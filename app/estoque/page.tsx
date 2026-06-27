@@ -104,7 +104,7 @@ export default function EstoquePage() {
   }
 
   // Agrupar lotes por produto e ordem
-  const lotesAgrupados = lotes.reduce((acc, lote) => {
+  const lotesAgrupados = lotes.reduce((acc: any, lote: any) => {
     const chave = `${lote.produto_id}-${lote.ordem_id}`
     if (!acc[chave]) {
       acc[chave] = {

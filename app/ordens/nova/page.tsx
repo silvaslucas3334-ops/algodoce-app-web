@@ -43,7 +43,7 @@ export default function NovaOrdemPage() {
       })
   }, [usuario?.nome])
 
-  const produtosPorCategoria = produtos.reduce((acc, p) => {
+  const produtosPorCategoria = produtos.reduce((acc: any, p: any) => {
     const cat = p.categoria || 'Outros'
     if (!acc[cat]) acc[cat] = []
     acc[cat].push(p)

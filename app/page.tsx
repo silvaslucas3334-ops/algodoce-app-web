@@ -233,7 +233,7 @@ function DashboardContent() {
           return ordensFiltradas.length > 0 ? (
           <div className="space-y-3">
             {(() => {
-              const ordensPorData = ordensFiltradas.reduce((acc, ordem) => {
+              const ordensPorData = ordensFiltradas.reduce((acc: any, ordem: any) => {
                 const data = ordem.data_entrega
                 if (!acc[data]) acc[data] = []
                 acc[data].push(ordem)
