@@ -158,7 +158,7 @@ function ProducaoContent() {
       </div>
 
       <div className="flex gap-2 mb-6 border-b border-gray-200">
-        {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map((status: any) => (
+        {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map(status => (
           <button
             key={status}
             onClick={() => setAbaAtiva(status)}
