@@ -14,12 +14,33 @@ export function useAuth() {
 
     const init = async () => {
       try {
-        // Sempre fazer logout ao carregar para forçar novo login
-        await supabase.auth.signOut()
+        // Pegar sessão do Supabase
+        const { data } = await supabase.auth.getSession()
 
         if (!montado) return
-        setCarregando(false)
-        return
+
+        if (!data.session) {
+          setCarregando(false)
+          return
+        }
+
+        setUser(data.session.user)
+
+        // Buscar usuário na base
+        const { data: userData, error } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('id', data.session.user.id)
+          .single()
+
+        if (montado) {
+          if (error) {
+            setErro(error.message)
+          } else {
+            setUsuario(userData)
+          }
+          setCarregando(false)
+        }
 
       } catch (e: any) {
         if (montado) {
