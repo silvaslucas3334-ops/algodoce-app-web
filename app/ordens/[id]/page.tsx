@@ -12,6 +12,24 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   cancelada: { label: 'Cancelada', color: 'bg-gray-100 text-gray-500' },
 }
 
+const MOVIMENTO_TIPO: Record<string, { label: string; color: string; iconColor: string }> = {
+  transferencia: {
+    label: 'Enviado da Cozinha',
+    color: 'bg-amber-50 border-amber-100',
+    iconColor: 'text-amber-600',
+  },
+  entrada: {
+    label: 'Recebido no Estoque',
+    color: 'bg-green-50 border-green-100',
+    iconColor: 'text-green-600',
+  },
+  saida: {
+    label: 'Dado Baixa (Venda)',
+    color: 'bg-red-50 border-red-100',
+    iconColor: 'text-red-600',
+  },
+}
+
 export default function DetalhesOrdemPage() {
   const router = useRouter()
   const params = useParams()
@@ -127,30 +145,17 @@ export default function DetalhesOrdemPage() {
               <div className="ml-7 space-y-3 pb-4 border-l-2 border-gray-200 pl-4">
                 {movimentacoes.map((mov: any) => {
                   const loteInfo = lotes.find(l => l.id === mov.lote_id)
-                  const tipo = mov.tipo as string
-                  const tipoLabel = {
-                    transferencia: 'Enviado da Cozinha',
-                    entrada: 'Recebido no Estoque',
-                    saida: 'Dado Baixa (Venda)',
-                  }[tipo as keyof typeof {transferencia: string; entrada: string; saida: string}] || tipo
-
-                  const tipoColor = {
-                    transferencia: 'bg-amber-50 border-amber-100',
-                    entrada: 'bg-green-50 border-green-100',
-                    saida: 'bg-red-50 border-red-100',
-                  }[tipo as keyof typeof {transferencia: string; entrada: string; saida: string}] || 'bg-gray-50 border-gray-100'
-
-                  const tipoIconColor = {
-                    transferencia: 'text-amber-600',
-                    entrada: 'text-green-600',
-                    saida: 'text-red-600',
-                  }[tipo as keyof typeof {transferencia: string; entrada: string; saida: string}] || 'text-gray-600'
+                  const tipoInfo = MOVIMENTO_TIPO[mov.tipo] || {
+                    label: mov.tipo,
+                    color: 'bg-gray-50 border-gray-100',
+                    iconColor: 'text-gray-600',
+                  }
 
                   return (
-                    <div key={mov.id} className={`rounded-lg p-3 border ${tipoColor}`}>
+                    <div key={mov.id} className={`rounded-lg p-3 border ${tipoInfo.color}`}>
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex-1">
-                          <p className={`font-medium ${tipoIconColor}`}>{tipoLabel}</p>
+                          <p className={`font-medium ${tipoInfo.iconColor}`}>{tipoInfo.label}</p>
                           <p className="text-xs text-gray-600 mt-0.5">Etiqueta: {loteInfo?.codigo_qr?.substring(0, 16)}...</p>
                         </div>
                       </div>
