@@ -202,7 +202,10 @@ export default function PerfilPage() {
         {/* Botão Sair */}
         <div className="flex gap-3">
           <button
-            onClick={logout}
+            onClick={async () => {
+              await logout()
+              router.push('/login')
+            }}
             className="flex-1 bg-red-600 hover:bg-red-700 text-white rounded-lg py-2.5 font-semibold flex items-center justify-center gap-2 transition-colors"
           >
             <LogOut size={18} /> Sair da Conta
