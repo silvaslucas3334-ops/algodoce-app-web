@@ -125,13 +125,13 @@ export default function DetalhesOrdemPage() {
                 <h3 className="font-semibold text-gray-800">Movimentações</h3>
               </div>
               <div className="ml-7 space-y-3 pb-4 border-l-2 border-gray-200 pl-4">
-                {movimentacoes.map(mov => {
+                {movimentacoes.map((mov: any) => {
                   const loteInfo = lotes.find(l => l.id === mov.lote_id)
                   const tipoLabel = {
                     transferencia: 'Enviado da Cozinha',
                     entrada: 'Recebido no Estoque',
                     saida: 'Dado Baixa (Venda)',
-                  }[mov.tipo] || mov.tipo
+                  }[mov.tipo as keyof typeof {transferencia: string; entrada: string; saida: string}] || mov.tipo
 
                   const tipoColor = {
                     transferencia: 'bg-amber-50 border-amber-100',
