@@ -164,7 +164,7 @@ function ProducaoContent() {
             onClick={() => setAbaAtiva(status)}
             className={`px-4 py-3 font-medium rounded-t-lg border-b-2 transition-all ${
               abaAtiva === status
-                ? `${STATUS_INFO[status].color} border-b-2`
+                ? `${STATUS_INFO[status as keyof typeof STATUS_INFO].color} border-b-2`
                 : 'text-gray-500 border-b-2 border-transparent hover:text-gray-700'
             }`}
           >
