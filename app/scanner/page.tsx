@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
+import { LOCAL_LABEL } from '@/lib/constants'
 import { CheckCircle, XCircle, ScanLine } from 'lucide-react'
 
 export default function ScannerPage() {
@@ -12,9 +13,11 @@ export default function ScannerPage() {
   const [operador, setOperador] = useState('')
   const [mensagem, setMensagem] = useState<{ tipo: 'ok' | 'erro'; texto: string; detalhes?: string } | null>(null)
   const [ativo, setAtivo] = useState(false)
+  const [modoEnvio, setModoEnvio] = useState(false)
+  const [lojaDestino, setLojaDestino] = useState('loja1')
+  const [lotesEnvio, setLotesEnvio] = useState<any[]>([])
 
   useEffect(() => {
-    // Preencher operador com nome do usuário
     if (usuario?.nome) {
       setOperador(usuario.nome)
     }
@@ -53,9 +56,25 @@ export default function ScannerPage() {
 
     setResultado(lote)
 
-    // Identificar ação baseado no status
-    if (lote.status === 'enviado') {
-      // Recebimento - etiqueta foi enviada da cozinha para a loja
+    // COZINHA - Enviar para loja
+    if (usuario?.role === 'cozinha' && lote.status === 'na_cozinha') {
+      if (modoEnvio) {
+        setLotesEnvio([...lotesEnvio, lote])
+        setMensagem({ tipo: 'ok', texto: `✓ Adicionado ao envio`, detalhes: `${lote.produto?.nome}` })
+      } else {
+        setModoEnvio(true)
+        setLotesEnvio([lote])
+        setMensagem({ tipo: 'ok', texto: `🚀 Modo Envio Ativado`, detalhes: 'Escaneie mais etiquetas ou clique em "Confirmar Envio"' })
+      }
+      return
+    }
+
+    // LOJA - Receber
+    if (usuario?.role === 'loja' && lote.status === 'enviado') {
+      if (lote.destino !== usuario.loja_id) {
+        setMensagem({ tipo: 'erro', texto: 'Este lote é para outra loja.', detalhes: `Destino: ${LOCAL_LABEL[lote.destino]}` })
+        return
+      }
       await supabase.from('lotes_producao').update({ status: 'na_loja' }).eq('id', lote.id)
       await supabase.from('movimentacoes_estoque').insert({
         lote_id: lote.id,
@@ -65,8 +84,15 @@ export default function ScannerPage() {
         registrado_por: operador,
       })
       setMensagem({ tipo: 'ok', texto: `✓ Recebimento Confirmado`, detalhes: `${lote.produto?.nome} - Val: ${new Date(lote.data_validade + 'T00:00:00').toLocaleDateString('pt-BR')}` })
-    } else if (lote.status === 'na_loja') {
-      // Baixa de estoque - etiqueta está na loja e será vendida
+      return
+    }
+
+    // LOJA - Baixa de estoque
+    if (usuario?.role === 'loja' && lote.status === 'na_loja') {
+      if (lote.destino !== usuario.loja_id) {
+        setMensagem({ tipo: 'erro', texto: 'Este lote é de outra loja.', detalhes: `Localização: ${LOCAL_LABEL[lote.destino]}` })
+        return
+      }
       await supabase.from('lotes_producao').update({ status: 'esgotado' }).eq('id', lote.id)
       await supabase.from('movimentacoes_estoque').insert({
         lote_id: lote.id,
@@ -76,13 +102,28 @@ export default function ScannerPage() {
         registrado_por: operador,
       })
       setMensagem({ tipo: 'ok', texto: `✓ Baixa de Estoque Registrada`, detalhes: `${lote.produto?.nome} - ${lote.quantidade} ${lote.produto?.unidade_medida}` })
-    } else if (lote.status === 'esgotado') {
-      setMensagem({ tipo: 'erro', texto: 'Este lote já foi vendido.', detalhes: lote.codigo_qr })
-    } else if (lote.status === 'na_cozinha') {
-      setMensagem({ tipo: 'erro', texto: 'Este lote ainda está na cozinha.', detalhes: 'Aguarde o envio para a loja.' })
-    } else {
-      setMensagem({ tipo: 'erro', texto: `Status inválido: ${lote.status}` })
+      return
     }
+
+    setMensagem({ tipo: 'erro', texto: 'Ação não permitida para este status.', detalhes: `Status: ${lote.status}` })
+  }
+
+  async function confirmarEnvio() {
+    if (lotesEnvio.length === 0) return
+    for (const lote of lotesEnvio) {
+      await supabase.from('lotes_producao').update({ status: 'enviado', destino: lojaDestino }).eq('id', lote.id)
+      await supabase.from('movimentacoes_estoque').insert({
+        lote_id: lote.id,
+        tipo: 'transferencia',
+        local_origem: 'cozinha',
+        local_destino: lojaDestino,
+        quantidade: lote.quantidade,
+        registrado_por: operador,
+      })
+    }
+    setMensagem({ tipo: 'ok', texto: `✓ Envio Confirmado`, detalhes: `${lotesEnvio.length} etiqueta(s) enviada(s) para ${LOCAL_LABEL[lojaDestino]}` })
+    setModoEnvio(false)
+    setLotesEnvio([])
   }
 
   async function parar() {
@@ -93,6 +134,12 @@ export default function ScannerPage() {
     setAtivo(false)
   }
 
+  function cancelarEnvio() {
+    setModoEnvio(false)
+    setLotesEnvio([])
+    setMensagem(null)
+  }
+
   useEffect(() => { return () => { parar() } }, [])
 
   return (
@@ -101,17 +148,45 @@ export default function ScannerPage() {
         <h1 className="text-xl font-bold text-gray-800 mb-1 flex items-center gap-2">
           <ScanLine size={22} className="text-pink-700" /> Scanner
         </h1>
-        <p className="text-sm text-gray-500">Aponte para o QR Code do produto</p>
+        <p className="text-sm text-gray-500">{modoEnvio ? '📤 Escaneie etiquetas para enviar' : 'Aponte para o QR Code do produto'}</p>
       </div>
 
       <div className="bg-blue-50 rounded-lg p-4 mb-4 border border-blue-200">
         <p className="text-sm font-semibold text-blue-900">👤 Operador: <strong>{operador || 'Desconhecido'}</strong></p>
-        <p className="text-xs text-blue-700 mt-1">O sistema detectará automaticamente a ação necessária</p>
+        <p className="text-xs text-blue-700 mt-1">{usuario?.role === 'cozinha' ? '🏭 Cozinha' : '🏪 Loja'}</p>
       </div>
+
+      {modoEnvio && (
+        <div className="bg-amber-50 rounded-lg p-4 mb-4 border border-amber-200">
+          <p className="text-sm font-semibold text-amber-900">📤 Etiquetas para enviar: <strong>{lotesEnvio.length}</strong></p>
+          <div className="mt-3 space-y-2">
+            {lotesEnvio.map(l => (
+              <p key={l.id} className="text-xs text-amber-800">✓ {l.produto?.nome}</p>
+            ))}
+          </div>
+          <div className="mt-3">
+            <label className="block text-xs font-semibold text-amber-900 mb-2">Destino:</label>
+            <select value={lojaDestino} onChange={e => setLojaDestino(e.target.value)} className="w-full border border-amber-200 rounded-lg px-3 py-2 text-sm bg-white">
+              {Object.entries(LOCAL_LABEL).filter(([k]) => k !== 'cozinha').map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       <div id={elementId} className="rounded-xl overflow-hidden mb-4 bg-gray-100 min-h-[200px]" />
 
-      {!ativo ? (
+      {modoEnvio ? (
+        <div className="flex gap-2">
+          <button onClick={confirmarEnvio} className="flex-1 bg-green-600 text-white rounded-xl py-3 font-semibold">
+            ✓ Confirmar Envio
+          </button>
+          <button onClick={cancelarEnvio} className="flex-1 bg-gray-600 text-white rounded-xl py-3 font-semibold">
+            Cancelar
+          </button>
+        </div>
+      ) : !ativo ? (
         <button onClick={iniciarScanner} className="w-full bg-pink-700 text-white rounded-xl py-3 font-semibold">
           Iniciar Scanner
         </button>
