@@ -16,6 +16,7 @@ export default function ScannerPage() {
   const [modoEnvio, setModoEnvio] = useState(false)
   const [lojaDestino, setLojaDestino] = useState('loja1')
   const [lotesEnvio, setLotesEnvio] = useState<any[]>([])
+  const [acaoSelecionada, setAcaoSelecionada] = useState<'receber' | 'baixa' | null>(null)
 
   useEffect(() => {
     if (usuario?.nome) {
@@ -69,40 +70,38 @@ export default function ScannerPage() {
       return
     }
 
-    // LOJA - Receber
-    if (usuario?.role === 'loja' && lote.status === 'enviado') {
-      if (lote.destino !== usuario.loja_id) {
-        setMensagem({ tipo: 'erro', texto: 'Este lote é para outra loja.', detalhes: `Destino: ${LOCAL_LABEL[lote.destino]}` })
+    // LOJA - Mostrar opções (não automático)
+    if (usuario?.role === 'loja') {
+      if (lote.status === 'enviado') {
+        if (lote.destino !== usuario.loja_id) {
+          setMensagem({ tipo: 'erro', texto: 'Este lote é para outra loja.', detalhes: `Destino: ${LOCAL_LABEL[lote.destino]}` })
+          return
+        }
+        setAcaoSelecionada('receber')
+        setMensagem({
+          tipo: 'ok',
+          texto: `📦 Pendente de Recebimento`,
+          detalhes: `${lote.produto?.nome} - Val: ${new Date(lote.data_validade + 'T00:00:00').toLocaleDateString('pt-BR')}`
+        })
         return
       }
-      await supabase.from('lotes_producao').update({ status: 'na_loja' }).eq('id', lote.id)
-      await supabase.from('movimentacoes_estoque').insert({
-        lote_id: lote.id,
-        tipo: 'entrada',
-        local_destino: lote.destino,
-        quantidade: lote.quantidade,
-        registrado_por: operador,
-      })
-      setMensagem({ tipo: 'ok', texto: `✓ Recebimento Confirmado`, detalhes: `${lote.produto?.nome} - Val: ${new Date(lote.data_validade + 'T00:00:00').toLocaleDateString('pt-BR')}` })
-      return
-    }
-
-    // LOJA - Baixa de estoque
-    if (usuario?.role === 'loja' && lote.status === 'na_loja') {
-      if (lote.destino !== usuario.loja_id) {
-        setMensagem({ tipo: 'erro', texto: 'Este lote é de outra loja.', detalhes: `Localização: ${LOCAL_LABEL[lote.destino]}` })
+      if (lote.status === 'na_loja') {
+        if (lote.destino !== usuario.loja_id) {
+          setMensagem({ tipo: 'erro', texto: 'Este lote é de outra loja.', detalhes: `Localização: ${LOCAL_LABEL[lote.destino]}` })
+          return
+        }
+        setAcaoSelecionada('baixa')
+        setMensagem({
+          tipo: 'ok',
+          texto: `📦 Etiqueta em Estoque`,
+          detalhes: `${lote.produto?.nome} - ${lote.quantidade} ${lote.produto?.unidade_medida}`
+        })
         return
       }
-      await supabase.from('lotes_producao').update({ status: 'esgotado' }).eq('id', lote.id)
-      await supabase.from('movimentacoes_estoque').insert({
-        lote_id: lote.id,
-        tipo: 'saida',
-        local_origem: lote.destino,
-        quantidade: lote.quantidade,
-        registrado_por: operador,
-      })
-      setMensagem({ tipo: 'ok', texto: `✓ Baixa de Estoque Registrada`, detalhes: `${lote.produto?.nome} - ${lote.quantidade} ${lote.produto?.unidade_medida}` })
-      return
+      if (lote.status === 'esgotado') {
+        setMensagem({ tipo: 'erro', texto: '✗ Já foi vendido', detalhes: lote.codigo_qr })
+        return
+      }
     }
 
     setMensagem({ tipo: 'erro', texto: 'Ação não permitida para este status.', detalhes: `Status: ${lote.status}` })
@@ -124,6 +123,36 @@ export default function ScannerPage() {
     setMensagem({ tipo: 'ok', texto: `✓ Envio Confirmado`, detalhes: `${lotesEnvio.length} etiqueta(s) enviada(s) para ${LOCAL_LABEL[lojaDestino]}` })
     setModoEnvio(false)
     setLotesEnvio([])
+  }
+
+  async function confirmarRecebimento() {
+    if (!resultado) return
+    await supabase.from('lotes_producao').update({ status: 'na_loja' }).eq('id', resultado.id)
+    await supabase.from('movimentacoes_estoque').insert({
+      lote_id: resultado.id,
+      tipo: 'entrada',
+      local_destino: resultado.destino,
+      quantidade: resultado.quantidade,
+      registrado_por: operador,
+    })
+    setMensagem({ tipo: 'ok', texto: `✓ Recebimento Confirmado`, detalhes: `${resultado.produto?.nome}` })
+    setAcaoSelecionada(null)
+    setResultado(null)
+  }
+
+  async function confirmarBaixa() {
+    if (!resultado) return
+    await supabase.from('lotes_producao').update({ status: 'esgotado' }).eq('id', resultado.id)
+    await supabase.from('movimentacoes_estoque').insert({
+      lote_id: resultado.id,
+      tipo: 'saida',
+      local_origem: resultado.destino,
+      quantidade: resultado.quantidade,
+      registrado_por: operador,
+    })
+    setMensagem({ tipo: 'ok', texto: `✓ Baixa de Estoque Registrada`, detalhes: `${resultado.produto?.nome}` })
+    setAcaoSelecionada(null)
+    setResultado(null)
   }
 
   async function parar() {
@@ -183,6 +212,24 @@ export default function ScannerPage() {
             ✓ Confirmar Envio
           </button>
           <button onClick={cancelarEnvio} className="flex-1 bg-gray-600 text-white rounded-xl py-3 font-semibold">
+            Cancelar
+          </button>
+        </div>
+      ) : acaoSelecionada === 'receber' ? (
+        <div className="flex gap-2">
+          <button onClick={confirmarRecebimento} className="flex-1 bg-green-600 text-white rounded-xl py-3 font-semibold">
+            ✓ Receber
+          </button>
+          <button onClick={() => { setAcaoSelecionada(null); setMensagem(null) }} className="flex-1 bg-gray-600 text-white rounded-xl py-3 font-semibold">
+            Cancelar
+          </button>
+        </div>
+      ) : acaoSelecionada === 'baixa' ? (
+        <div className="flex gap-2">
+          <button onClick={confirmarBaixa} className="flex-1 bg-red-600 text-white rounded-xl py-3 font-semibold">
+            ✓ Dar Baixa
+          </button>
+          <button onClick={() => { setAcaoSelecionada(null); setMensagem(null) }} className="flex-1 bg-gray-600 text-white rounded-xl py-3 font-semibold">
             Cancelar
           </button>
         </div>
