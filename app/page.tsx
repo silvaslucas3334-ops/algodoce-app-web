@@ -279,7 +279,7 @@ function DashboardContent() {
                             {isHoje ? 'Hoje' : dataObj.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
                           </p>
                           <p className="text-xs text-gray-600 mt-0.5">
-                            {ordensPorData[data].length} ordem(ns) • {ordensPorData[data].reduce((sum, o) => sum + o.quantidade, 0)} itens
+                            {ordensPorData[data].length} ordem(ns) • {ordensPorData[data].reduce((sum: number, o: any) => sum + o.quantidade, 0)} itens
                           </p>
                         </div>
                         <span className={`text-xs font-bold px-2 py-1 rounded ${badgeColor}`}>
