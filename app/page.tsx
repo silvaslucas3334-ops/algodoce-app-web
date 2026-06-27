@@ -17,6 +17,13 @@ function DashboardContent() {
   const [ordens, setOrdens] = useState<any[]>([])
   const [lojaFiltro, setLojaFiltro] = useState<string>('todas')
 
+  // Redirecionar para login se não há usuário
+  useEffect(() => {
+    if (!carregando && !usuario) {
+      router.replace('/login')
+    }
+  }, [carregando, usuario, router])
+
   useEffect(() => {
     if (!usuario) return
 
