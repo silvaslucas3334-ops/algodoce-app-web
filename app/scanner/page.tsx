@@ -34,17 +34,6 @@ export default function ScannerPage() {
         await scanner.stop()
         setAtivo(false)
         await processarCodigo(codigo)
-        // Reiniciar scanner após processar
-        await scanner.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          async (codigo: string) => {
-            await scanner.stop()
-            setAtivo(false)
-            await processarCodigo(codigo)
-          },
-          () => {}
-        )
       },
       () => {}
     )
