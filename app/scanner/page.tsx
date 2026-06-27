@@ -1,18 +1,24 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/hooks/useAuth'
 import { CheckCircle, XCircle, ScanLine } from 'lucide-react'
 
-type Acao = 'entrada' | 'saida'
-
 export default function ScannerPage() {
+  const { usuario } = useAuth()
   const scannerRef = useRef<any>(null)
   const elementId = 'qr-reader'
   const [resultado, setResultado] = useState<any>(null)
-  const [acao, setAcao] = useState<Acao>('entrada')
   const [operador, setOperador] = useState('')
-  const [mensagem, setMensagem] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+  const [mensagem, setMensagem] = useState<{ tipo: 'ok' | 'erro'; texto: string; detalhes?: string } | null>(null)
   const [ativo, setAtivo] = useState(false)
+
+  useEffect(() => {
+    // Preencher operador com nome do usuário
+    if (usuario?.nome) {
+      setOperador(usuario.nome)
+    }
+  }, [usuario?.nome])
 
   async function iniciarScanner() {
     if (!operador) { setMensagem({ tipo: 'erro', texto: 'Informe seu nome antes de escanear.' }); return }
@@ -28,6 +34,17 @@ export default function ScannerPage() {
         await scanner.stop()
         setAtivo(false)
         await processarCodigo(codigo)
+        // Reiniciar scanner após processar
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          async (codigo: string) => {
+            await scanner.stop()
+            setAtivo(false)
+            await processarCodigo(codigo)
+          },
+          () => {}
+        )
       },
       () => {}
     )
@@ -47,7 +64,9 @@ export default function ScannerPage() {
 
     setResultado(lote)
 
-    if (acao === 'entrada') {
+    // Identificar ação baseado no status
+    if (lote.status === 'enviado') {
+      // Recebimento - etiqueta foi enviada da cozinha para a loja
       await supabase.from('lotes_producao').update({ status: 'na_loja' }).eq('id', lote.id)
       await supabase.from('movimentacoes_estoque').insert({
         lote_id: lote.id,
@@ -56,12 +75,9 @@ export default function ScannerPage() {
         quantidade: lote.quantidade,
         registrado_por: operador,
       })
-      setMensagem({ tipo: 'ok', texto: `Entrada registrada: ${lote.produto?.nome}` })
-    } else {
-      if (lote.status === 'esgotado') {
-        setMensagem({ tipo: 'erro', texto: 'Este lote já está esgotado.' })
-        return
-      }
+      setMensagem({ tipo: 'ok', texto: `✓ Recebimento Confirmado`, detalhes: `${lote.produto?.nome} - Val: ${new Date(lote.data_validade + 'T00:00:00').toLocaleDateString('pt-BR')}` })
+    } else if (lote.status === 'na_loja') {
+      // Baixa de estoque - etiqueta está na loja e será vendida
       await supabase.from('lotes_producao').update({ status: 'esgotado' }).eq('id', lote.id)
       await supabase.from('movimentacoes_estoque').insert({
         lote_id: lote.id,
@@ -70,7 +86,13 @@ export default function ScannerPage() {
         quantidade: lote.quantidade,
         registrado_por: operador,
       })
-      setMensagem({ tipo: 'ok', texto: `Saída registrada: ${lote.produto?.nome}` })
+      setMensagem({ tipo: 'ok', texto: `✓ Baixa de Estoque Registrada`, detalhes: `${lote.produto?.nome} - ${lote.quantidade} ${lote.produto?.unidade_medida}` })
+    } else if (lote.status === 'esgotado') {
+      setMensagem({ tipo: 'erro', texto: 'Este lote já foi vendido.', detalhes: lote.codigo_qr })
+    } else if (lote.status === 'na_cozinha') {
+      setMensagem({ tipo: 'erro', texto: 'Este lote ainda está na cozinha.', detalhes: 'Aguarde o envio para a loja.' })
+    } else {
+      setMensagem({ tipo: 'erro', texto: `Status inválido: ${lote.status}` })
     }
   }
 
@@ -93,27 +115,9 @@ export default function ScannerPage() {
         <p className="text-sm text-gray-500">Aponte para o QR Code do produto</p>
       </div>
 
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Seu nome</label>
-        <input
-          type="text"
-          placeholder="Quem está registrando?"
-          value={operador}
-          onChange={e => setOperador(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-        />
-      </div>
-
-      <div className="flex gap-2 mb-4">
-        {(['entrada', 'saida'] as Acao[]).map(a => (
-          <button
-            key={a}
-            onClick={() => setAcao(a)}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium border ${acao === a ? (a === 'entrada' ? 'bg-green-600 text-white border-green-600' : 'bg-red-600 text-white border-red-600') : 'bg-white border-gray-200 text-gray-600'}`}
-          >
-            {a === 'entrada' ? '📥 Entrada na loja' : '📤 Saída (venda)'}
-          </button>
-        ))}
+      <div className="bg-blue-50 rounded-lg p-4 mb-4 border border-blue-200">
+        <p className="text-sm font-semibold text-blue-900">👤 Operador: <strong>{operador || 'Desconhecido'}</strong></p>
+        <p className="text-xs text-blue-700 mt-1">O sistema detectará automaticamente a ação necessária</p>
       </div>
 
       <div id={elementId} className="rounded-xl overflow-hidden mb-4 bg-gray-100 min-h-[200px]" />
@@ -131,11 +135,14 @@ export default function ScannerPage() {
       {mensagem && (
         <div className={`mt-4 p-4 rounded-xl flex items-start gap-3 ${mensagem.tipo === 'ok' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
           {mensagem.tipo === 'ok' ? <CheckCircle className="text-green-600 mt-0.5" size={20} /> : <XCircle className="text-red-500 mt-0.5" size={20} />}
-          <div>
+          <div className="flex-1">
             <p className={`font-semibold ${mensagem.tipo === 'ok' ? 'text-green-700' : 'text-red-600'}`}>{mensagem.texto}</p>
+            {mensagem.detalhes && (
+              <p className="text-sm text-gray-600 mt-2">{mensagem.detalhes}</p>
+            )}
             {resultado && (
-              <p className="text-sm text-gray-500 mt-1">
-                Validade: {new Date(resultado.data_validade + 'T00:00:00').toLocaleDateString('pt-BR')} · {resultado.codigo_qr}
+              <p className="text-xs text-gray-500 mt-2">
+                {resultado.codigo_qr}
               </p>
             )}
           </div>

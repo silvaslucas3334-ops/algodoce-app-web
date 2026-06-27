@@ -1,7 +1,8 @@
 'use client'
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, ClipboardList, ChefHat, ScanLine, Package } from 'lucide-react'
+import { LayoutDashboard, ClipboardList, ChefHat, ScanLine, Package, User } from 'lucide-react'
 
 const links = [
   { href: '/', label: 'Início', icon: LayoutDashboard },
@@ -9,6 +10,7 @@ const links = [
   { href: '/producao', label: 'Produção', icon: ChefHat },
   { href: '/scanner', label: 'Scanner', icon: ScanLine },
   { href: '/estoque', label: 'Estoque', icon: Package },
+  { href: '/perfil', label: 'Perfil', icon: User },
 ]
 
 export default function BottomNav() {
