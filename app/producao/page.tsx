@@ -158,7 +158,7 @@ function ProducaoContent() {
       </div>
 
       <div className="flex gap-2 mb-6 border-b border-gray-200">
-        {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map(status => (
+        {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map((status: any) => (
           <button
             key={status}
             onClick={() => setAbaAtiva(status)}
@@ -191,7 +191,7 @@ function ProducaoContent() {
             </div>
           ) : (
             <div className="space-y-3">
-              {ordensAba.map(ordem => (
+              {ordensAba.map((ordem: any) => (
                 <KanbanCard key={ordem.id} ordem={ordem} />
               ))}
             </div>

@@ -64,7 +64,7 @@ function AdminContent() {
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex gap-1">
-            {abas.map(aba => {
+            {abas.map((aba: any) => {
               const Icon = aba.icon
               const isActive = abaAtiva === aba.id
               return (

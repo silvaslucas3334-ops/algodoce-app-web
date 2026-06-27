@@ -37,7 +37,7 @@ export default function ReimprimirPage() {
       .eq('ordem_id', ordemId)
       .order('sequencia_lote')
     setLotes(data || [])
-    setLotesSelecionados(data?.map(l => l.id) || [])
+    setLotesSelecionados(data?.map((l: any) => l.id) || [])
   }
 
   function toggleLote(loteId: string) {
@@ -184,7 +184,7 @@ export default function ReimprimirPage() {
       {!ordenSelecionada ? (
         <div className="space-y-3">
           {ordens.length > 0 ? (
-            ordens.map(ordem => (
+            ordens.map((ordem: any) => (
               <button
                 key={ordem.id}
                 onClick={() => {
@@ -230,7 +230,7 @@ export default function ReimprimirPage() {
           </div>
 
           <div className="space-y-2">
-            {lotes.map(lote => (
+            {lotes.map((lote: any) => (
               <label key={lote.id} className="flex items-center gap-3 bg-white p-3 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-50">
                 <input
                   type="checkbox"

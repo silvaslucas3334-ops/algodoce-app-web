@@ -243,7 +243,7 @@ function DashboardContent() {
               const datas = Object.keys(ordensPorData).sort()
               const hoje = new Date().toISOString().split('T')[0]
 
-              return datas.map(data => {
+              return datas.map((data: any) => {
                 const dataObj = new Date(data + 'T00:00:00')
                 const diasAteEntrega = Math.floor((dataObj.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
                 const isHoje = data === hoje
@@ -288,7 +288,7 @@ function DashboardContent() {
                       </div>
                     </div>
                     <div className="divide-y divide-gray-200">
-                      {ordensPorData[data].map(ordem => (
+                      {ordensPorData[data].map((ordem: any) => (
                         <div key={ordem.id} className="p-3">
                           <div className="flex items-start justify-between mb-1">
                             <div className="flex-1">

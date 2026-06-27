@@ -152,7 +152,7 @@ export default function EstoquePage() {
       .update({ status: 'enviado', destino: destinoEnvio })
       .in('id', carrinho)
     await supabase.from('movimentacoes_estoque').insert(
-      carrinho.map(id => ({
+      carrinho.map((id: any) => ({
         lote_id: id,
         tipo: 'transferencia',
         local_origem: local,
@@ -188,7 +188,7 @@ export default function EstoquePage() {
       .update({ status: 'na_loja' })
       .in('id', carrinhoRecebimento)
     await supabase.from('movimentacoes_estoque').insert(
-      carrinhoRecebimento.map(id => ({
+      carrinhoRecebimento.map((id: any) => ({
         lote_id: id,
         tipo: 'entrada',
         local_destino: local,
@@ -227,7 +227,7 @@ export default function EstoquePage() {
       .update({ status: 'esgotado' })
       .in('id', carrinhoBaixa)
     await supabase.from('movimentacoes_estoque').insert(
-      carrinhoBaixa.map(id => ({
+      carrinhoBaixa.map((id: any) => ({
         lote_id: id,
         tipo: 'saida',
         local_origem: local,
@@ -248,7 +248,7 @@ export default function EstoquePage() {
       .update({ status: 'na_loja' })
       .in('id', lote_ids)
     await supabase.from('movimentacoes_estoque').insert(
-      lote_ids.map(id => ({
+      lote_ids.map((id: any) => ({
         lote_id: id,
         tipo: 'entrada',
         local_destino: local,
@@ -265,7 +265,7 @@ export default function EstoquePage() {
       .update({ status: 'esgotado' })
       .in('id', lote_ids)
     await supabase.from('movimentacoes_estoque').insert(
-      lote_ids.map(id => ({
+      lote_ids.map((id: any) => ({
         lote_id: id,
         tipo: 'saida',
         local_origem: local,
@@ -491,7 +491,7 @@ export default function EstoquePage() {
                   )}
                 </div>
                 <div className="space-y-2">
-                  {lotesPendentesBloco.map(lote => {
+                  {lotesPendentesBloco.map((lote: any) => {
                     const selecionado = carrinhoRecebimento.includes(lote.id)
                     return (
                       <div
@@ -553,7 +553,7 @@ export default function EstoquePage() {
                   <div className="space-y-2 max-h-48 overflow-y-auto">
                     {lotes
                       .filter(l => carrinhoRecebimento.includes(l.id))
-                      .map(lote => (
+                      .map((lote: any) => (
                         <div key={lote.id} className="text-sm text-gray-700 flex justify-between items-center">
                           <span>{lote.produto?.nome}</span>
                           <span className="text-xs text-gray-500">{lote.codigo_qr.substring(0, 16)}...</span>
@@ -598,7 +598,7 @@ export default function EstoquePage() {
                   <div className="space-y-2 max-h-48 overflow-y-auto">
                     {lotes
                       .filter(l => carrinhoBaixa.includes(l.id))
-                      .map(lote => (
+                      .map((lote: any) => (
                         <div key={lote.id} className="text-sm text-gray-700 flex justify-between items-center">
                           <span>{lote.produto?.nome}</span>
                           <span className="text-xs text-gray-500">{lote.codigo_qr.substring(0, 16)}...</span>

@@ -116,7 +116,7 @@ export default function UsuariosTab() {
         <div className="text-center py-12 text-gray-400">Nenhum usuário cadastrado</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {usuarios.map(u => (
+          {usuarios.map((u: any) => (
             <div key={u.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">

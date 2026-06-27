@@ -308,7 +308,7 @@ export default function ProdutosTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {produtos.map(p => (
+              {produtos.map((p: any) => (
                 <tr key={p.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm font-medium text-gray-800 cursor-pointer" onClick={() => abrirEdicao(p)}>
                     {p.nome}

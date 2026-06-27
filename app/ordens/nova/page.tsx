@@ -62,7 +62,7 @@ export default function NovaOrdemPage() {
     if (!produto) return
     setCarrinho(prev => {
       const existe = prev.find(i => i.produto_id === produtoSel)
-      if (existe) return prev.map(i => i.produto_id === produtoSel ? { ...i, quantidade: i.quantidade + qtdSel } : i)
+      if (existe) return prev.map((i: any) => i.produto_id === produtoSel ? { ...i, quantidade: i.quantidade + qtdSel } : i)
       return [...prev, { produto_id: produtoSel, nome: produto.nome, quantidade: qtdSel }]
     })
     setProdutoSel('')
@@ -81,7 +81,7 @@ export default function NovaOrdemPage() {
     const hoje = new Date().toISOString().split('T')[0]
 
     await supabase.from('ordens_producao').insert(
-      carrinho.map(item => ({
+      carrinho.map((item: any) => ({
         produto_id: item.produto_id,
         quantidade: item.quantidade,
         loja_destino,
@@ -108,7 +108,7 @@ export default function NovaOrdemPage() {
       <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 mb-4">
         <h2 className="font-semibold text-gray-700 mb-3">Adicionar produto</h2>
         <div className="space-y-2 max-h-60 overflow-y-auto">
-          {categorias.map(cat => (
+          {categorias.map((cat: any) => (
             <div key={cat}>
               <button
                 type="button"
@@ -160,7 +160,7 @@ export default function NovaOrdemPage() {
             <h2 className="font-semibold text-gray-700">Carrinho ({carrinho.length} {carrinho.length === 1 ? 'item' : 'itens'})</h2>
           </div>
           <div className="divide-y divide-gray-100">
-            {carrinho.map(item => (
+            {carrinho.map((item: any) => (
               <div key={item.produto_id} className="flex items-center justify-between px-4 py-3">
                 <div>
                   <p className="text-sm font-medium text-gray-800">{item.nome}</p>

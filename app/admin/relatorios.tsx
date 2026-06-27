@@ -210,7 +210,7 @@ export default function RelatoriosTab() {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
             >
               <option value="">Todos</option>
-              {produtos.map(p => (
+              {produtos.map((p: any) => (
                 <option key={p.id} value={p.id}>
                   {p.nome}
                 </option>
@@ -311,7 +311,7 @@ export default function RelatoriosTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {lotesFiltered.map(l => (
+                {lotesFiltered.map((l: any) => (
                   <tr key={l.id} className="hover:bg-gray-50">
                     <td className="px-6 py-3">{l.produto?.nome}</td>
                     <td className="px-6 py-3">{l.quantidade}</td>
@@ -382,7 +382,7 @@ export default function RelatoriosTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {ordensFiltered.map(o => {
+                {ordensFiltered.map((o: any) => {
                   const tempoProducao = o.hora_fim_prod && o.hora_inicio_prod
                     ? Math.round((new Date(o.hora_fim_prod).getTime() - new Date(o.hora_inicio_prod).getTime()) / 60000)
                     : null
