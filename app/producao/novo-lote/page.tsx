@@ -240,7 +240,13 @@ function NovoLoteForm() {
     html += `</body></html>`
     w.document.write(html)
     w.document.close()
-    w.print()
+    // Esperar as imagens carregarem antes de imprimir
+    w.addEventListener('load', () => {
+      setTimeout(() => w.print(), 200)
+    })
+    if (w.document.readyState === 'complete') {
+      setTimeout(() => w.print(), 200)
+    }
   }
 
   if (lotes.length > 0) {
