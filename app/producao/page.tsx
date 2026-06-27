@@ -84,7 +84,7 @@ function ProducaoContent() {
       )}
 
       {abaAtiva === 'em_producao' && (
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Link
             href={`/producao/novo-lote?ordem=${ordem.id}&produto=${ordem.produto_id}&destino=${ordem.loja_destino}`}
             className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium text-center hover:bg-green-700"
@@ -157,12 +157,12 @@ function ProducaoContent() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-6 border-b border-gray-200">
+      <div className="flex gap-2 mb-6 border-b border-gray-200 flex-wrap sm:flex-nowrap">
         {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map(status => (
           <button
             key={status}
             onClick={() => setAbaAtiva(status)}
-            className={`px-4 py-3 font-medium rounded-t-lg border-b-2 transition-all ${
+            className={`px-2 sm:px-4 py-3 font-medium rounded-t-lg border-b-2 transition-all text-xs sm:text-base ${
               abaAtiva === status
                 ? `${STATUS_INFO[status as keyof typeof STATUS_INFO].color} border-b-2`
                 : 'text-gray-500 border-b-2 border-transparent hover:text-gray-700'
