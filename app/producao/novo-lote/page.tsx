@@ -196,16 +196,18 @@ function NovoLoteForm() {
           word-break: break-all;
         }
         .info {
-          font-size: 8px;
+          font-size: 12px;
+          font-weight: 600;
           text-align: left;
-          line-height: 1.4;
+          line-height: 1.6;
           margin-bottom: 2mm;
+          color: #000;
         }
         .info p {
-          margin: 1mm 0;
+          margin: 1.5mm 0;
         }
         .info strong {
-          font-weight: bold;
+          font-weight: 700;
         }
         @media print {
           body { width: 80mm; margin: 0; padding: 0; }
