@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
+import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { Download, Filter, X } from 'lucide-react'
 
 export default function RelatoriosTab() {
@@ -31,6 +32,21 @@ export default function RelatoriosTab() {
   useEffect(() => {
     carregarProdutos()
   }, [])
+
+  // Real-time listeners para lotes e ordens
+  useRealtimeData({
+    table: 'lotes_producao',
+    onInsert: () => { setLotesFiltered([]); setFiltrosAplicados(false) },
+    onUpdate: () => { setLotesFiltered([]); setFiltrosAplicados(false) },
+    onDelete: () => { setLotesFiltered([]); setFiltrosAplicados(false) }
+  })
+
+  useRealtimeData({
+    table: 'ordens_producao',
+    onInsert: () => { setOrdensFiltered([]); setFiltrosAplicados(false) },
+    onUpdate: () => { setOrdensFiltered([]); setFiltrosAplicados(false) },
+    onDelete: () => { setOrdensFiltered([]); setFiltrosAplicados(false) }
+  })
 
   async function carregarProdutos() {
     const { data: produtosData } = await supabase.from('produtos').select('id, nome').order('nome')

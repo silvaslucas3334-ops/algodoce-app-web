@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { Plus, AlertCircle, Edit2, Trash2, X } from 'lucide-react'
 
 export default function ProdutosTab() {
@@ -23,6 +24,11 @@ export default function ProdutosTab() {
 
   useEffect(() => {
     carregarProdutos()
+    const channel = supabase
+      .channel('produtos-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'produtos' }, carregarProdutos)
+      .subscribe()
+    return () => { channel.unsubscribe() }
   }, [])
 
   async function carregarProdutos() {

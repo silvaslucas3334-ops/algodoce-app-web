@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
+import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { Edit2, Trash2, X, Save } from 'lucide-react'
 
 const ROLE_INFO = {
@@ -25,6 +26,11 @@ export default function UsuariosTab() {
 
   useEffect(() => {
     carregarUsuarios()
+    const channel = supabase
+      .channel('usuarios-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, carregarUsuarios)
+      .subscribe()
+    return () => { channel.unsubscribe() }
   }, [])
 
   async function carregarUsuarios() {
