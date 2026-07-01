@@ -163,22 +163,23 @@ function NovoLoteForm() {
         }
         .logo {
           font-weight: bold;
-          font-size: 14px;
+          font-size: 17px;
           color: #000;
           margin-bottom: 2mm;
         }
         .produto {
           font-weight: 900;
-          font-size: 14px;
+          font-size: 17px;
           color: #000;
           margin-bottom: 2mm;
           word-wrap: break-word;
           line-height: 1.3;
         }
         .sequencia {
-          font-size: 9px;
+          font-size: 11px;
           color: #b93c52;
           margin-bottom: 2mm;
+          font-weight: 600;
         }
         .qrcode {
           margin: 3mm 0;
@@ -190,13 +191,14 @@ function NovoLoteForm() {
         }
         .codigo {
           font-family: "Courier New", monospace;
-          font-size: 9px;
+          font-size: 11px;
           letter-spacing: 1px;
           margin-bottom: 2mm;
           word-break: break-all;
+          font-weight: 600;
         }
         .info {
-          font-size: 12px;
+          font-size: 14px;
           font-weight: 600;
           text-align: left;
           line-height: 1.6;
