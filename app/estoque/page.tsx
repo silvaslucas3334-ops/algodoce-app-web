@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
+import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { ShoppingCart, Trash2, Send } from 'lucide-react'
 
 export default function EstoquePage() {

@@ -8,6 +8,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useRouter } from 'next/navigation'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import { LOCAL_LABEL } from '@/lib/constants'
+import { useRealtimeData } from '@/hooks/useRealtimeData'
 
 function DashboardContent() {
   const router = useRouter()
@@ -82,6 +83,98 @@ function DashboardContent() {
     }
     carregar()
   }, [usuario?.role, usuario?.loja_id])
+
+  // Real-time listeners
+  useRealtimeData({
+    table: 'lotes_producao',
+    onInsert: () => {
+      if (usuario?.role === 'loja' || usuario?.role === 'cozinha') {
+        const event = new Event('refetch-dashboard')
+        window.dispatchEvent(event)
+      }
+    },
+    onUpdate: () => {
+      if (usuario?.role === 'loja' || usuario?.role === 'cozinha') {
+        const event = new Event('refetch-dashboard')
+        window.dispatchEvent(event)
+      }
+    },
+    onDelete: () => {
+      if (usuario?.role === 'loja' || usuario?.role === 'cozinha') {
+        const event = new Event('refetch-dashboard')
+        window.dispatchEvent(event)
+      }
+    }
+  })
+
+  useRealtimeData({
+    table: 'ordens_producao',
+    onInsert: () => {
+      if (usuario?.role === 'loja' || usuario?.role === 'cozinha') {
+        const event = new Event('refetch-dashboard')
+        window.dispatchEvent(event)
+      }
+    },
+    onUpdate: () => {
+      if (usuario?.role === 'loja' || usuario?.role === 'cozinha') {
+        const event = new Event('refetch-dashboard')
+        window.dispatchEvent(event)
+      }
+    }
+  })
+
+  // Listen para refetch events
+  useEffect(() => {
+    const handleRefetch = () => {
+      if (usuario) {
+        const hoje = new Date().toISOString().split('T')[0]
+        const em7dias = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
+
+        if (usuario?.role === 'loja' && usuario?.loja_id) {
+          Promise.all([
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .eq('destino', usuario.loja_id)
+              .eq('status', 'na_loja'),
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .eq('destino', usuario.loja_id)
+              .lte('data_validade', em7dias)
+              .gte('data_validade', hoje)
+              .in('status', ['na_loja', 'na_cozinha']),
+            supabase.from('ordens_producao').select('id', { count: 'exact', head: true })
+              .eq('loja_destino', usuario.loja_id)
+              .eq('status', 'pendente'),
+            supabase.from('ordens_producao').select('id', { count: 'exact', head: true })
+              .eq('loja_destino', usuario.loja_id)
+              .eq('status', 'em_producao'),
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .eq('destino', usuario.loja_id)
+              .eq('status', 'enviado'),
+          ]).then(([r1, r2, r3, r4, r5]) => {
+            setStats({
+              totalEstoque: r1.count || 0,
+              vencendo: r2.count || 0,
+              ordensSolicitadas: r3.count || 0,
+              ordensProducao: r4.count || 0,
+              lotesPendentes: r5.count || 0,
+            })
+          })
+        }
+
+        if (usuario?.role === 'cozinha') {
+          supabase
+            .from('ordens_producao')
+            .select('*, produto:produtos(nome)')
+            .in('status', ['pendente', 'em_producao'])
+            .order('data_entrega')
+            .limit(10)
+            .then(({ data }) => setOrdens(data || []))
+        }
+      }
+    }
+
+    window.addEventListener('refetch-dashboard', handleRefetch)
+    return () => window.removeEventListener('refetch-dashboard', handleRefetch)
+  }, [usuario])
 
   if (loading) {
     return <div className="text-center py-12 text-gray-400">Carregando...</div>
