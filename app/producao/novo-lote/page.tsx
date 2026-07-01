@@ -241,12 +241,30 @@ function NovoLoteForm() {
     w.document.write(html)
     w.document.close()
     // Esperar as imagens carregarem antes de imprimir
-    w.addEventListener('load', () => {
-      setTimeout(() => w.print(), 200)
-    })
-    if (w.document.readyState === 'complete') {
-      setTimeout(() => w.print(), 200)
+    const printWhenReady = () => {
+      const images = w.document.querySelectorAll('img')
+      let loadedCount = 0
+      if (images.length === 0) {
+        setTimeout(() => w.print(), 300)
+        return
+      }
+      images.forEach((img: any) => {
+        if (img.complete) {
+          loadedCount++
+        } else {
+          img.onload = () => {
+            loadedCount++
+            if (loadedCount === images.length) {
+              setTimeout(() => w.print(), 200)
+            }
+          }
+        }
+      })
+      if (loadedCount === images.length) {
+        setTimeout(() => w.print(), 200)
+      }
     }
+    setTimeout(printWhenReady, 100)
   }
 
   if (lotes.length > 0) {
