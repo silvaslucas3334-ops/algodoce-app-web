@@ -77,7 +77,10 @@ function ProducaoContent() {
 
       {abaAtiva === 'pendente' && (
         <button
-          onClick={() => atualizarStatus(ordem.id, 'em_producao')}
+          onClick={async () => {
+            await atualizarStatus(ordem.id, 'em_producao')
+            window.open(`/producao/ordem/${ordem.id}`, '_blank')
+          }}
           className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-2 hover:bg-blue-700"
         >
           <Play size={16} /> Iniciar Produção
