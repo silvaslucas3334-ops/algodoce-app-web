@@ -35,16 +35,16 @@ export default function NovaOrdemPage() {
       setSolicitadoPor(usuario.nome)
     }
 
-    supabase.from('produtos').select('id, nome, tipo, categoria').eq('ativo', true).order('categoria, nome')
+    supabase.from('produtos').select('id, nome, tipo, categoria_id, categoria:categorias(nome)').eq('ativo', true).order('categoria(nome), nome')
       .then(({ data }) => {
         setProdutos(data || [])
-        const cats = data?.reduce((acc, p: any) => ({ ...acc, [p.categoria]: true }), {}) || {}
+        const cats = data?.reduce((acc: any, p: any) => ({ ...acc, [p.categoria?.nome || 'Outros']: true }), {}) || {}
         setCategoriasExpandidas(cats)
       })
   }, [usuario?.nome])
 
   const produtosPorCategoria = produtos.reduce((acc: any, p: any) => {
-    const cat = p.categoria || 'Outros'
+    const cat = p.categoria?.nome || 'Outros'
     if (!acc[cat]) acc[cat] = []
     acc[cat].push(p)
     return acc

@@ -19,7 +19,7 @@ export default function OrdemProducaoPage() {
     setLoading(true)
     const { data } = await supabase
       .from('ordens_producao')
-      .select('*, produto:produtos(nome, tipo, categoria, unidade_medida, validade_dias, congelado)')
+      .select('*, produto:produtos(nome, tipo, categoria:categorias(nome), unidade_medida, validade_dias, congelado)')
       .eq('id', params.id)
       .single()
 
@@ -95,7 +95,7 @@ export default function OrdemProducaoPage() {
             <div className="flex justify-between text-xs mb-1">
               <div>
                 <p className="text-gray-600">Categoria</p>
-                <p className="font-semibold">{ordem.produto?.categoria}</p>
+                <p className="font-semibold">{ordem.produto?.categoria?.nome || 'Sem categoria'}</p>
               </div>
               <div className="text-right">
                 <p className="text-gray-600">Tipo</p>

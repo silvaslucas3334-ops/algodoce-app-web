@@ -62,7 +62,7 @@ export default function EstoquePage() {
 
     let query = supabase
       .from('lotes_producao')
-      .select('id, codigo_qr, produto_id, ordem_id, quantidade, peso_gramas, data_producao, data_validade, produzido_por, destino, status, produto:produtos(nome, tipo, categoria, unidade_medida, congelado), ordem:ordens_producao(numero_ordem, data_entrega, loja_destino)')
+      .select('id, codigo_qr, produto_id, ordem_id, quantidade, peso_gramas, data_producao, data_validade, produzido_por, destino, status, produto:produtos(nome, tipo, categoria:categorias(nome), unidade_medida, congelado), ordem:ordens_producao(numero_ordem, data_entrega, loja_destino)')
 
     // Filtrar por local (onde está agora)
     if (local === 'cozinha') {
@@ -649,8 +649,8 @@ export default function EstoquePage() {
                   {(() => {
                     // Agrupar lotes por categoria e depois por produto
                     const lotesPorCategoria: Record<string, Record<string, any[]>> = {}
-                    lotesDisponiveis.forEach(lote => {
-                      const categoria = lote.produto?.categoria || 'Outros'
+                    lotesDisponiveis.forEach((lote: any) => {
+                      const categoria = lote.produto?.categoria?.nome || 'Outros'
                       const produtoId = lote.produto_id
                       if (!lotesPorCategoria[categoria]) {
                         lotesPorCategoria[categoria] = {}
@@ -661,7 +661,7 @@ export default function EstoquePage() {
                       lotesPorCategoria[categoria][produtoId].push(lote)
                     })
 
-                    return Object.entries(lotesPorCategoria).sort().map(([categoria, produtosPorCat]) => {
+                    return Object.entries(lotesPorCategoria).sort().map(([categoria, produtosPorCat]: any) => {
                       return (
                         <div key={categoria} className="bg-white border-2 border-gray-200 rounded-xl overflow-hidden">
                           {/* Cabeçalho da Categoria */}
@@ -671,10 +671,10 @@ export default function EstoquePage() {
 
                           {/* Produtos da Categoria */}
                           <div className="space-y-2 p-4">
-                            {Object.entries(produtosPorCat).map(([produtoId, lotesDoProduto]) => {
+                            {Object.entries(produtosPorCat).map(([produtoId, lotesDoProduto]: any) => {
                               const produto = lotesDoProduto[0].produto
                               const quantidade = lotesDoProduto.length
-                              const itemsProxVencimento = lotesDoProduto.filter(l => {
+                              const itemsProxVencimento = lotesDoProduto.filter((l: any) => {
                                 const dias = Math.floor((new Date(l.data_validade + 'T00:00:00').getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
                                 return dias >= 0 && dias <= 7
                               }).length
@@ -709,7 +709,7 @@ export default function EstoquePage() {
                           {/* Lista de Etiquetas - Retraída por padrão */}
                           {(produtosExpandidos[produtoId] || modoBaixa) && (
                           <div className="space-y-2">
-                            {lotesDoProduto.map((lote, idx) => {
+                            {lotesDoProduto.map((lote: any, idx: number) => {
                               const dataValidade = new Date(lote.data_validade + 'T00:00:00')
                               const diasAteVencer = Math.floor((dataValidade.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
 

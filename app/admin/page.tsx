@@ -3,17 +3,18 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { useSearchParams } from 'next/navigation'
 import Image from 'next/image'
-import { LogOut, Package, BarChart3, Users } from 'lucide-react'
+import { LogOut, Package, BarChart3, Users, Tag } from 'lucide-react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import ProdutosTab from './produtos'
 import RelatoriosTab from './relatorios'
 import UsuariosTab from './usuarios'
+import CategoriasTab from './categorias'
 
 function AdminContent() {
   const { usuario, logout } = useAuth()
   const searchParams = useSearchParams()
-  const tabParam = (searchParams.get('tab') || 'produtos') as 'produtos' | 'relatorios' | 'usuarios'
-  const [abaAtiva, setAbaAtiva] = useState<'produtos' | 'relatorios' | 'usuarios'>(tabParam)
+  const tabParam = (searchParams.get('tab') || 'produtos') as 'produtos' | 'categorias' | 'relatorios' | 'usuarios'
+  const [abaAtiva, setAbaAtiva] = useState<'produtos' | 'categorias' | 'relatorios' | 'usuarios'>(tabParam)
 
   useEffect(() => {
     setAbaAtiva(tabParam)
@@ -21,6 +22,7 @@ function AdminContent() {
 
   const abas = [
     { id: 'produtos', label: 'Produtos', icon: Package },
+    { id: 'categorias', label: 'Categorias', icon: Tag },
     { id: 'relatorios', label: 'Relatórios', icon: BarChart3 },
     { id: 'usuarios', label: 'Usuários', icon: Users },
   ]
@@ -89,6 +91,7 @@ function AdminContent() {
       {/* Conteúdo */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         {abaAtiva === 'produtos' && <ProdutosTab />}
+        {abaAtiva === 'categorias' && <CategoriasTab />}
         {abaAtiva === 'relatorios' && <RelatoriosTab />}
         {abaAtiva === 'usuarios' && <UsuariosTab />}
       </div>

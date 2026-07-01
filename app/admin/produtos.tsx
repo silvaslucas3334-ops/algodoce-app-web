@@ -6,6 +6,7 @@ import { Plus, AlertCircle, Edit2, Trash2, X } from 'lucide-react'
 
 export default function ProdutosTab() {
   const [produtos, setProdutos] = useState<any[]>([])
+  const [categorias, setCategorias] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [mostraFormulario, setMostraFormulario] = useState(false)
   const [produtoEditando, setProdutoEditando] = useState<any>(null)
@@ -18,22 +19,39 @@ export default function ProdutosTab() {
     validade_dias: 7,
     congelado: false,
     fatias_porcoes: null as number | null,
-    categoria: 'Outros',
+    categoria_id: '',
   })
   const [salvando, setSalvando] = useState(false)
 
   useEffect(() => {
+    carregarCategorias()
     carregarProdutos()
-    const channel = supabase
+    const channelProdutos = supabase
       .channel('produtos-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'produtos' }, carregarProdutos)
       .subscribe()
-    return () => { channel.unsubscribe() }
+    const channelCategorias = supabase
+      .channel('categorias-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categorias' }, carregarCategorias)
+      .subscribe()
+    return () => {
+      channelProdutos.unsubscribe()
+      channelCategorias.unsubscribe()
+    }
   }, [])
+
+  async function carregarCategorias() {
+    const { data } = await supabase.from('categorias').select('*').order('nome')
+    setCategorias(data || [])
+    // Se não tiver categoria_id selecionada e houver categorias, seleciona a primeira
+    if (!form.categoria_id && data && data.length > 0) {
+      setForm((prev: any) => ({ ...prev, categoria_id: data[0].id }))
+    }
+  }
 
   async function carregarProdutos() {
     setLoading(true)
-    const { data } = await supabase.from('produtos').select('*').order('nome')
+    const { data } = await supabase.from('produtos').select('*, categoria:categorias(nome)').order('nome')
     setProdutos(data || [])
 
     // Verificar estoque pendente para cada produto
@@ -92,7 +110,7 @@ export default function ProdutosTab() {
         validade_dias: 7,
         congelado: false,
         fatias_porcoes: null,
-        categoria: 'Outros',
+        categoria_id: categorias[0]?.id || '',
       })
       setProdutoEditando(null)
       setMostraFormulario(false)
@@ -133,7 +151,7 @@ export default function ProdutosTab() {
       validade_dias: produto.validade_dias,
       congelado: produto.congelado,
       fatias_porcoes: produto.fatias_porcoes,
-      categoria: produto.categoria,
+      categoria_id: produto.categoria_id || categorias[0]?.id || '',
     })
     setMostraFormulario(true)
   }
@@ -148,7 +166,7 @@ export default function ProdutosTab() {
       validade_dias: 7,
       congelado: false,
       fatias_porcoes: null,
-      categoria: 'Outros',
+      categoria_id: categorias[0]?.id || '',
     })
   }
 
@@ -200,17 +218,14 @@ export default function ProdutosTab() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
               <select
-                value={form.categoria}
-                onChange={e => setForm({ ...form, categoria: e.target.value })}
+                value={form.categoria_id}
+                onChange={e => setForm({ ...form, categoria_id: e.target.value })}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
               >
-                <option value="Bolos">Bolos</option>
-                <option value="Tortas">Tortas</option>
-                <option value="Insumos">Insumos</option>
-                <option value="Pães">Pães</option>
-                <option value="Mini Tortinhas">Mini Tortinhas</option>
-                <option value="Copinhos">Copinhos</option>
-                <option value="Outros">Outros</option>
+                <option value="">Selecione uma categoria</option>
+                {categorias.map((cat: any) => (
+                  <option key={cat.id} value={cat.id}>{cat.nome}</option>
+                ))}
               </select>
             </div>
 
@@ -319,7 +334,7 @@ export default function ProdutosTab() {
                   <td className="px-6 py-4 text-sm font-medium text-gray-800 cursor-pointer" onClick={() => abrirEdicao(p)}>
                     {p.nome}
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{p.categoria}</td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{p.categoria?.nome || 'Sem categoria'}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{p.tipo}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{p.unidade_medida}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{p.validade_dias} dias</td>
