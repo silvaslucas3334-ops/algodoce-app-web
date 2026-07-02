@@ -10,6 +10,7 @@ export default function OrdemProducaoPage() {
   const params = useParams()
   const [ordem, setOrdem] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [navegando, setNavegando] = useState(false)
 
   useEffect(() => {
     carregarOrdem()
@@ -42,7 +43,12 @@ export default function OrdemProducaoPage() {
     <div className="bg-white">
       {/* Cabeçalho */}
       <div className="no-print p-4 bg-gray-50 border-b flex items-center justify-between">
-        <button onClick={() => router.push('/producao')} className="text-gray-600 hover:text-gray-800 flex items-center gap-2">
+        <button onClick={() => {
+          if (!navegando) {
+            setNavegando(true)
+            router.push('/producao')
+          }
+        }} disabled={navegando} className="text-gray-600 hover:text-gray-800 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           <ArrowLeft size={20} /> Voltar
         </button>
         <h1 className="text-lg font-bold text-gray-800">Ordem de Produção #{ordem.numero_ordem}</h1>
