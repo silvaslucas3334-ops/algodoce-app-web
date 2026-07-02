@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
+import { useAuth } from '@/hooks/useAuth'
 import Link from 'next/link'
 import { Plus, Play } from 'lucide-react'
 import ProtectedRoute from '@/components/ProtectedRoute'
@@ -14,6 +15,8 @@ const STATUS_INFO = {
 }
 
 function ProducaoContent() {
+  const { usuario } = useAuth()
+  const isAdmin = usuario?.role === 'admin'
   const [abaAtiva, setAbaAtiva] = useState<'pendente' | 'em_producao' | 'concluida'>('pendente')
   const [ordens, setOrdens] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -79,7 +82,7 @@ function ProducaoContent() {
         )}
       </div>
 
-      {abaAtiva === 'pendente' && (
+      {!isAdmin && abaAtiva === 'pendente' && (
         <button
           onClick={async () => {
             await atualizarStatus(ordem.id, 'em_producao')
@@ -91,7 +94,7 @@ function ProducaoContent() {
         </button>
       )}
 
-      {abaAtiva === 'em_producao' && (
+      {!isAdmin && abaAtiva === 'em_producao' && (
         <div className="flex flex-col gap-2 sm:flex-row">
           <Link
             href={`/producao/novo-lote?ordem=${ordem.id}&produto=${ordem.produto_id}&destino=${ordem.loja_destino}`}
@@ -108,7 +111,7 @@ function ProducaoContent() {
         </div>
       )}
 
-      {abaAtiva === 'em_producao' && (
+      {!isAdmin && abaAtiva === 'em_producao' && (
         <button
           onClick={() => atualizarStatus(ordem.id, 'cancelada')}
           className="w-full bg-gray-100 text-gray-500 rounded-lg py-1.5 text-xs mt-2 hover:bg-gray-200"
@@ -122,10 +125,15 @@ function ProducaoContent() {
   return (
     <div className="p-4">
       <div className="flex items-center justify-between pt-4 mb-6">
-        <h1 className="text-xl font-bold text-gray-800">Produção</h1>
-        <Link href="/producao/ordem-interna" className="bg-blue-600 text-white rounded-lg px-3 py-1.5 text-sm flex items-center gap-1 hover:bg-blue-700">
-          <Plus size={16} /> Ordem Interna
-        </Link>
+        <div>
+          <h1 className="text-xl font-bold text-gray-800">Produção</h1>
+          {isAdmin && <p className="text-xs text-gray-500 mt-1">👁️ Visualização apenas</p>}
+        </div>
+        {!isAdmin && (
+          <Link href="/producao/ordem-interna" className="bg-blue-600 text-white rounded-lg px-3 py-1.5 text-sm flex items-center gap-1 hover:bg-blue-700">
+            <Plus size={16} /> Ordem Interna
+          </Link>
+        )}
       </div>
 
       {/* FILTRO POR LOJA */}
@@ -222,7 +230,7 @@ function ProducaoContent() {
 
 export default function ProducaoPage() {
   return (
-    <ProtectedRoute allowedRoles={['cozinha']}>
+    <ProtectedRoute allowedRoles={['cozinha', 'admin']}>
       <ProducaoContent />
     </ProtectedRoute>
   )
