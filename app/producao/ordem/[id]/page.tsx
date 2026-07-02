@@ -41,6 +41,34 @@ export default function OrdemProducaoPage() {
 
   return (
     <div className="bg-white">
+      <style jsx global>{`
+        @media print {
+          * {
+            margin: 0;
+            padding: 0;
+            border: 0;
+          }
+          body {
+            margin: 0;
+            padding: 0;
+            width: 80mm;
+            background: white;
+          }
+          html {
+            width: 80mm;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .print-container {
+            width: 80mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            display: block !important;
+          }
+        }
+      `}</style>
+
       {/* Cabeçalho */}
       <div className="no-print p-4 bg-gray-50 border-b flex items-center justify-between">
         <button onClick={() => {
@@ -58,15 +86,8 @@ export default function OrdemProducaoPage() {
       </div>
 
       {/* Documento 80mm */}
-      <div className="print:p-0 p-8 flex justify-center">
-        <div style={{ width: '80mm' }} className="bg-white">
-          <style jsx>{`
-            @media print {
-              body { margin: 0; padding: 0; width: 80mm; }
-              .no-print { display: none !important; }
-              * { margin: 0; padding: 0; }
-            }
-          `}</style>
+      <div className="no-print p-8 flex justify-center">
+        <div style={{ width: '80mm' }} className="bg-white print-container">
 
           {/* Cabeçalho */}
           <div className="text-center mb-3 pb-2 border-b-2 border-black">
