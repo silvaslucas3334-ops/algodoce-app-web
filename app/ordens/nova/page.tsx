@@ -126,21 +126,25 @@ export default function NovaOrdemPage() {
       <div className="bg-white border-b border-gray-200 sticky top-0">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex gap-4">
-            {[1, 2, 3].map((s: any) => (
+            {[
+              { num: 1, icon: '📦', label: 'Entrega' },
+              { num: 2, icon: '🛒', label: 'Produtos' },
+              { num: 3, icon: '✅', label: 'Revisão' }
+            ].map((s: any) => (
               <button
-                key={s}
-                onClick={() => setStep(s)}
-                disabled={s > 1 && !podeAvançar()}
-                className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                  step === s
+                key={s.num}
+                onClick={() => setStep(s.num)}
+                disabled={s.num > 1 && !podeAvançar()}
+                className={`px-4 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-2 ${
+                  step === s.num
                     ? 'bg-pink-700 text-white'
-                    : s < step
+                    : s.num < step
                     ? 'bg-green-100 text-green-700'
                     : 'bg-gray-100 text-gray-500 cursor-not-allowed'
                 }`}
               >
-                {s < step && <Check size={16} className="inline mr-1" />}
-                Step {s}
+                {s.num < step && <Check size={16} />}
+                <span>{s.icon} {s.label}</span>
               </button>
             ))}
           </div>
@@ -201,67 +205,63 @@ export default function NovaOrdemPage() {
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
                 <h2 className="text-lg font-bold text-gray-800 mb-6">Adicionar Produtos</h2>
 
-                {/* Search */}
-                <div className="mb-4 relative">
-                  <Search size={18} className="absolute left-3 top-3 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Buscar produto..."
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2.5 text-sm"
-                  />
-                </div>
+                {!produtoSel && (
+                  <>
+                    {/* Search */}
+                    <div className="mb-4 relative">
+                      <Search size={18} className="absolute left-3 top-3 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Buscar produto..."
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2.5 text-sm"
+                      />
+                    </div>
 
-                {/* Product List */}
-                <div className="space-y-2 max-h-80 overflow-y-auto mb-6 pb-4 border-b border-gray-200">
-                  {searchTerm ? (
-                    produtosFiltrados.map((p: any) => (
-                      <button
-                        key={p.id}
-                        onClick={() => setProdutoSel(p.id)}
-                        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all ${
-                          produtoSel === p.id
-                            ? 'bg-pink-100 text-pink-700 font-medium border-2 border-pink-300'
-                            : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'
-                        }`}
-                      >
-                        <div className="font-medium">{p.nome}</div>
-                        <div className="text-xs text-gray-500">{p.categoria?.nome || 'Outros'}</div>
-                      </button>
-                    ))
-                  ) : (
-                    categorias.map((cat: any) => (
-                      <div key={cat}>
-                        <button
-                          type="button"
-                          onClick={() => toggleCategoria(cat)}
-                          className="w-full text-left px-3 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-semibold text-gray-700"
-                        >
-                          📁 {cat}
-                        </button>
-                        {categoriasExpandidas[cat] && (
-                          <div className="ml-2 mt-1 space-y-1">
-                            {produtosPorCategoria[cat].map((p: any) => (
-                              <button
-                                key={p.id}
-                                type="button"
-                                onClick={() => setProdutoSel(p.id)}
-                                className={`w-full text-left px-3 py-2 rounded text-sm transition-all ${
-                                  produtoSel === p.id
-                                    ? 'bg-pink-100 text-pink-700 font-medium'
-                                    : 'text-gray-600 hover:bg-gray-50'
-                                }`}
-                              >
-                                {p.nome}
-                              </button>
-                            ))}
+                    {/* Product List */}
+                    <div className="space-y-2 max-h-80 overflow-y-auto mb-6 pb-4 border-b border-gray-200">
+                      {searchTerm ? (
+                        produtosFiltrados.map((p: any) => (
+                          <button
+                            key={p.id}
+                            onClick={() => setProdutoSel(p.id)}
+                            className="w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200"
+                          >
+                            <div className="font-medium">{p.nome}</div>
+                            <div className="text-xs text-gray-500">{p.categoria?.nome || 'Outros'}</div>
+                          </button>
+                        ))
+                      ) : (
+                        categorias.map((cat: any) => (
+                          <div key={cat}>
+                            <button
+                              type="button"
+                              onClick={() => toggleCategoria(cat)}
+                              className="w-full text-left px-3 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-semibold text-gray-700"
+                            >
+                              📁 {cat}
+                            </button>
+                            {categoriasExpandidas[cat] && (
+                              <div className="ml-2 mt-1 space-y-1">
+                                {produtosPorCategoria[cat].map((p: any) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => setProdutoSel(p.id)}
+                                    className="w-full text-left px-3 py-2 rounded text-sm transition-all text-gray-600 hover:bg-gray-50"
+                                  >
+                                    {p.nome}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
 
                 {/* Quantidade e Observação */}
                 {produtoSel && (
@@ -291,13 +291,26 @@ export default function NovaOrdemPage() {
                       />
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={adicionarItem}
-                      className="w-full bg-pink-700 text-white rounded-lg py-3 text-sm font-medium flex items-center justify-center gap-2"
-                    >
-                      <Plus size={18} /> Adicionar ao Carrinho
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProdutoSel('')
+                          setQtdSel(1)
+                          setObservacaoSel('')
+                        }}
+                        className="flex-1 bg-gray-200 text-gray-700 rounded-lg py-3 text-sm font-medium"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={adicionarItem}
+                        className="flex-1 bg-pink-700 text-white rounded-lg py-3 text-sm font-medium flex items-center justify-center gap-2"
+                      >
+                        <Plus size={18} /> Adicionar
+                      </button>
+                    </div>
                   </div>
                 )}
 
