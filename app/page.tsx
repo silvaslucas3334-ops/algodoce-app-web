@@ -17,6 +17,7 @@ function DashboardContent() {
   const [stats, setStats] = useState<any>({})
   const [ordens, setOrdens] = useState<any[]>([])
   const [lojaFiltro, setLojaFiltro] = useState<string>('todas')
+  const [statusFiltro, setStatusFiltro] = useState<string>('pendente')
 
   // Redirecionar para login se não há usuário
   useEffect(() => {
@@ -180,11 +181,17 @@ function DashboardContent() {
     const hoje = new Date().toISOString().split('T')[0]
     const amanha = new Date(Date.now() + 86400000).toISOString().split('T')[0]
 
+    // Filtrar por status e destino
+    const ordensFiltradasPorStatus = ordens.filter(o => o.status === statusFiltro)
+    const ordensFiltradasPorDestino = lojaFiltro === 'todas'
+      ? ordensFiltradasPorStatus
+      : ordensFiltradasPorStatus.filter(o => o.loja_destino === lojaFiltro)
+
     const ordensAgrupadas = {
-      atrasadas: ordens.filter(o => o.data_entrega < hoje && o.status !== 'concluida'),
-      hoje: ordens.filter(o => o.data_entrega === hoje),
-      amanha: ordens.filter(o => o.data_entrega === amanha),
-      proximos: ordens.filter(o => o.data_entrega > amanha && o.data_entrega <= new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]),
+      atrasadas: ordensFiltradasPorDestino.filter(o => o.data_entrega < hoje),
+      hoje: ordensFiltradasPorDestino.filter(o => o.data_entrega === hoje),
+      amanha: ordensFiltradasPorDestino.filter(o => o.data_entrega === amanha),
+      proximos: ordensFiltradasPorDestino.filter(o => o.data_entrega > amanha && o.data_entrega <= new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]),
     }
 
     const statusLabel = (status: string) => {
@@ -216,22 +223,101 @@ function DashboardContent() {
         {/* Atalhos */}
         <div className="p-4 max-w-6xl mx-auto">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <Link href="/producao" className="bg-gradient-to-br from-amber-500 to-amber-600 text-white rounded-lg p-4 hover:shadow-md transition-shadow">
-              <p className="text-2xl mb-1">⏳</p>
+            <Link href="/producao" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
+              <p className="text-2xl mb-2">⏳</p>
               <p className="font-medium text-sm">Ordens Pendentes</p>
             </Link>
-            <Link href="/producao/ordem-interna" className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg p-4 hover:shadow-md transition-shadow">
-              <p className="text-2xl mb-1">➕</p>
+            <Link href="/producao/ordem-interna" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
+              <p className="text-2xl mb-2">➕</p>
               <p className="font-medium text-sm">Criar Ordem Interna</p>
             </Link>
-            <Link href="/producao/novo-lote" className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-lg p-4 hover:shadow-md transition-shadow">
-              <p className="text-2xl mb-1">📦</p>
+            <Link href="/producao/novo-lote" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
+              <p className="text-2xl mb-2">📦</p>
               <p className="font-medium text-sm">Criar Envio</p>
             </Link>
-            <Link href="/producao/reimprimir" className="bg-gradient-to-br from-gray-500 to-gray-600 text-white rounded-lg p-4 hover:shadow-md transition-shadow">
-              <p className="text-2xl mb-1">🖨️</p>
+            <Link href="/producao/reimprimir" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
+              <p className="text-2xl mb-2">🖨️</p>
               <p className="font-medium text-sm">Reimprimir</p>
             </Link>
+          </div>
+        </div>
+
+        {/* Filtros */}
+        <div className="p-4 max-w-6xl mx-auto mb-4">
+          <div className="flex flex-col gap-4">
+            {/* Filtro por Destino */}
+            <div>
+              <p className="text-xs font-semibold text-gray-600 mb-2">Filtrar por destino:</p>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setLojaFiltro('todas')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    lojaFiltro === 'todas'
+                      ? 'bg-gray-800 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Todas
+                </button>
+                <button
+                  onClick={() => setLojaFiltro('loja1')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    lojaFiltro === 'loja1'
+                      ? 'bg-gray-800 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Paraisópolis
+                </button>
+                <button
+                  onClick={() => setLojaFiltro('loja2')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    lojaFiltro === 'loja2'
+                      ? 'bg-gray-800 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Itajubá
+                </button>
+                <button
+                  onClick={() => setLojaFiltro('cozinha')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    lojaFiltro === 'cozinha'
+                      ? 'bg-gray-800 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  🍳 Cozinha (Internas)
+                </button>
+              </div>
+            </div>
+
+            {/* Filtro por Status */}
+            <div>
+              <p className="text-xs font-semibold text-gray-600 mb-2">Filtrar por status:</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setStatusFiltro('pendente')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    statusFiltro === 'pendente'
+                      ? 'bg-amber-100 text-amber-700 border-2 border-amber-300'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Pendente
+                </button>
+                <button
+                  onClick={() => setStatusFiltro('em_producao')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    statusFiltro === 'em_producao'
+                      ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Em Produção
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
