@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2, ShoppingCart, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Check, Search, ShoppingCart } from 'lucide-react'
 
 interface ItemCarrinho {
   produto_id: string
@@ -12,9 +12,12 @@ interface ItemCarrinho {
   quantidade: number
 }
 
+type Step = 1 | 2 | 3
+
 export default function NovaOrdemPage() {
   const router = useRouter()
   const { usuario } = useAuth()
+  const [step, setStep] = useState<Step>(1)
   const [produtos, setProdutos] = useState<any[]>([])
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([])
   const [loja_destino, setLojaDestino] = useState(usuario?.loja_id || 'loja1')
@@ -24,13 +27,13 @@ export default function NovaOrdemPage() {
   const [produtoSel, setProdutoSel] = useState('')
   const [qtdSel, setQtdSel] = useState(1)
   const [salvando, setSalvando] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
   const [categoriasExpandidas, setCategoriasExpandidas] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     const hoje = new Date().toISOString().split('T')[0]
     setDataEntrega(hoje)
 
-    // Preencher solicitado_por com nome do usuário
     if (usuario?.nome) {
       setSolicitadoPor(usuario.nome)
     }
@@ -51,6 +54,10 @@ export default function NovaOrdemPage() {
   }, {} as Record<string, any[]>)
 
   const categorias = Object.keys(produtosPorCategoria).sort()
+
+  const produtosFiltrados = produtos.filter(p =>
+    p.nome.toLowerCase().includes(searchTerm.toLowerCase())
+  )
 
   function toggleCategoria(cat: string) {
     setCategoriasExpandidas(prev => ({ ...prev, [cat]: !prev[cat] }))
@@ -73,9 +80,14 @@ export default function NovaOrdemPage() {
     setCarrinho(prev => prev.filter(i => i.produto_id !== produto_id))
   }
 
-  async function enviarOrdem(e: React.FormEvent) {
-    e.preventDefault()
-    if (carrinho.length === 0 || !solicitado_por || !data_entrega) return
+  function podeAvançar(): boolean {
+    if (step === 1) return !!data_entrega && !!solicitado_por
+    if (step === 2) return carrinho.length > 0
+    return true
+  }
+
+  async function enviarOrdem() {
+    if (carrinho.length === 0) return
     setSalvando(true)
 
     const hoje = new Date().toISOString().split('T')[0]
@@ -96,136 +108,313 @@ export default function NovaOrdemPage() {
     router.push('/ordens')
   }
 
-  const hoje = new Date().toISOString().split('T')[0]
+  const totalItens = carrinho.reduce((sum, item) => sum + item.quantidade, 0)
 
   return (
-    <div className="p-4">
-      <div className="flex items-center gap-3 pt-4 mb-6">
-        <button onClick={() => router.back()} className="text-gray-500"><ArrowLeft size={22} /></button>
-        <h1 className="text-xl font-bold text-gray-800">Nova Ordem de Produção</h1>
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="p-4 max-w-7xl mx-auto flex items-center gap-3">
+          <button onClick={() => router.back()} className="text-gray-500"><ArrowLeft size={22} /></button>
+          <h1 className="text-xl font-bold text-gray-800">Nova Ordem de Produção</h1>
+        </div>
       </div>
 
-      <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 mb-4">
-        <h2 className="font-semibold text-gray-700 mb-3">Adicionar produto</h2>
-        <div className="space-y-2 max-h-60 overflow-y-auto">
-          {categorias.map((cat: any) => (
-            <div key={cat}>
+      {/* Steps */}
+      <div className="bg-white border-b border-gray-200 sticky top-0">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex gap-4">
+            {[1, 2, 3].map((s: any) => (
               <button
-                type="button"
-                onClick={() => toggleCategoria(cat)}
-                className="w-full flex items-center justify-between bg-gray-50 hover:bg-gray-100 rounded-lg px-3 py-2 text-sm font-medium text-gray-700"
+                key={s}
+                onClick={() => setStep(s)}
+                disabled={s > 1 && !podeAvançar()}
+                className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                  step === s
+                    ? 'bg-pink-700 text-white'
+                    : s < step
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-gray-100 text-gray-500 cursor-not-allowed'
+                }`}
               >
-                <span>{cat}</span>
-                {categoriasExpandidas[cat] ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                {s < step && <Check size={16} className="inline mr-1" />}
+                Step {s}
               </button>
-              {categoriasExpandidas[cat] && (
-                <div className="ml-2 mt-1 space-y-1 border-l-2 border-gray-200 pl-2">
-                  {produtosPorCategoria[cat].map((p: any) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setProdutoSel(p.id)}
-                      className={`w-full text-left text-sm px-2 py-1.5 rounded ${produtoSel === p.id ? 'bg-pink-100 text-pink-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
-                    >
-                      {p.nome}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div className="flex gap-2 mt-3">
-          <input
-            type="number" min={1} value={qtdSel}
-            onChange={e => setQtdSel(Number(e.target.value))}
-            className="w-24 border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-          />
-          <button
-            type="button"
-            onClick={adicionarItem}
-            disabled={!produtoSel}
-            className="flex-1 bg-pink-700 text-white rounded-lg py-2.5 text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-40"
-          >
-            <Plus size={16} /> Adicionar
-          </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {carrinho.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
-          <div className="flex items-center gap-2 px-4 pt-4 pb-2">
-            <ShoppingCart size={18} className="text-pink-700" />
-            <h2 className="font-semibold text-gray-700">Carrinho ({carrinho.length} {carrinho.length === 1 ? 'item' : 'itens'})</h2>
-          </div>
-          <div className="divide-y divide-gray-100">
-            {carrinho.map((item: any) => (
-              <div key={item.produto_id} className="flex items-center justify-between px-4 py-3">
+      {/* Content */}
+      <div className="max-w-7xl mx-auto p-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Side - Main Content */}
+          <div className="lg:col-span-2">
+            {/* STEP 1: Dados da Ordem */}
+            {step === 1 && (
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
+                <h2 className="text-lg font-bold text-gray-800 mb-6">Informações da Ordem</h2>
+
                 <div>
-                  <p className="text-sm font-medium text-gray-800">{item.nome}</p>
-                  <p className="text-xs text-gray-400">{item.quantidade} unidade{item.quantidade > 1 ? 's' : ''}</p>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Data de Entrega</label>
+                  <input
+                    type="date"
+                    value={data_entrega}
+                    onChange={e => setDataEntrega(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                  />
                 </div>
-                <button onClick={() => removerItem(item.produto_id)} className="text-gray-300 hover:text-red-400 p-1">
-                  <Trash2 size={16} />
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Loja Destino</label>
+                  <select
+                    value={loja_destino}
+                    onChange={e => setLojaDestino(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white"
+                  >
+                    <option value="loja1">{LOCAL_LABEL['loja1']}</option>
+                    <option value="loja2">{LOCAL_LABEL['loja2']}</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Solicitado Por</label>
+                  <input
+                    type="text"
+                    value={solicitado_por}
+                    onChange={e => setSolicitadoPor(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Observação</label>
+                  <textarea
+                    value={observacao}
+                    onChange={e => setObservacao(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm h-24 resize-none"
+                  />
+                </div>
+
+                <button
+                  onClick={() => setStep(2)}
+                  disabled={!podeAvançar()}
+                  className="w-full bg-pink-700 text-white rounded-lg py-3 font-medium disabled:opacity-50"
+                >
+                  Prosseguir para Produtos →
                 </button>
               </div>
-            ))}
+            )}
+
+            {/* STEP 2: Selecionar Produtos */}
+            {step === 2 && (
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <h2 className="text-lg font-bold text-gray-800 mb-6">Adicionar Produtos</h2>
+
+                {/* Search */}
+                <div className="mb-4 relative">
+                  <Search size={18} className="absolute left-3 top-3 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar produto..."
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2.5 text-sm"
+                  />
+                </div>
+
+                {/* Product List */}
+                <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
+                  {searchTerm ? (
+                    produtosFiltrados.map((p: any) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setProdutoSel(p.id)}
+                        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all ${
+                          produtoSel === p.id
+                            ? 'bg-pink-100 text-pink-700 font-medium border-2 border-pink-300'
+                            : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'
+                        }`}
+                      >
+                        <div className="font-medium">{p.nome}</div>
+                        <div className="text-xs text-gray-500">{p.categoria?.nome || 'Outros'}</div>
+                      </button>
+                    ))
+                  ) : (
+                    categorias.map((cat: any) => (
+                      <div key={cat}>
+                        <button
+                          type="button"
+                          onClick={() => toggleCategoria(cat)}
+                          className="w-full text-left px-3 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-semibold text-gray-700"
+                        >
+                          📁 {cat}
+                        </button>
+                        {categoriasExpandidas[cat] && (
+                          <div className="ml-2 mt-1 space-y-1">
+                            {produtosPorCategoria[cat].map((p: any) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => setProdutoSel(p.id)}
+                                className={`w-full text-left px-3 py-2 rounded text-sm transition-all ${
+                                  produtoSel === p.id
+                                    ? 'bg-pink-100 text-pink-700 font-medium'
+                                    : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                              >
+                                {p.nome}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Add to Cart */}
+                <div className="flex gap-2 pt-4 border-t border-gray-200">
+                  <input
+                    type="number"
+                    min={1}
+                    value={qtdSel}
+                    onChange={e => setQtdSel(Number(e.target.value))}
+                    className="w-24 border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={adicionarItem}
+                    disabled={!produtoSel}
+                    className="flex-1 bg-pink-700 text-white rounded-lg py-2.5 text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-40"
+                  >
+                    <Plus size={18} /> Adicionar
+                  </button>
+                </div>
+
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={() => setStep(1)}
+                    className="flex-1 bg-gray-200 text-gray-700 rounded-lg py-3 font-medium"
+                  >
+                    ← Voltar
+                  </button>
+                  <button
+                    onClick={() => setStep(3)}
+                    disabled={!podeAvançar()}
+                    className="flex-1 bg-pink-700 text-white rounded-lg py-3 font-medium disabled:opacity-50"
+                  >
+                    Revisar →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: Revisar */}
+            {step === 3 && (
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <h2 className="text-lg font-bold text-gray-800 mb-6">Revisar Ordem</h2>
+
+                <div className="space-y-4 mb-6 pb-6 border-b border-gray-200">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-gray-500">Data de Entrega</p>
+                      <p className="font-semibold text-gray-800">{new Date(data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Loja Destino</p>
+                      <p className="font-semibold text-gray-800">{LOCAL_LABEL[loja_destino]}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Solicitado Por</p>
+                      <p className="font-semibold text-gray-800">{solicitado_por}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Total de Itens</p>
+                      <p className="font-semibold text-gray-800">{totalItens}</p>
+                    </div>
+                  </div>
+                  {observacao && (
+                    <div>
+                      <p className="text-gray-500 text-sm">Observação</p>
+                      <p className="text-gray-800">{observacao}</p>
+                    </div>
+                  )}
+                </div>
+
+                <h3 className="font-semibold text-gray-800 mb-3">Produtos</h3>
+                <div className="space-y-2 mb-6">
+                  {carrinho.map((item: any) => (
+                    <div key={item.produto_id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg text-sm">
+                      <div>
+                        <p className="font-medium text-gray-800">{item.nome}</p>
+                        <p className="text-gray-500">Qty: {item.quantidade}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setStep(2)}
+                    className="flex-1 bg-gray-200 text-gray-700 rounded-lg py-3 font-medium"
+                  >
+                    ← Voltar
+                  </button>
+                  <button
+                    onClick={enviarOrdem}
+                    disabled={salvando}
+                    className="flex-1 bg-green-600 text-white rounded-lg py-3 font-medium flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Check size={18} /> {salvando ? 'Enviando...' : 'Confirmar Ordem'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Side - Carrinho */}
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 sticky top-24">
+              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <ShoppingCart size={20} />
+                Resumo da Ordem
+              </h3>
+
+              <div className="space-y-3 mb-4 pb-4 border-b border-gray-200 max-h-64 overflow-y-auto">
+                {carrinho.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-8">Nenhum item adicionado</p>
+                ) : (
+                  carrinho.map((item: any) => (
+                    <div key={item.produto_id} className="flex justify-between items-start text-sm">
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-800">{item.nome}</p>
+                        <p className="text-gray-500">Qtd: {item.quantidade}</p>
+                      </div>
+                      <button
+                        onClick={() => removerItem(item.produto_id)}
+                        className="text-red-600 hover:text-red-700 ml-2"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between font-semibold text-gray-800">
+                  <span>Total de Itens:</span>
+                  <span className="text-lg text-pink-700">{totalItens}</span>
+                </div>
+                <div className="text-xs text-gray-500">
+                  {carrinho.length} produto(s) adicionado(s)
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      )}
-
-      <form onSubmit={enviarOrdem} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Destino</label>
-          <select
-            value={loja_destino}
-            onChange={e => setLojaDestino(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white"
-          >
-            {Object.entries(LOCAL_LABEL).filter(([k]) => k !== 'cozinha').map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Data de entrega</label>
-          <input
-            type="date"
-            required
-            min={hoje}
-            value={data_entrega}
-            onChange={e => setDataEntrega(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Solicitado por</label>
-          <p className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-700 font-medium">
-            {solicitado_por}
-          </p>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Observação (opcional)</label>
-          <textarea
-            rows={2} placeholder="Ex: urgente, prazo especial..."
-            value={observacao}
-            onChange={e => setObservacao(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={salvando || carrinho.length === 0 || !solicitado_por || !data_entrega}
-          className="w-full bg-pink-700 text-white rounded-xl py-3 font-semibold disabled:opacity-40"
-        >
-          {salvando ? 'Enviando...' : `Enviar ${carrinho.length} ordem${carrinho.length !== 1 ? 's' : ''} para cozinha`}
-        </button>
-      </form>
+      </div>
     </div>
   )
 }
