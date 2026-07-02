@@ -260,11 +260,17 @@ export default function NovaOrdemInternaPage() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Quantidade</label>
                       <input
-                        type="number"
-                        min={1}
+                        type="text"
+                        inputMode="numeric"
                         value={qtdSel}
-                        onChange={e => setQtdSel(Number(e.target.value))}
+                        onChange={e => {
+                          const val = e.target.value
+                          if (val === '' || !isNaN(Number(val))) {
+                            setQtdSel(val === '' ? 1 : Number(val))
+                          }
+                        }}
                         className="w-full border border-gray-300 rounded-lg px-3 py-3 text-lg font-semibold"
+                        placeholder="Digite a quantidade"
                       />
                     </div>
 

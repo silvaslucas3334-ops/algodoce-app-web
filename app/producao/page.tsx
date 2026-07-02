@@ -48,9 +48,13 @@ function ProducaoContent() {
     carregarOrdens()
   }
 
-  const ordensAba = ordens.filter(o =>
-    o.status === abaAtiva && (lojaFiltro === 'todas' || o.loja_destino === lojaFiltro)
-  )
+  const ordensAba = ordens.filter(o => {
+    const statusMatch = o.status === abaAtiva
+    if (lojaFiltro === 'cozinha') {
+      return statusMatch && o.tipo_ordem === 'interna'
+    }
+    return statusMatch && (lojaFiltro === 'todas' || o.loja_destino === lojaFiltro)
+  })
 
   const KanbanCard = ({ ordem }: { ordem: any }) => (
     <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
@@ -119,14 +123,9 @@ function ProducaoContent() {
     <div className="p-4">
       <div className="flex items-center justify-between pt-4 mb-6">
         <h1 className="text-xl font-bold text-gray-800">Produção</h1>
-        <div className="flex gap-2">
-          <Link href="/producao/ordem-interna" className="bg-blue-600 text-white rounded-lg px-3 py-1.5 text-sm flex items-center gap-1 hover:bg-blue-700">
-            <Plus size={16} /> Ordem Interna
-          </Link>
-          <Link href="/producao/novo-lote" className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm flex items-center gap-1 hover:bg-gray-900">
-            <Plus size={16} /> Lote
-          </Link>
-        </div>
+        <Link href="/producao/ordem-interna" className="bg-blue-600 text-white rounded-lg px-3 py-1.5 text-sm flex items-center gap-1 hover:bg-blue-700">
+          <Plus size={16} /> Ordem Interna
+        </Link>
       </div>
 
       {/* FILTRO POR LOJA */}
@@ -162,6 +161,16 @@ function ProducaoContent() {
             }`}
           >
             Itajubá
+          </button>
+          <button
+            onClick={() => setLojaFiltro('cozinha')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              lojaFiltro === 'cozinha'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            🍳 Cozinha (Internas)
           </button>
         </div>
       </div>
