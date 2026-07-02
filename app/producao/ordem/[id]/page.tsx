@@ -86,7 +86,7 @@ export default function OrdemProducaoPage() {
       </div>
 
       {/* Documento 80mm */}
-      <div className="no-print p-8 flex justify-center">
+      <div className="p-8 flex justify-center">
         <div style={{ width: '80mm' }} className="bg-white print-container">
 
           {/* Cabeçalho */}
