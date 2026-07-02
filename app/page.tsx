@@ -176,8 +176,43 @@ function DashboardContent() {
     return <div className="p-4 text-center text-gray-400">Carregando...</div>
   }
 
+  // RENDER PARA ADMIN
+  if (usuario?.role === 'admin') {
+    return (
+      <div className="p-4">
+        <div className="flex items-center justify-between pt-4 mb-6">
+          <h1 className="text-2xl font-bold text-gray-800">Gestão AlgoDoce</h1>
+        </div>
+
+        {/* Atalhos de Gestão */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <Link href="/ordens" className="bg-white border border-gray-200 rounded-lg p-6 hover:border-gray-300 hover:shadow-md transition-all">
+            <p className="text-3xl mb-3">📋</p>
+            <p className="font-bold text-lg text-gray-800">Ordens de Produção</p>
+            <p className="text-sm text-gray-600 mt-1">Gerenciar todas as ordens</p>
+          </Link>
+          <Link href="/producao" className="bg-white border border-gray-200 rounded-lg p-6 hover:border-gray-300 hover:shadow-md transition-all">
+            <p className="text-3xl mb-3">🏭</p>
+            <p className="font-bold text-lg text-gray-800">Produção</p>
+            <p className="text-sm text-gray-600 mt-1">Acompanhar produção</p>
+          </Link>
+          <Link href="/estoque" className="bg-white border border-gray-200 rounded-lg p-6 hover:border-gray-300 hover:shadow-md transition-all">
+            <p className="text-3xl mb-3">📦</p>
+            <p className="font-bold text-lg text-gray-800">Estoque</p>
+            <p className="text-sm text-gray-600 mt-1">Gerenciar inventário</p>
+          </Link>
+          <Link href="/admin" className="bg-white border border-gray-200 rounded-lg p-6 hover:border-gray-300 hover:shadow-md transition-all">
+            <p className="text-3xl mb-3">⚙️</p>
+            <p className="font-bold text-lg text-gray-800">Configurações</p>
+            <p className="text-sm text-gray-600 mt-1">Produtos e categorias</p>
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   // RENDER PARA COZINHA
-  if (usuario?.role === 'cozinha' || usuario?.role === 'admin') {
+  if (usuario?.role === 'cozinha') {
     const hoje = new Date().toISOString().split('T')[0]
     const amanha = new Date(Date.now() + 86400000).toISOString().split('T')[0]
 
