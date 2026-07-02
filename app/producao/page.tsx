@@ -119,9 +119,14 @@ function ProducaoContent() {
     <div className="p-4">
       <div className="flex items-center justify-between pt-4 mb-6">
         <h1 className="text-xl font-bold text-gray-800">Produção</h1>
-        <Link href="/producao/novo-lote" className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm flex items-center gap-1">
-          <Plus size={16} /> Lote
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/producao/ordem-interna" className="bg-blue-600 text-white rounded-lg px-3 py-1.5 text-sm flex items-center gap-1 hover:bg-blue-700">
+            <Plus size={16} /> Ordem Interna
+          </Link>
+          <Link href="/producao/novo-lote" className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm flex items-center gap-1 hover:bg-gray-900">
+            <Plus size={16} /> Lote
+          </Link>
+        </div>
       </div>
 
       {/* FILTRO POR LOJA */}
