@@ -231,7 +231,7 @@ function DashboardContent() {
               <p className="text-2xl mb-2">➕</p>
               <p className="font-medium text-sm">Criar Ordem Interna</p>
             </Link>
-            <Link href="/estoque?modo=envio" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
+            <Link href="/estoque" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
               <p className="text-2xl mb-2">📦</p>
               <p className="font-medium text-sm">Criar Envio</p>
             </Link>
