@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
-import { AlertTriangle, Package, Truck, TrendingUp, Settings } from 'lucide-react'
+import { AlertTriangle, Package, Truck, TrendingUp, Settings, Plus } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter } from 'next/navigation'
@@ -64,14 +64,12 @@ function DashboardContent() {
           })
         }
 
-        // Para COZINHA
-        if (usuario?.role === 'cozinha') {
+        // Para COZINHA - Carregar todas as ordens
+        if (usuario?.role === 'cozinha' || usuario?.role === 'admin') {
           const { data: ordensData } = await supabase
             .from('ordens_producao')
             .select('*, produto:produtos(nome)')
-            .in('status', ['pendente', 'em_producao'])
             .order('data_entrega')
-            .limit(10)
           setOrdens(ordensData || [])
         }
 
@@ -149,24 +147,21 @@ function DashboardContent() {
             supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
               .eq('destino', usuario.loja_id)
               .eq('status', 'enviado'),
-          ]).then(([r1, r2, r3, r4, r5]) => {
+          ]).then(([e1, e2, e3, e4, e5]) => {
             setStats({
-              totalEstoque: r1.count || 0,
-              vencendo: r2.count || 0,
-              ordensSolicitadas: r3.count || 0,
-              ordensProducao: r4.count || 0,
-              lotesPendentes: r5.count || 0,
+              totalEstoque: e1.count || 0,
+              vencendo: e2.count || 0,
+              ordensSolicitadas: e3.count || 0,
+              ordensProducao: e4.count || 0,
+              lotesPendentes: e5.count || 0,
             })
           })
         }
 
-        if (usuario?.role === 'cozinha') {
-          supabase
-            .from('ordens_producao')
+        if (usuario?.role === 'cozinha' || usuario?.role === 'admin') {
+          supabase.from('ordens_producao')
             .select('*, produto:produtos(nome)')
-            .in('status', ['pendente', 'em_producao'])
             .order('data_entrega')
-            .limit(10)
             .then(({ data }) => setOrdens(data || []))
         }
       }
@@ -174,294 +169,233 @@ function DashboardContent() {
 
     window.addEventListener('refetch-dashboard', handleRefetch)
     return () => window.removeEventListener('refetch-dashboard', handleRefetch)
-  }, [usuario])
+  }, [usuario?.role, usuario?.loja_id])
 
   if (loading) {
-    return <div className="text-center py-12 text-gray-400">Carregando...</div>
+    return <div className="p-4 text-center text-gray-400">Carregando...</div>
   }
 
-  // Mostrar carregamento
-  if (!usuario) {
+  // RENDER PARA COZINHA
+  if (usuario?.role === 'cozinha' || usuario?.role === 'admin') {
+    const hoje = new Date().toISOString().split('T')[0]
+    const amanha = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+
+    const ordensAgrupadas = {
+      atrasadas: ordens.filter(o => o.data_entrega < hoje && o.status !== 'concluida'),
+      hoje: ordens.filter(o => o.data_entrega === hoje),
+      amanha: ordens.filter(o => o.data_entrega === amanha),
+      proximos: ordens.filter(o => o.data_entrega > amanha && o.data_entrega <= new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]),
+    }
+
+    const statusLabel = (status: string) => {
+      const labels: Record<string, string> = {
+        pendente: 'Pendente',
+        em_producao: 'Em Produção',
+        concluida: 'Concluída',
+      }
+      return labels[status] || status
+    }
+
+    const statusColor = (status: string) => {
+      const colors: Record<string, string> = {
+        pendente: 'bg-amber-100 text-amber-700',
+        em_producao: 'bg-blue-100 text-blue-700',
+        concluida: 'bg-green-100 text-green-700',
+      }
+      return colors[status] || 'bg-gray-100 text-gray-700'
+    }
+
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-pink-50 to-white">
-        <div className="text-center">
-          <p className="text-gray-400 mb-2">{carregando ? 'Carregando...' : 'Você precisa fazer login'}</p>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 p-4">
+          <h1 className="text-2xl font-bold text-gray-800">Produção</h1>
+          <p className="text-sm text-gray-600">Cronograma de ordens</p>
         </div>
-      </div>
-    )
-  }
 
-  // LAYOUT PARA LOJA
-  if (usuario?.role === 'loja') {
-    return (
-      <div className="p-4">
-        <div className="flex items-center justify-between mb-6 pt-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">{LOCAL_LABEL[usuario?.loja_id || 'loja1']}</h1>
-            <p className="text-xs text-gray-500 mt-1">Gestão de Estoque</p>
+        {/* Atalhos */}
+        <div className="p-4 max-w-6xl mx-auto">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <Link href="/producao" className="bg-gradient-to-br from-amber-500 to-amber-600 text-white rounded-lg p-4 hover:shadow-md transition-shadow">
+              <p className="text-2xl mb-1">⏳</p>
+              <p className="font-medium text-sm">Ordens Pendentes</p>
+            </Link>
+            <Link href="/producao/ordem-interna" className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg p-4 hover:shadow-md transition-shadow">
+              <p className="text-2xl mb-1">➕</p>
+              <p className="font-medium text-sm">Criar Ordem Interna</p>
+            </Link>
+            <Link href="/producao/novo-lote" className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-lg p-4 hover:shadow-md transition-shadow">
+              <p className="text-2xl mb-1">📦</p>
+              <p className="font-medium text-sm">Criar Envio</p>
+            </Link>
+            <Link href="/producao/reimprimir" className="bg-gradient-to-br from-gray-500 to-gray-600 text-white rounded-lg p-4 hover:shadow-md transition-shadow">
+              <p className="text-2xl mb-1">🖨️</p>
+              <p className="font-medium text-sm">Reimprimir</p>
+            </Link>
           </div>
-          <div className="text-right text-sm text-gray-500">
-            {new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
-          </div>
         </div>
 
-        {/* ATALHOS */}
-        <div className="grid grid-cols-3 gap-2 mb-6">
-          <Link href="/ordens/nova" className="bg-gray-900 text-white rounded-lg p-3 text-center hover:bg-gray-800 transition-colors">
-            <p className="text-lg">📋</p>
-            <p className="text-xs font-semibold mt-1">Criar<br/>Ordem</p>
-          </Link>
-          <Link href="/estoque" className="bg-gray-700 text-white rounded-lg p-3 text-center hover:bg-gray-600 transition-colors">
-            <p className="text-lg">📉</p>
-            <p className="text-xs font-semibold mt-1">Baixar<br/>Estoque</p>
-          </Link>
-          <Link href="/estoque" className="bg-gray-600 text-white rounded-lg p-3 text-center hover:bg-gray-500 transition-colors">
-            <p className="text-lg">📥</p>
-            <p className="text-xs font-semibold mt-1">Receber<br/>Pendente</p>
-          </Link>
-        </div>
-
-        {/* ALERTA DE LOTES PENDENTES */}
-        {stats.lotesPendentes > 0 && (
-          <Link href="/estoque" className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 mb-6 block hover:bg-blue-100 transition-colors">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold text-blue-900">📥 Lotes Pendentes de Recebimento</p>
-                <p className="text-xs text-blue-700 mt-1">{stats.lotesPendentes} etiqueta{stats.lotesPendentes !== 1 ? 's' : ''} aguardando confirmação</p>
+        {/* Timeline */}
+        <div className="max-w-6xl mx-auto px-4 pb-6">
+          {/* Atrasadas */}
+          {ordensAgrupadas.atrasadas.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-2 h-8 bg-red-500 rounded-full"></div>
+                <h2 className="text-lg font-bold text-gray-800">🔴 Atrasadas ({ordensAgrupadas.atrasadas.length})</h2>
               </div>
-              <p className="text-3xl font-bold text-blue-600">{stats.lotesPendentes}</p>
-            </div>
-          </Link>
-        )}
-
-        {/* RESUMO */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <p className="text-xs text-gray-400 mb-1">Itens no Estoque</p>
-            <p className="text-3xl font-bold text-gray-900">{stats.totalEstoque}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <p className="text-xs text-gray-400 mb-1">Próximos do Vencimento</p>
-            <p className="text-3xl font-bold text-gray-900">{stats.vencendo}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <p className="text-xs text-gray-400 mb-1">Ordens Solicitadas</p>
-            <p className="text-3xl font-bold text-gray-900">{stats.ordensSolicitadas}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <p className="text-xs text-gray-400 mb-1">Em Produção</p>
-            <p className="text-3xl font-bold text-gray-900">{stats.ordensProducao}</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // LAYOUT PARA COZINHA
-  if (usuario?.role === 'cozinha') {
-    return (
-      <div className="p-4">
-        <div className="flex items-center justify-between mb-6 pt-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">Cozinha</h1>
-            <p className="text-xs text-gray-500 mt-1">Gestão de Produção</p>
-          </div>
-          <div className="text-right text-sm text-gray-500">
-            {new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
-          </div>
-        </div>
-
-        {/* ATALHOS */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          <Link href="/ordens" className="bg-gray-800 text-white rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
-            <p className="text-2xl mb-1">⏳</p>
-            <p className="text-sm font-semibold">Ordens Pendentes</p>
-          </Link>
-          <Link href="/estoque" className="bg-gray-700 text-white rounded-lg p-4 text-center hover:bg-gray-600 transition-colors">
-            <p className="text-2xl mb-1">🚚</p>
-            <p className="text-sm font-semibold">Criar Envio</p>
-          </Link>
-          <Link href="/producao/reimprimir" className="bg-gray-600 text-white rounded-lg p-4 text-center hover:bg-gray-500 transition-colors">
-            <p className="text-2xl mb-1">🖨️</p>
-            <p className="text-sm font-semibold">Reimprimir</p>
-          </Link>
-        </div>
-
-        {/* FILTRO POR LOJA */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
-          <p className="text-xs font-semibold text-gray-600 mb-3">Filtrar por loja:</p>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={() => setLojaFiltro('todas')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                lojaFiltro === 'todas'
-                  ? 'bg-gray-800 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Todas
-            </button>
-            <button
-              onClick={() => setLojaFiltro('loja1')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                lojaFiltro === 'loja1'
-                  ? 'bg-gray-800 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Paraisópolis
-            </button>
-            <button
-              onClick={() => setLojaFiltro('loja2')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                lojaFiltro === 'loja2'
-                  ? 'bg-gray-800 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Itajubá
-            </button>
-          </div>
-        </div>
-
-        {/* PAINEL GERENCIAL DE ORDENS POR DATA */}
-        {(() => {
-          const ordensFiltradas = lojaFiltro === 'todas'
-            ? ordens
-            : ordens.filter(o => o.loja_destino === lojaFiltro)
-
-          return ordensFiltradas.length > 0 ? (
-          <div className="space-y-3">
-            {(() => {
-              const ordensPorData = ordensFiltradas.reduce((acc: any, ordem: any) => {
-                const data = ordem.data_entrega
-                if (!acc[data]) acc[data] = []
-                acc[data].push(ordem)
-                return acc
-              }, {} as Record<string, any[]>)
-
-              const datas = Object.keys(ordensPorData).sort()
-              const hoje = new Date().toISOString().split('T')[0]
-
-              return datas.map((data: any) => {
-                const dataObj = new Date(data + 'T00:00:00')
-                const diasAteEntrega = Math.floor((dataObj.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
-                const isHoje = data === hoje
-                const isAtrasado = diasAteEntrega < 0
-                const isUrgente = diasAteEntrega === 0
-
-                let bgColor = 'bg-white border-gray-200'
-                let headerColor = 'bg-gray-50'
-                let badgeColor = 'bg-gray-100 text-gray-700'
-
-                if (isAtrasado) {
-                  bgColor = 'bg-red-50 border-red-200'
-                  headerColor = 'bg-red-100'
-                  badgeColor = 'bg-red-200 text-red-700'
-                } else if (isUrgente) {
-                  bgColor = 'bg-orange-50 border-orange-200'
-                  headerColor = 'bg-orange-100'
-                  badgeColor = 'bg-orange-200 text-orange-700'
-                } else if (diasAteEntrega === 1) {
-                  bgColor = 'bg-yellow-50 border-yellow-200'
-                  headerColor = 'bg-yellow-100'
-                  badgeColor = 'bg-yellow-200 text-yellow-700'
-                }
-
-                return (
-                  <div key={data} className={`${bgColor} rounded-lg border overflow-hidden`}>
-                    <div className={`${headerColor} px-4 py-3`}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold text-gray-800">
-                            {isAtrasado && '⚠️ ATRASADO - '}
-                            {isUrgente && '🔴 HOJE - '}
-                            {isHoje ? 'Hoje' : dataObj.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
-                          </p>
-                          <p className="text-xs text-gray-600 mt-0.5">
-                            {ordensPorData[data].length} ordem(ns) • {ordensPorData[data].reduce((sum: number, o: any) => sum + o.quantidade, 0)} itens
-                          </p>
-                        </div>
-                        <span className={`text-xs font-bold px-2 py-1 rounded ${badgeColor}`}>
-                          {diasAteEntrega < 0 ? `${Math.abs(diasAteEntrega)}d atrasado` : `${diasAteEntrega}d`}
-                        </span>
+              <div className="space-y-2">
+                {ordensAgrupadas.atrasadas.map((ordem) => (
+                  <div key={ordem.id} className="bg-white border-l-4 border-red-500 rounded-lg p-4 hover:shadow-sm transition-shadow">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-800">{ordem.produto?.nome}</p>
+                        <p className="text-sm text-gray-600 mt-1">
+                          <strong>{ordem.quantidade}</strong> un • {LOCAL_LABEL[ordem.loja_destino] || ordem.loja_destino}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Entrega: {new Date(ordem.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
+                        </p>
                       </div>
-                    </div>
-                    <div className="divide-y divide-gray-200">
-                      {ordensPorData[data].map((ordem: any) => (
-                        <div key={ordem.id} className="p-3">
-                          <div className="flex items-start justify-between mb-1">
-                            <div className="flex-1">
-                              <p className="font-medium text-gray-800 text-sm">{ordem.produto?.nome}</p>
-                              <p className="text-xs text-gray-500 mt-0.5">{ordem.quantidade} un • {LOCAL_LABEL[ordem.loja_destino]}</p>
-                            </div>
-                            <span className={`text-xs font-semibold px-2 py-1 rounded ${ordem.status === 'pendente' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-                              {ordem.status === 'pendente' ? 'Pendente' : 'Em Produção'}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
+                      <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor(ordem.status)}`}>
+                        {statusLabel(ordem.status)}
+                      </span>
                     </div>
                   </div>
-                )
-              })
-            })()}
-          </div>
-          ) : (
-            <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-400">
-              <p className="text-sm">Nenhuma ordem pendente ou em produção</p>
+                ))}
+              </div>
             </div>
-          )
-        })()}
+          )}
+
+          {/* Hoje */}
+          {ordensAgrupadas.hoje.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-2 h-8 bg-amber-500 rounded-full"></div>
+                <h2 className="text-lg font-bold text-gray-800">🟡 Hoje ({ordensAgrupadas.hoje.length})</h2>
+              </div>
+              <div className="space-y-2">
+                {ordensAgrupadas.hoje.map((ordem) => (
+                  <div key={ordem.id} className="bg-white border-l-4 border-amber-500 rounded-lg p-4 hover:shadow-sm transition-shadow">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-800">{ordem.produto?.nome}</p>
+                        <p className="text-sm text-gray-600 mt-1">
+                          <strong>{ordem.quantidade}</strong> un • {LOCAL_LABEL[ordem.loja_destino] || ordem.loja_destino}
+                        </p>
+                      </div>
+                      <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor(ordem.status)}`}>
+                        {statusLabel(ordem.status)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Amanhã */}
+          {ordensAgrupadas.amanha.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-2 h-8 bg-green-500 rounded-full"></div>
+                <h2 className="text-lg font-bold text-gray-800">🟢 Amanhã ({ordensAgrupadas.amanha.length})</h2>
+              </div>
+              <div className="space-y-2">
+                {ordensAgrupadas.amanha.map((ordem) => (
+                  <div key={ordem.id} className="bg-white border-l-4 border-green-500 rounded-lg p-4 hover:shadow-sm transition-shadow">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-800">{ordem.produto?.nome}</p>
+                        <p className="text-sm text-gray-600 mt-1">
+                          <strong>{ordem.quantidade}</strong> un • {LOCAL_LABEL[ordem.loja_destino] || ordem.loja_destino}
+                        </p>
+                      </div>
+                      <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor(ordem.status)}`}>
+                        {statusLabel(ordem.status)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Próximos */}
+          {ordensAgrupadas.proximos.length > 0 && (
+            <div className="mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-2 h-8 bg-blue-500 rounded-full"></div>
+                <h2 className="text-lg font-bold text-gray-800">🔵 Próximos dias ({ordensAgrupadas.proximos.length})</h2>
+              </div>
+              <div className="space-y-2">
+                {ordensAgrupadas.proximos.map((ordem) => (
+                  <div key={ordem.id} className="bg-white border-l-4 border-blue-500 rounded-lg p-4 hover:shadow-sm transition-shadow">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-800">{ordem.produto?.nome}</p>
+                        <p className="text-sm text-gray-600 mt-1">
+                          <strong>{ordem.quantidade}</strong> un • {LOCAL_LABEL[ordem.loja_destino] || ordem.loja_destino}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Entrega: {new Date(ordem.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
+                        </p>
+                      </div>
+                      <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor(ordem.status)}`}>
+                        {statusLabel(ordem.status)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ordens.length === 0 && (
+            <div className="text-center py-12">
+              <p className="text-gray-400">Nenhuma ordem encontrada</p>
+            </div>
+          )}
+        </div>
       </div>
     )
   }
 
-  // LAYOUT PARA ADMIN
-  if (usuario?.role === 'admin') {
-    return (
-      <div className="p-4">
-        <div className="flex items-center justify-between mb-6 pt-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">Administração</h1>
-            <p className="text-xs text-gray-500 mt-1">Gestão de Sistema</p>
-          </div>
-          <div className="text-right text-sm text-gray-500">
-            {new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
-          </div>
-        </div>
+  // RENDER PARA LOJA
+  return (
+    <div className="p-4">
+      <div className="flex items-center justify-between pt-4 mb-6">
+        <h1 className="text-xl font-bold text-gray-800">Dashboard</h1>
+      </div>
 
-        {/* ATALHOS */}
-        <div className="grid grid-cols-2 gap-3">
-          <Link href="/admin" className="bg-gray-800 text-white rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
-            <p className="text-2xl mb-2">⚙️</p>
-            <p className="text-sm font-semibold">Gerenciar Produtos</p>
-            <p className="text-xs text-gray-300 mt-1">Adicionar, editar e remover</p>
-          </Link>
-          <Link href="/admin" className="bg-gray-700 text-white rounded-lg p-4 text-center hover:bg-gray-600 transition-colors">
-            <p className="text-2xl mb-2">👥</p>
-            <p className="text-sm font-semibold">Usuários & Permissões</p>
-            <p className="text-xs text-gray-300 mt-1">Gerenciar acesso</p>
-          </Link>
-          <Link href="/admin" className="bg-gray-700 text-white rounded-lg p-4 text-center hover:bg-gray-600 transition-colors">
-            <p className="text-2xl mb-2">📊</p>
-            <p className="text-sm font-semibold">Relatórios</p>
-            <p className="text-xs text-gray-300 mt-1">Análise de dados</p>
-          </Link>
-          <Link href="/admin" className="bg-gray-800 text-white rounded-lg p-4 text-center hover:bg-gray-700 transition-colors">
-            <p className="text-2xl mb-2">🔧</p>
-            <p className="text-sm font-semibold">Configurações</p>
-            <p className="text-xs text-gray-300 mt-1">Sistema</p>
-          </Link>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <div className="bg-white rounded-lg p-4 border border-gray-100">
+          <p className="text-xs text-gray-600 font-semibold">Estoque</p>
+          <p className="text-2xl font-bold text-gray-800 mt-2">{stats.totalEstoque || 0}</p>
+        </div>
+        <div className="bg-white rounded-lg p-4 border border-gray-100">
+          <p className="text-xs text-gray-600 font-semibold">Vencendo</p>
+          <p className="text-2xl font-bold text-orange-600 mt-2">{stats.vencendo || 0}</p>
+        </div>
+        <div className="bg-white rounded-lg p-4 border border-gray-100">
+          <p className="text-xs text-gray-600 font-semibold">Solicitadas</p>
+          <p className="text-2xl font-bold text-blue-600 mt-2">{stats.ordensSolicitadas || 0}</p>
+        </div>
+        <div className="bg-white rounded-lg p-4 border border-gray-100">
+          <p className="text-xs text-gray-600 font-semibold">Em Produção</p>
+          <p className="text-2xl font-bold text-purple-600 mt-2">{stats.ordensProducao || 0}</p>
+        </div>
+        <div className="bg-white rounded-lg p-4 border border-gray-100">
+          <p className="text-xs text-gray-600 font-semibold">Pendentes</p>
+          <p className="text-2xl font-bold text-green-600 mt-2">{stats.lotesPendentes || 0}</p>
         </div>
       </div>
-    )
-  }
-
-  return null
+    </div>
+  )
 }
 
-export default function Dashboard() {
+export default function HomePage() {
   return (
     <ProtectedRoute>
       <DashboardContent />
