@@ -451,32 +451,46 @@ function DashboardContent() {
   return (
     <div className="p-4">
       <div className="flex items-center justify-between pt-4 mb-6">
-        <h1 className="text-xl font-bold text-gray-800">Dashboard</h1>
+        <h1 className="text-xl font-bold text-gray-800">{LOCAL_LABEL[usuario?.loja_id || 'cozinha']}</h1>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      {/* Atalhos */}
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <Link href="/ordens/nova" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
+          <p className="text-2xl mb-2">➕</p>
+          <p className="font-medium text-sm">Criar Ordem</p>
+        </Link>
+        <Link href="/estoque" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
+          <p className="text-2xl mb-2">📥</p>
+          <p className="font-medium text-sm">Receber Estoque</p>
+        </Link>
+        <Link href="/scanner" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
+          <p className="text-2xl mb-2">📱</p>
+          <p className="font-medium text-sm">Scanner</p>
+        </Link>
+      </div>
+
+      {/* Stats Cards - Estoque e Vencimento */}
+      <div className="grid grid-cols-2 gap-3 mb-6">
         <div className="bg-white rounded-lg p-4 border border-gray-100">
           <p className="text-xs text-gray-600 font-semibold">Estoque</p>
           <p className="text-2xl font-bold text-gray-800 mt-2">{stats.totalEstoque || 0}</p>
         </div>
         <div className="bg-white rounded-lg p-4 border border-gray-100">
-          <p className="text-xs text-gray-600 font-semibold">Vencendo</p>
+          <p className="text-xs text-gray-600 font-semibold">Vencendo em 7 dias</p>
           <p className="text-2xl font-bold text-orange-600 mt-2">{stats.vencendo || 0}</p>
         </div>
-        <div className="bg-white rounded-lg p-4 border border-gray-100">
-          <p className="text-xs text-gray-600 font-semibold">Solicitadas</p>
-          <p className="text-2xl font-bold text-blue-600 mt-2">{stats.ordensSolicitadas || 0}</p>
-        </div>
-        <div className="bg-white rounded-lg p-4 border border-gray-100">
-          <p className="text-xs text-gray-600 font-semibold">Em Produção</p>
-          <p className="text-2xl font-bold text-purple-600 mt-2">{stats.ordensProducao || 0}</p>
-        </div>
-        <div className="bg-white rounded-lg p-4 border border-gray-100">
-          <p className="text-xs text-gray-600 font-semibold">Pendentes</p>
-          <p className="text-2xl font-bold text-green-600 mt-2">{stats.lotesPendentes || 0}</p>
-        </div>
       </div>
+
+      {/* Seção de Estoque Pendente */}
+      {stats.lotesPendentes > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-sm font-semibold text-blue-900">📥 {stats.lotesPendentes} item(ns) pendente(s) de recebimento</p>
+          <Link href="/estoque" className="text-blue-700 text-sm font-medium hover:underline mt-2 inline-block">
+            Ver detalhes →
+          </Link>
+        </div>
+      )}
     </div>
   )
 }
