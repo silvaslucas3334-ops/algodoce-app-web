@@ -28,6 +28,9 @@ export default function EstoquePage() {
   const [modoBaixa, setModoBaixa] = useState(false)
   const [carrinhoBaixa, setCarrinhoBaixa] = useState<string[]>([])
   const [confirmarBaixa, setConfirmarBaixa] = useState(false)
+  const [modoBaixaConsumo, setModoBaixaConsumo] = useState(false)
+  const [carrinhoBaixaConsumo, setCarrinhoBaixaConsumo] = useState<string[]>([])
+  const [confirmarBaixaConsumo, setConfirmarBaixaConsumo] = useState(false)
   const [produtosExpandidos, setProdutosExpandidos] = useState<Record<string, boolean>>({})
   const [mostrarRecebimento, setMostrarRecebimento] = useState(false)
 
@@ -62,7 +65,7 @@ export default function EstoquePage() {
 
     let query = supabase
       .from('lotes_producao')
-      .select('id, codigo_qr, produto_id, ordem_id, quantidade, peso_gramas, data_producao, data_validade, produzido_por, destino, status, produto:produtos(nome, tipo, categoria:categorias(nome), unidade_medida, congelado), ordem:ordens_producao(numero_ordem, data_entrega, loja_destino)')
+      .select('id, codigo_qr, produto_id, ordem_id, quantidade, peso_gramas, data_producao, data_validade, produzido_por, destino, status, produto:produtos(nome, tipo, categoria:categorias(nome), unidade_medida, congelado), ordem:ordens_producao(numero_ordem, data_entrega, loja_destino, tipo_ordem)')
 
     // Filtrar por local (onde está agora)
     if (local === 'cozinha') {
@@ -243,6 +246,41 @@ export default function EstoquePage() {
     carregarEstoque()
   }
 
+  function toggleCarrinhoBaixaConsumo(loteId: string) {
+    setCarrinhoBaixaConsumo(prev => {
+      if (prev.includes(loteId)) {
+        return prev.filter(id => id !== loteId)
+      } else {
+        return [...prev, loteId]
+      }
+    })
+  }
+
+  async function executarBaixaConsumo() {
+    if (carrinhoBaixaConsumo.length === 0) {
+      alert('Selecione pelo menos um item')
+      return
+    }
+
+    await supabase.from('lotes_producao')
+      .update({ status: 'esgotado' })
+      .in('id', carrinhoBaixaConsumo)
+    await supabase.from('movimentacoes_estoque').insert(
+      carrinhoBaixaConsumo.map((id: any) => ({
+        lote_id: id,
+        tipo: 'saida',
+        local_origem: 'cozinha',
+        quantidade: 1,
+        registrado_por: operador || 'Sistema',
+      }))
+    )
+
+    setCarrinhoBaixaConsumo([])
+    setModoBaixaConsumo(false)
+    setConfirmarBaixaConsumo(false)
+    carregarEstoque()
+  }
+
   async function confirmarRecebimentoIndividual(lote_ids: string[]) {
     if (!operador) { alert('Informe seu nome primeiro'); return }
     await supabase.from('lotes_producao')
@@ -309,8 +347,31 @@ export default function EstoquePage() {
         <p className="font-medium text-gray-800">{operador}</p>
       </div>
 
+      {/* MODO: BAIXA DE CONSUMO - HEADER COM BOTÃO VOLTAR */}
+      {modoBaixaConsumo && (
+        <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-4 shadow-lg z-40 flex items-center justify-between">
+          <div>
+            <p className="font-bold text-sm">Modo: Baixa de Consumo</p>
+            <p className="text-xs opacity-90">Selecione os itens consumidos</p>
+          </div>
+          <button
+            onClick={() => {
+              setModoBaixaConsumo(false)
+              setCarrinhoBaixaConsumo([])
+              setConfirmarBaixaConsumo(false)
+            }}
+            className="bg-red-700 hover:bg-red-800 text-white rounded-lg px-4 py-2 text-sm font-semibold"
+          >
+            ✕ Cancelar
+          </button>
+        </div>
+      )}
+
+      {/* Espaço para compensar o header quando em modo de consumo */}
+      {modoBaixaConsumo && <div className="h-20" />}
+
       {/* MODAL: ESCOLHER LOJA PARA CRIAR ENVIO */}
-      {local === 'cozinha' && confirmarRecebimento && (
+      {local === 'cozinha' && confirmarRecebimento && !modoBaixaConsumo && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-sm w-full">
             <h2 className="text-lg font-bold text-gray-800 mb-4">Enviar para qual loja?</h2>
@@ -420,20 +481,36 @@ export default function EstoquePage() {
         <div className="text-center py-12 text-gray-400">Carregando...</div>
       ) : (
         <>
-          {/* CARD: CRIAR ENVIO (Só aparece na cozinha) */}
-          {local === 'cozinha' && !modoEnvio && (
-            <div className="bg-white rounded-lg border border-amber-200 p-4 mb-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Enviar itens para as lojas</p>
-                  <p className="text-xs text-gray-500 mt-1">Selecione os itens e escolha o destino</p>
+          {/* CARDS: CRIAR ENVIO E BAIXA (Só aparecem na cozinha) */}
+          {local === 'cozinha' && !modoEnvio && !modoBaixaConsumo && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="bg-white rounded-lg border border-amber-200 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">Enviar itens para as lojas</p>
+                    <p className="text-xs text-gray-500 mt-1">Selecione os itens e escolha o destino</p>
+                  </div>
+                  <button
+                    onClick={() => setConfirmarRecebimento(true)}
+                    className="bg-amber-600 text-white rounded-lg px-4 py-2.5 text-sm font-semibold hover:bg-amber-700"
+                  >
+                    🚚 Envio
+                  </button>
                 </div>
-                <button
-                  onClick={() => setConfirmarRecebimento(true)}
-                  className="bg-amber-600 text-white rounded-lg px-4 py-2.5 text-sm font-semibold hover:bg-amber-700"
-                >
-                  🚚 Criar Envio
-                </button>
+              </div>
+              <div className="bg-white rounded-lg border border-red-200 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">Baixa de consumo</p>
+                    <p className="text-xs text-gray-500 mt-1">Itens usados na produção</p>
+                  </div>
+                  <button
+                    onClick={() => setModoBaixaConsumo(true)}
+                    className="bg-red-600 text-white rounded-lg px-4 py-2.5 text-sm font-semibold hover:bg-red-700"
+                  >
+                    📉 Baixar
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -633,11 +710,61 @@ export default function EstoquePage() {
             </div>
           )}
 
+          {/* MODAL DE DUPLA CONFIRMAÇÃO - BAIXA POR CONSUMO */}
+          {confirmarBaixaConsumo && carrinhoBaixaConsumo.length > 0 && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+                <h3 className="text-lg font-bold text-gray-800 mb-4">Confirmar Baixa de Consumo</h3>
+
+                <div className="bg-red-50 rounded-lg p-4 mb-4 border border-red-200">
+                  <p className="text-sm text-red-800 font-semibold mb-3">📦 Itens consumidos:</p>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {lotes
+                      .filter(l => carrinhoBaixaConsumo.includes(l.id))
+                      .map((lote: any) => (
+                        <div key={lote.id} className="text-sm text-gray-700 flex justify-between items-center">
+                          <span>{lote.produto?.nome}</span>
+                          <span className="text-xs text-gray-500">{lote.codigo_qr.substring(0, 16)}...</span>
+                        </div>
+                      ))}
+                  </div>
+                  <p className="text-sm font-bold text-red-900 mt-3 pt-3 border-t border-red-200">
+                    Total: {carrinhoBaixaConsumo.length} etiqueta(s)
+                  </p>
+                </div>
+
+                <p className="text-sm text-gray-600 mb-4">
+                  ⚠️ <strong>Esses itens foram consumidos?</strong> Esta ação não pode ser desfeita.
+                </p>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setConfirmarBaixaConsumo(false)}
+                    className="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2 font-semibold hover:bg-gray-200"
+                  >
+                    Voltar
+                  </button>
+                  <button
+                    onClick={executarBaixaConsumo}
+                    className="flex-1 bg-red-600 text-white rounded-lg py-2 font-semibold hover:bg-red-700"
+                  >
+                    ✓ Confirmar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* BLOCO 2: ESTOQUE DISPONÍVEL (Pendente de Venda) */}
           {(() => {
-            const lotesDisponiveis = local === 'cozinha'
+            let lotesDisponiveis = local === 'cozinha'
               ? lotes.filter(l => l.status === 'na_cozinha')
               : lotes.filter(l => l.status === 'na_loja')
+
+            // No modo de baixa por consumo, filtrar apenas itens de insumos (ordens internas)
+            if (modoBaixaConsumo) {
+              lotesDisponiveis = lotesDisponiveis.filter(l => l.ordem?.tipo_ordem === 'interna')
+            }
             return lotesDisponiveis.length > 0 ? (
               <div className="bg-white border-2 border-gray-200 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-4">
@@ -701,13 +828,13 @@ export default function EstoquePage() {
                                 </p>
                               </div>
                               <div className="text-gray-400 text-xl">
-                                {produtosExpandidos[produtoId] || modoBaixa ? '▼' : '▶'}
+                                {produtosExpandidos[produtoId] || modoBaixa || modoBaixaConsumo ? '▼' : '▶'}
                               </div>
                             </div>
                           </div>
 
                           {/* Lista de Etiquetas - Retraída por padrão */}
-                          {(produtosExpandidos[produtoId] || modoBaixa) && (
+                          {(produtosExpandidos[produtoId] || modoBaixa || modoBaixaConsumo) && (
                           <div className="space-y-2">
                             {lotesDoProduto.map((lote: any, idx: number) => {
                               const dataValidade = new Date(lote.data_validade + 'T00:00:00')
@@ -735,18 +862,18 @@ export default function EstoquePage() {
                                 aviso = '🟡 ATENÇÃO'
                               }
 
-                              const carrinhoAtivo = local === 'cozinha' ? carrinho : carrinhoBaixa
+                              const carrinhoAtivo = modoBaixaConsumo ? carrinhoBaixaConsumo : (local === 'cozinha' ? carrinho : carrinhoBaixa)
                               const selecionado = carrinhoAtivo.includes(lote.id)
-                              const toggleFn = local === 'cozinha' ? toggleCarrinho : toggleCarrinhoBaixa
+                              const toggleFn = modoBaixaConsumo ? toggleCarrinhoBaixaConsumo : (local === 'cozinha' ? toggleCarrinho : toggleCarrinhoBaixa)
 
                               return (
                                 <div
                                   key={lote.id}
-                                  className={`${corRisco} rounded-lg p-3 border ${corTexto.replace('text-', 'border-')} border cursor-pointer transition-all hover:shadow-md ${selecionado ? `ring-2 ${local === 'cozinha' ? 'ring-amber-500' : 'ring-red-500'}` : ''}`}
+                                  className={`${corRisco} rounded-lg p-3 border ${corTexto.replace('text-', 'border-')} border cursor-pointer transition-all hover:shadow-md ${selecionado ? `ring-2 ${modoBaixaConsumo ? 'ring-red-600' : (local === 'cozinha' ? 'ring-amber-500' : 'ring-red-500')}` : ''}`}
                                   onClick={() => toggleFn(lote.id)}
                                 >
                                   <div className="flex items-start gap-3">
-                                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${selecionado ? `${local === 'cozinha' ? 'bg-amber-500 border-amber-500' : 'bg-red-600 border-red-600'}` : 'border-gray-300'}`}>
+                                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${selecionado ? `${modoBaixaConsumo ? 'bg-red-600 border-red-600' : (local === 'cozinha' ? 'bg-amber-500 border-amber-500' : 'bg-red-600 border-red-600')}` : 'border-gray-300'}`}>
                                       {selecionado && <span className="text-white text-xs">✓</span>}
                                     </div>
                                     <div className="flex-1">
@@ -787,6 +914,22 @@ export default function EstoquePage() {
                       </div>
                       <button
                         onClick={() => setConfirmarBaixa(true)}
+                        className="bg-gray-700 hover:bg-gray-600 text-white rounded px-3 py-1.5 text-xs font-semibold whitespace-nowrap"
+                      >
+                        Dar Baixa
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {local === 'cozinha' && modoBaixaConsumo && carrinhoBaixaConsumo.length > 0 && (
+                  <div className="fixed bottom-28 right-6 bg-gray-800 text-white rounded-lg p-3 shadow-md border border-gray-700 z-40 max-w-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold">🛒 {carrinhoBaixaConsumo.length} item(ns)</p>
+                      </div>
+                      <button
+                        onClick={() => setConfirmarBaixaConsumo(true)}
                         className="bg-gray-700 hover:bg-gray-600 text-white rounded px-3 py-1.5 text-xs font-semibold whitespace-nowrap"
                       >
                         Dar Baixa
