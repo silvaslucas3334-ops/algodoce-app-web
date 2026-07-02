@@ -1,13 +1,15 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { ShoppingCart, Trash2, Send } from 'lucide-react'
 
-export default function EstoquePage() {
+function EstoqueContent() {
   const { usuario } = useAuth()
+  const searchParams = useSearchParams()
   const [local, setLocal] = useState<string>(() => {
     if (usuario?.role === 'loja' && usuario?.loja_id) {
       return usuario.loja_id
@@ -42,7 +44,12 @@ export default function EstoquePage() {
     if (usuario?.nome) {
       setOperador(usuario.nome)
     }
-  }, [usuario?.role, usuario?.loja_id, usuario?.nome])
+
+    // Ativar modo envio se parâmetro estiver na URL
+    if (searchParams?.get('modo') === 'envio') {
+      setModoEnvio(true)
+    }
+  }, [usuario?.role, usuario?.loja_id, usuario?.nome, searchParams])
 
   useEffect(() => {
     carregarEstoque()
@@ -804,5 +811,13 @@ export default function EstoquePage() {
         </>
       )}
     </div>
+  )
+}
+
+export default function EstoquePage() {
+  return (
+    <Suspense fallback={<div className="p-4 text-center text-gray-400">Carregando...</div>}>
+      <EstoqueContent />
+    </Suspense>
   )
 }
