@@ -10,6 +10,7 @@ interface ItemCarrinho {
   produto_id: string
   nome: string
   quantidade: number
+  observacao?: string
 }
 
 type Step = 1 | 2 | 3
@@ -22,10 +23,10 @@ export default function NovaOrdemPage() {
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([])
   const [loja_destino, setLojaDestino] = useState(usuario?.loja_id || 'loja1')
   const [solicitado_por, setSolicitadoPor] = useState('')
-  const [observacao, setObservacao] = useState('')
   const [data_entrega, setDataEntrega] = useState('')
   const [produtoSel, setProdutoSel] = useState('')
   const [qtdSel, setQtdSel] = useState(1)
+  const [observacaoSel, setObservacaoSel] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [categoriasExpandidas, setCategoriasExpandidas] = useState<Record<string, boolean>>({})
@@ -69,11 +70,12 @@ export default function NovaOrdemPage() {
     if (!produto) return
     setCarrinho(prev => {
       const existe = prev.find(i => i.produto_id === produtoSel)
-      if (existe) return prev.map((i: any) => i.produto_id === produtoSel ? { ...i, quantidade: i.quantidade + qtdSel } : i)
-      return [...prev, { produto_id: produtoSel, nome: produto.nome, quantidade: qtdSel }]
+      if (existe) return prev.map((i: any) => i.produto_id === produtoSel ? { ...i, quantidade: i.quantidade + qtdSel, observacao: observacaoSel } : i)
+      return [...prev, { produto_id: produtoSel, nome: produto.nome, quantidade: qtdSel, observacao: observacaoSel }]
     })
     setProdutoSel('')
     setQtdSel(1)
+    setObservacaoSel('')
   }
 
   function removerItem(produto_id: string) {
@@ -98,7 +100,7 @@ export default function NovaOrdemPage() {
         quantidade: item.quantidade,
         loja_destino,
         solicitado_por,
-        observacao: observacao || null,
+        observacao: item.observacao || null,
         data_solicitacao: hoje,
         data_entrega,
         status: 'pendente',
@@ -150,10 +152,10 @@ export default function NovaOrdemPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Side - Main Content */}
           <div className="lg:col-span-2">
-            {/* STEP 1: Dados da Ordem */}
+            {/* STEP 1: Informações da Entrega */}
             {step === 1 && (
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
-                <h2 className="text-lg font-bold text-gray-800 mb-6">Informações da Ordem</h2>
+                <h2 className="text-lg font-bold text-gray-800 mb-6">Informações da Entrega</h2>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Data de Entrega</label>
@@ -179,21 +181,9 @@ export default function NovaOrdemPage() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Solicitado Por</label>
-                  <input
-                    type="text"
-                    value={solicitado_por}
-                    onChange={e => setSolicitadoPor(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Observação</label>
-                  <textarea
-                    value={observacao}
-                    onChange={e => setObservacao(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm h-24 resize-none"
-                  />
+                  <div className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-700 font-medium">
+                    {solicitado_por}
+                  </div>
                 </div>
 
                 <button
@@ -206,7 +196,7 @@ export default function NovaOrdemPage() {
               </div>
             )}
 
-            {/* STEP 2: Selecionar Produtos */}
+            {/* STEP 2: Adicionar Produtos */}
             {step === 2 && (
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
                 <h2 className="text-lg font-bold text-gray-800 mb-6">Adicionar Produtos</h2>
@@ -224,7 +214,7 @@ export default function NovaOrdemPage() {
                 </div>
 
                 {/* Product List */}
-                <div className="space-y-2 max-h-96 overflow-y-auto mb-4">
+                <div className="space-y-2 max-h-80 overflow-y-auto mb-6 pb-4 border-b border-gray-200">
                   {searchTerm ? (
                     produtosFiltrados.map((p: any) => (
                       <button
@@ -273,26 +263,45 @@ export default function NovaOrdemPage() {
                   )}
                 </div>
 
-                {/* Add to Cart */}
-                <div className="flex gap-2 pt-4 border-t border-gray-200">
-                  <input
-                    type="number"
-                    min={1}
-                    value={qtdSel}
-                    onChange={e => setQtdSel(Number(e.target.value))}
-                    className="w-24 border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={adicionarItem}
-                    disabled={!produtoSel}
-                    className="flex-1 bg-pink-700 text-white rounded-lg py-2.5 text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-40"
-                  >
-                    <Plus size={18} /> Adicionar
-                  </button>
-                </div>
+                {/* Quantidade e Observação */}
+                {produtoSel && (
+                  <div className="space-y-4 mb-6 p-4 bg-pink-50 rounded-lg border border-pink-200">
+                    <h3 className="font-semibold text-gray-800">
+                      {produtos.find(p => p.id === produtoSel)?.nome}
+                    </h3>
 
-                <div className="flex gap-2 mt-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Quantidade</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={qtdSel}
+                        onChange={e => setQtdSel(Number(e.target.value))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-3 text-lg font-semibold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Observação (por produto)</label>
+                      <textarea
+                        value={observacaoSel}
+                        onChange={e => setObservacaoSel(e.target.value)}
+                        placeholder="Ex: Ingrediente especial, forma diferente, etc."
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm h-20 resize-none"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={adicionarItem}
+                      className="w-full bg-pink-700 text-white rounded-lg py-3 text-sm font-medium flex items-center justify-center gap-2"
+                    >
+                      <Plus size={18} /> Adicionar ao Carrinho
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
                   <button
                     onClick={() => setStep(1)}
                     className="flex-1 bg-gray-200 text-gray-700 rounded-lg py-3 font-medium"
@@ -310,10 +319,10 @@ export default function NovaOrdemPage() {
               </div>
             )}
 
-            {/* STEP 3: Revisar */}
+            {/* STEP 3: Revisão */}
             {step === 3 && (
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                <h2 className="text-lg font-bold text-gray-800 mb-6">Revisar Ordem</h2>
+                <h2 className="text-lg font-bold text-gray-800 mb-6">Revisão</h2>
 
                 <div className="space-y-4 mb-6 pb-6 border-b border-gray-200">
                   <div className="grid grid-cols-2 gap-4 text-sm">
@@ -334,22 +343,24 @@ export default function NovaOrdemPage() {
                       <p className="font-semibold text-gray-800">{totalItens}</p>
                     </div>
                   </div>
-                  {observacao && (
-                    <div>
-                      <p className="text-gray-500 text-sm">Observação</p>
-                      <p className="text-gray-800">{observacao}</p>
-                    </div>
-                  )}
                 </div>
 
                 <h3 className="font-semibold text-gray-800 mb-3">Produtos</h3>
-                <div className="space-y-2 mb-6">
+                <div className="space-y-3 mb-6">
                   {carrinho.map((item: any) => (
-                    <div key={item.produto_id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg text-sm">
-                      <div>
-                        <p className="font-medium text-gray-800">{item.nome}</p>
-                        <p className="text-gray-500">Qty: {item.quantidade}</p>
+                    <div key={item.produto_id} className="bg-gray-50 p-4 rounded-lg text-sm">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <p className="font-medium text-gray-800">{item.nome}</p>
+                          <p className="text-gray-500">Quantidade: <span className="font-semibold text-gray-800">{item.quantidade}</span></p>
+                        </div>
                       </div>
+                      {item.observacao && (
+                        <div className="mt-2 pt-2 border-t border-gray-200">
+                          <p className="text-xs text-gray-500 font-medium">Observação:</p>
+                          <p className="text-gray-700">{item.observacao}</p>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
