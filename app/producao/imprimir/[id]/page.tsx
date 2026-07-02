@@ -10,7 +10,10 @@ export default function ImprimirOrdemPage() {
 
   useEffect(() => {
     carregarOrdem()
-    window.print()
+    const timer = setTimeout(() => {
+      window.print()
+    }, 500)
+    return () => clearTimeout(timer)
   }, [params.id])
 
   async function carregarOrdem() {
