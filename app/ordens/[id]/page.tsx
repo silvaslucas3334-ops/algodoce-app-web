@@ -30,6 +30,39 @@ const MOVIMENTO_TIPO: Record<string, { label: string; color: string; iconColor: 
   },
 }
 
+// Função para determinar label com base na rota de origem/destino
+function getMovimentoLabel(mov: any): { label: string; color: string; iconColor: string } {
+  if (mov.tipo === 'transferencia') {
+    // Transferência da Cozinha
+    if (mov.local_origem === 'cozinha') {
+      return {
+        label: 'Enviado da Cozinha',
+        color: 'bg-amber-50 border-amber-100',
+        iconColor: 'text-amber-600',
+      }
+    }
+    // Transferência entre lojas (Devolução de Loja para Cozinha ou para outra Loja)
+    if (mov.local_destino === 'cozinha') {
+      return {
+        label: `Devolução para Cozinha`,
+        color: 'bg-purple-50 border-purple-100',
+        iconColor: 'text-purple-600',
+      }
+    }
+    // Transferência entre lojas
+    return {
+      label: 'Transferência entre Lojas',
+      color: 'bg-cyan-50 border-cyan-100',
+      iconColor: 'text-cyan-600',
+    }
+  }
+  return MOVIMENTO_TIPO[mov.tipo] || {
+    label: mov.tipo,
+    color: 'bg-gray-50 border-gray-100',
+    iconColor: 'text-gray-600',
+  }
+}
+
 export default function DetalhesOrdemPage() {
   const router = useRouter()
   const params = useParams()
@@ -145,11 +178,7 @@ export default function DetalhesOrdemPage() {
               <div className="ml-7 space-y-3 pb-4 border-l-2 border-gray-200 pl-4">
                 {movimentacoes.map((mov: any) => {
                   const loteInfo = lotes.find(l => l.id === mov.lote_id)
-                  const tipoInfo = MOVIMENTO_TIPO[mov.tipo] || {
-                    label: mov.tipo,
-                    color: 'bg-gray-50 border-gray-100',
-                    iconColor: 'text-gray-600',
-                  }
+                  const tipoInfo = getMovimentoLabel(mov)
 
                   return (
                     <div key={mov.id} className={`rounded-lg p-3 border ${tipoInfo.color}`}>

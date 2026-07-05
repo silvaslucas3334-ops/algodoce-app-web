@@ -20,6 +20,20 @@ export function useAuth() {
         if (!montado) return
 
         if (!data.session) {
+          // Modo teste: injetar usuário fake se em development (e não foi desconectado)
+          if (process.env.NODE_ENV === 'development' && !localStorage.getItem('logged_out')) {
+            const testUser = {
+              id: 'b3bdcd1b-440c-4a2d-9305-9254f890473e',
+              email: 'teste@algodoce.local',
+              nome: 'Usuário Teste',
+              funcao: 'cozinha',
+              ativo: true,
+            }
+            if (montado) {
+              setUsuario(testUser)
+              console.log('✅ Modo teste: usuário injetado')
+            }
+          }
           setCarregando(false)
           return
         }
@@ -70,6 +84,7 @@ export function useAuth() {
   }, [])
 
   const logout = async () => {
+    localStorage.setItem('logged_out', 'true')
     await supabase.auth.signOut()
   }
 

@@ -53,6 +53,9 @@ export default function LoginPage() {
           return
         }
 
+        // Limpar flag de logout
+        localStorage.removeItem('logged_out')
+
         // Redirecionar para dashboard
         router.push('/')
       }
