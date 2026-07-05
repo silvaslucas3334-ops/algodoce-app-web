@@ -3,6 +3,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { LayoutDashboard, ClipboardList, ChefHat, ScanLine, Package, User, CheckSquare, Truck } from 'lucide-react'
+import OluquinhasLogo from './OluquinhasLogo'
 
 const links = [
   { href: '/', label: 'Início', icon: LayoutDashboard },
@@ -20,16 +21,29 @@ export default function BottomNav() {
   if (path === '/login' || path === '/signup') return null
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
-      <div className="max-w-lg mx-auto flex justify-around">
-        {links.map(({ href, label, icon: Icon }) => {
-          const active = path === href
-          return (
-            <Link key={href} href={href} className={`flex flex-col items-center py-2 px-3 text-xs ${active ? 'text-pink-700' : 'text-gray-500'}`}>
-              <Icon size={22} strokeWidth={active ? 2.5 : 1.8} />
-              <span className="mt-0.5">{label}</span>
-            </Link>
-          )
-        })}
+      <div className="max-w-lg mx-auto flex justify-around items-center">
+        {/* Logo Oluquinhas - Left Side */}
+        <div className="flex-shrink-0 p-2">
+          <OluquinhasLogo size="xs" />
+        </div>
+
+        {/* Links */}
+        <div className="flex justify-around flex-1">
+          {links.map(({ href, label, icon: Icon }) => {
+            const active = path === href
+            return (
+              <Link key={href} href={href} className={`flex flex-col items-center py-2 px-2 text-xs ${active ? 'text-pink-700' : 'text-gray-500'}`}>
+                <Icon size={22} strokeWidth={active ? 2.5 : 1.8} />
+                <span className="mt-0.5">{label}</span>
+              </Link>
+            )
+          })}
+        </div>
+
+        {/* Logo AlgoDoce - Right Side */}
+        <div className="flex-shrink-0 p-2 w-8 h-8 relative">
+          <Image src="/logo.png" alt="AlgoDoce" fill className="object-contain" />
+        </div>
       </div>
     </nav>
   )

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { AlertCircle } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -70,14 +71,21 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-pink-50 to-white p-4">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-lg p-8 border border-gray-100">
-          {/* Logo */}
-          <div className="flex justify-center mb-8">
-            <Image src="/logo.png" alt="AlgoDoce" width={80} height={80} className="object-contain" />
+          {/* 1. Logo AlgoDoce */}
+          <div className="flex justify-center mb-6">
+            <Image src="/logo.png" alt="AlgoDoce" width={72} height={72} className="object-contain" />
           </div>
 
-          <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">AlgoDoce</h1>
-          <p className="text-center text-gray-500 text-sm mb-8">Gestão de Produção</p>
+          {/* 2. Bem-Vindo */}
+          <h1 className="text-3xl font-bold text-center text-gray-800 mb-1">Bem-Vindo</h1>
+          <p className="text-center text-gray-500 text-sm mb-8">AlgoDoce - Gestão de Produção</p>
 
+          {/* 3. Oluquinhas Logo */}
+          <div className="flex justify-center mb-8">
+            <OluquinhasLogo size="md" variant="rosto" color="marrom" />
+          </div>
+
+          {/* 4. Formulário de Login */}
           {erro && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
               <AlertCircle size={18} className="text-red-600 mt-0.5 flex-shrink-0" />

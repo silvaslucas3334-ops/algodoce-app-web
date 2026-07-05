@@ -7,6 +7,7 @@ import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { temPermissao } from '@/lib/permissions'
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
+import EmptyState from '@/components/EmptyState'
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   pendente: { label: 'Pendente', color: 'bg-amber-100 text-amber-700' },
@@ -88,7 +89,11 @@ export default function OrdensPage() {
       {loading ? (
         <div className="text-center py-12 text-gray-400">Carregando...</div>
       ) : ordens.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">Nenhuma ordem {STATUS_LABEL[filtro]?.label.toLowerCase()}</div>
+        <EmptyState
+          title={`Nenhuma ordem ${STATUS_LABEL[filtro]?.label.toLowerCase()}`}
+          description="Quando tiver ordens, elas vão aparecer aqui"
+          action={podecriarOrdens ? { label: 'Criar primeira ordem', onClick: () => {} } : undefined}
+        />
       ) : (
         <div className="space-y-2">
           {ordens.map((ordem: any) => (

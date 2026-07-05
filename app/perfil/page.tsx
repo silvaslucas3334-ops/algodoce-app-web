@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { ArrowLeft, LogOut, AlertCircle, CheckCircle } from 'lucide-react'
 import { LOCAL_LABEL } from '@/lib/constants'
+import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 export default function PerfilPage() {
   const { usuario, carregando, logout } = useAuth()
@@ -96,8 +97,13 @@ export default function PerfilPage() {
         {/* Card de Informações */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
           <div className="flex items-start gap-4 mb-6">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-pink-400 to-pink-700 flex items-center justify-center text-white text-2xl font-bold flex-shrink-0">
-              {usuario?.nome?.charAt(0).toUpperCase()}
+            <div className="flex gap-3 flex-1">
+              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-pink-400 to-pink-700 flex items-center justify-center text-white text-2xl font-bold flex-shrink-0">
+                {usuario?.nome?.charAt(0).toUpperCase()}
+              </div>
+              <div className="w-16 h-16 flex-shrink-0">
+                <OluquinhasLogo size="sm" />
+              </div>
             </div>
             <div className="flex-1">
               <h2 className="text-2xl font-bold text-gray-800">{usuario?.nome}</h2>
