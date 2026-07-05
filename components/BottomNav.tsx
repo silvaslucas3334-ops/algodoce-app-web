@@ -2,14 +2,16 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, ClipboardList, ChefHat, ScanLine, Package, User } from 'lucide-react'
+import { LayoutDashboard, ClipboardList, ChefHat, ScanLine, Package, User, CheckSquare, Truck } from 'lucide-react'
 
 const links = [
   { href: '/', label: 'Início', icon: LayoutDashboard },
   { href: '/ordens', label: 'Ordens', icon: ClipboardList },
   { href: '/producao', label: 'Produção', icon: ChefHat },
+  { href: '/tarefas', label: 'Tarefas', icon: CheckSquare },
   { href: '/scanner', label: 'Scanner', icon: ScanLine },
   { href: '/estoque', label: 'Estoque', icon: Package },
+  { href: '/expedicao', label: 'Expedição', icon: Truck },
   { href: '/perfil', label: 'Perfil', icon: User },
 ]
 

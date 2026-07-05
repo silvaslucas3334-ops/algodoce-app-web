@@ -77,9 +77,9 @@ export default function EstoquePage() {
 
     const { data, error } = await query.order('data_validade')
 
-    console.log('Estoque carregado:', { local, data, error })
+    console.log('Estoque carregado:', { local, quantidade: data?.length, error })
     if (data && data.length > 0) {
-      console.log('Primeiro lote:', data[0])
+      console.log('Lotes recebidos:', JSON.stringify(data.map(l => ({ id: l.id, status: l.status, destino: l.destino }))))
     }
     setLotes(data || [])
 
@@ -149,28 +149,29 @@ export default function EstoquePage() {
     })
   }
 
-  async function criarEnvio() {
-    if (carrinho.length === 0 || !operador) return
-    setEnviando(true)
-    await supabase.from('lotes_producao')
-      .update({ status: 'enviado', destino: destinoEnvio })
-      .in('id', carrinho)
-    await supabase.from('movimentacoes_estoque').insert(
-      carrinho.map((id: any) => ({
-        lote_id: id,
-        tipo: 'transferencia',
-        local_origem: local,
-        local_destino: destinoEnvio,
-        quantidade: 1,
-        registrado_por: operador,
-      }))
-    )
-    setEnviando(false)
-    setConfirmarBaixa(false)
-    setModoEnvio(false)
-    setCarrinho([])
-    carregarEstoque()
-  }
+  // DESCONTINUADO: criarEnvio foi removido. Use o módulo de Romaneios (Expedição) para envios.
+  // async function criarEnvio() {
+  //   if (carrinho.length === 0 || !operador) return
+  //   setEnviando(true)
+  //   await supabase.from('lotes_producao')
+  //     .update({ status: 'enviado', destino: destinoEnvio })
+  //     .in('id', carrinho)
+  //   await supabase.from('movimentacoes_estoque').insert(
+  //     carrinho.map((id: any) => ({
+  //       lote_id: id,
+  //       tipo: 'transferencia',
+  //       local_origem: local,
+  //       local_destino: destinoEnvio,
+  //       quantidade: 1,
+  //       registrado_por: operador,
+  //     }))
+  //   )
+  //   setEnviando(false)
+  //   setConfirmarBaixa(false)
+  //   setModoEnvio(false)
+  //   setCarrinho([])
+  //   carregarEstoque()
+  // }
 
   function toggleCarrinhoRecebimento(loteId: string) {
     setCarrinhoRecebimento(prev => {
@@ -370,134 +371,18 @@ export default function EstoquePage() {
       {/* Espaço para compensar o header quando em modo de consumo */}
       {modoBaixaConsumo && <div className="h-20" />}
 
-      {/* MODAL: ESCOLHER LOJA PARA CRIAR ENVIO */}
-      {local === 'cozinha' && confirmarRecebimento && !modoBaixaConsumo && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 max-w-sm w-full">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Enviar para qual loja?</h2>
-            <div className="space-y-3">
-              <button
-                onClick={() => { setDestinoEnvio('loja1'); setModoEnvio(true); setConfirmarRecebimento(false) }}
-                className="w-full bg-amber-600 text-white rounded-lg py-3 text-sm font-semibold hover:bg-amber-700"
-              >
-                📍 Paraisópolis
-              </button>
-              <button
-                onClick={() => { setDestinoEnvio('loja2'); setModoEnvio(true); setConfirmarRecebimento(false) }}
-                className="w-full bg-amber-600 text-white rounded-lg py-3 text-sm font-semibold hover:bg-amber-700"
-              >
-                📍 Itajubá
-              </button>
-              <button
-                onClick={() => setConfirmarRecebimento(false)}
-                className="w-full bg-gray-100 text-gray-700 rounded-lg py-3 text-sm font-semibold hover:bg-gray-200"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CARRINHO FLUTUANTE DURANTE SELEÇÃO */}
-      {local === 'cozinha' && modoEnvio && (
-        <div className="fixed bottom-28 right-6 bg-amber-600 text-white rounded-lg p-3 shadow-md border border-amber-700 z-40 max-w-xs">
-          <div className="space-y-2">
-            <div>
-              <p className="text-xs font-semibold">📍 {LOCAL_LABEL[destinoEnvio]}</p>
-              <p className="text-xs text-amber-100">🛒 {carrinho.length} item(ns) selecionado(ns)</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => { setModoEnvio(false); setCarrinho([]) }}
-                className="flex-1 bg-amber-700 hover:bg-amber-800 text-white rounded px-2 py-1.5 text-xs font-semibold"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => setConfirmarBaixa(true)}
-                disabled={carrinho.length === 0}
-                className="flex-1 bg-amber-800 hover:bg-amber-900 text-white rounded px-2 py-1.5 text-xs font-semibold disabled:opacity-40"
-              >
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: DUPLA VERIFICAÇÃO (CONFIRMAÇÃO) */}
-      {local === 'cozinha' && confirmarBaixa && carrinho.length > 0 && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 max-w-sm w-full">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Confirmar Envio</h2>
-
-            <div className="space-y-3 mb-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Operador</label>
-                <p className="text-sm font-medium text-gray-800 bg-gray-50 border border-gray-300 rounded-lg px-3 py-2.5">
-                  {operador}
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-amber-50 rounded-lg p-3 mb-4 border border-amber-200">
-              <p className="text-xs font-semibold text-amber-900 mb-2">📦 Itens a enviar:</p>
-              <div className="space-y-1 max-h-40 overflow-y-auto">
-                {lotes
-                  .filter(l => carrinho.includes(l.id))
-                  .map((lote, idx) => (
-                    <div key={lote.id} className="text-xs text-amber-800">
-                      <span className="font-medium">{idx + 1}.</span> {lote.produto?.nome} • {lote.codigo_qr.substring(0, 16)}...
-                    </div>
-                  ))}
-              </div>
-            </div>
-
-            <p className="text-sm text-gray-600 mb-4">
-              ⚠️ <strong>Você vai enviar {carrinho.length} item(ns)</strong> para <strong>{LOCAL_LABEL[destinoEnvio]}</strong>
-            </p>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setConfirmarBaixa(false)}
-                className="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2.5 font-semibold hover:bg-gray-200"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={criarEnvio}
-                disabled={enviando || !operador}
-                className="flex-1 bg-amber-600 text-white rounded-lg py-2.5 font-semibold hover:bg-amber-700 disabled:opacity-40"
-              >
-                {enviando ? 'Enviando...' : '✓ Confirmar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* NOTA: Envio de itens agora é realizado via aba "Expedição" (Romaneio)
+          Os modais de envio abaixo foram removidos da UI de Estoque.
+          A função criarEnvio() é reutilizada pelo módulo de Romaneio.
+      */}
 
       {loading ? (
         <div className="text-center py-12 text-gray-400">Carregando...</div>
       ) : (
         <>
-          {/* CARDS: CRIAR ENVIO E BAIXA (Só aparecem na cozinha) */}
-          {local === 'cozinha' && !modoEnvio && !modoBaixaConsumo && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div className="bg-white rounded-lg border border-amber-200 p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-800">Enviar itens para as lojas</p>
-                    <p className="text-xs text-gray-500 mt-1">Selecione os itens e escolha o destino</p>
-                  </div>
-                  <button
-                    onClick={() => setConfirmarRecebimento(true)}
-                    className="bg-amber-600 text-white rounded-lg px-4 py-2.5 text-sm font-semibold hover:bg-amber-700"
-                  >
-                    🚚 Envio
-                  </button>
-                </div>
-              </div>
+          {/* CARD: BAIXA DE CONSUMO (Só aparece na cozinha) */}
+          {local === 'cozinha' && !modoBaixaConsumo && (
+            <div className="mb-6">
               <div className="bg-white rounded-lg border border-red-200 p-4">
                 <div className="flex items-center justify-between">
                   <div>
@@ -522,18 +407,13 @@ export default function EstoquePage() {
                 <h1 className="text-2xl font-bold text-gray-800">📊 Estoque</h1>
                 <p className="text-gray-500 text-sm mt-1">{LOCAL_LABEL[local]}</p>
               </div>
-              {usuario?.role === 'loja' && lojesPendentes.length > 0 && (
-                <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-sm font-semibold border border-blue-200">
-                  📥 {lojesPendentes.length} pendente(s)
-                </div>
-              )}
             </div>
 
             {/* Resumo de Itens */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                 <p className="text-gray-600 text-xs font-medium">Total</p>
-                <p className="text-2xl font-bold text-gray-800 mt-1">{lotes.length}</p>
+                <p className="text-2xl font-bold text-gray-800 mt-1">{local === 'cozinha' ? lotes.filter(l => l.status === 'na_cozinha').length : lotes.filter(l => l.status === 'na_loja').length}</p>
               </div>
               <div className="bg-orange-50 rounded-lg p-3 border border-orange-200">
                 <p className="text-orange-700 text-xs font-medium">Vencendo em 7 dias</p>
@@ -552,73 +432,7 @@ export default function EstoquePage() {
             </div>
           </div>
 
-          {/* BLOCO 1: PENDENTE DE RECEBIMENTO (Cozinha + Loja) */}
-          {usuario?.role === 'loja' && (() => {
-            const lotesPendentesBloco = lojesPendentes
-            return lotesPendentesBloco.length > 0 ? (
-              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 mb-6">
-                <div className="flex items-center justify-between mb-4">
-                  <p className="text-lg font-bold text-blue-700">📥 Pendente de Recebimento ({lotesPendentesBloco.length})</p>
-                  {usuario?.role === 'loja' && (
-                    <button
-                      onClick={() => setModoRecebimento(!modoRecebimento)}
-                      className={`px-3 py-1 rounded-lg text-sm font-medium ${modoRecebimento ? 'bg-gray-200 text-gray-700' : 'bg-blue-600 text-white'}`}
-                    >
-                      {modoRecebimento ? 'Cancelar' : 'Receber'}
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  {lotesPendentesBloco.map((lote: any) => {
-                    const selecionado = carrinhoRecebimento.includes(lote.id)
-                    return (
-                      <div
-                        key={lote.id}
-                        className={`bg-white rounded-lg p-3 border border-blue-100 cursor-pointer transition-all ${modoRecebimento ? 'hover:shadow-md' : ''} ${selecionado ? 'ring-2 ring-blue-500' : ''}`}
-                        onClick={() => modoRecebimento && toggleCarrinhoRecebimento(lote.id)}
-                      >
-                        <div className="flex items-start gap-3">
-                          {modoRecebimento && (
-                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${selecionado ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
-                              {selecionado && <span className="text-white text-xs">✓</span>}
-                            </div>
-                          )}
-                          <div className="flex-1">
-                            <p className="font-semibold text-gray-800">{lote.produto?.nome}</p>
-                            <p className="text-xs text-gray-600 mt-0.5">
-                              Etiqueta: {lote.codigo_qr}
-                            </p>
-                            <p className="text-sm text-gray-600 mt-1">
-                              {lote.produto?.unidade_medida === 'Gramas' ? `${lote.peso_gramas}g` : `${lote.quantidade} ${lote.produto?.unidade_medida}`}
-                              {lote.produto?.congelado ? ' ❄️' : ''}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500">Validade:</p>
-                            <p className="text-sm font-medium text-gray-800">
-                              {new Date(lote.data_validade + 'T00:00:00').toLocaleDateString('pt-BR')}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                {modoRecebimento && carrinhoRecebimento.length > 0 && usuario?.role === 'loja' && (
-                  <div className="bg-blue-100 border border-blue-300 rounded-lg p-3 mt-4">
-                    <p className="text-xs text-blue-700 font-semibold mb-3">✓ {carrinhoRecebimento.length} item(ns) selecionado(s)</p>
-                    <button
-                      onClick={() => setConfirmarRecebimento(true)}
-                      className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-blue-700"
-                    >
-                      Conferir e Confirmar
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : null
-          })()}
+          {/* NOTE: Recebimentos agora aparecem apenas na aba Expedição > Recebimentos */}
 
           {/* MODAL DE DUPLA CONFIRMAÇÃO */}
           {confirmarRecebimento && carrinhoRecebimento.length > 0 && (

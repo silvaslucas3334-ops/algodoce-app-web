@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
-import { AlertTriangle, Package, Truck, TrendingUp, Settings, Plus } from 'lucide-react'
+import { AlertTriangle, Package, Truck, TrendingUp, Settings, Plus, Clock, AlertCircle, CheckCircle2, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter } from 'next/navigation'
@@ -16,6 +16,9 @@ function DashboardContent() {
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<any>({})
   const [ordens, setOrdens] = useState<any[]>([])
+  const [tarefas, setTarefas] = useState<any[]>([])
+  const [recebimentos, setRecebimentos] = useState<any[]>([])
+  const [tarefasCozinha, setTarefasCozinha] = useState<any[]>([])
   const [lojaFiltro, setLojaFiltro] = useState<string>('todas')
   const [statusFiltro, setStatusFiltro] = useState<string>('pendente')
 
@@ -37,7 +40,7 @@ function DashboardContent() {
       try {
         // Para LOJA
         if (usuario?.role === 'loja' && usuario?.loja_id) {
-          const [{ count: totalEstoque }, { count: vencendo }, { count: ordensSolicitadas }, { count: ordensProducao }, { count: lotesPendentes }] = await Promise.all([
+          const [{ count: totalEstoque }, { count: vencendo }, { count: ordensSolicitadas }, { count: ordensProducao }, { count: lotesPendentes }, { data: tarefasData }, { data: recebimentosData }] = await Promise.all([
             supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
               .eq('destino', usuario.loja_id)
               .eq('status', 'na_loja'),
@@ -55,6 +58,13 @@ function DashboardContent() {
             supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
               .eq('destino', usuario.loja_id)
               .eq('status', 'enviado'),
+            supabase.from('tarefas').select('*')
+              .eq('setor_id', usuario.setor_id)
+              .in('status', ['pendente', 'em_andamento']),
+            supabase.from('romaneios').select('*')
+              .eq('status', 'confirmado')
+              .eq('unidade_destino', usuario.loja_id)
+              .in('tipo', ['envio', 'transferencia']),
           ])
           setStats({
             totalEstoque: totalEstoque || 0,
@@ -63,15 +73,25 @@ function DashboardContent() {
             ordensProducao: ordensProducao || 0,
             lotesPendentes: lotesPendentes || 0,
           })
+          setTarefas(tarefasData || [])
+          setRecebimentos(recebimentosData || [])
         }
 
-        // Para COZINHA - Carregar todas as ordens
+        // Para COZINHA - Carregar todas as ordens e tarefas
         if (usuario?.role === 'cozinha' || usuario?.role === 'admin') {
-          const { data: ordensData } = await supabase
-            .from('ordens_producao')
-            .select('*, produto:produtos(nome)')
-            .order('data_entrega')
+          const [{ data: ordensData }, { data: tarefasData }] = await Promise.all([
+            supabase
+              .from('ordens_producao')
+              .select('*, produto:produtos(nome)')
+              .order('data_entrega'),
+            supabase
+              .from('tarefas')
+              .select('*')
+              .eq('setor_id', usuario.setor_id)
+              .in('status', ['pendente', 'em_andamento']),
+          ])
           setOrdens(ordensData || [])
+          setTarefasCozinha(tarefasData || [])
         }
 
         setLoading(false)
@@ -148,7 +168,14 @@ function DashboardContent() {
             supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
               .eq('destino', usuario.loja_id)
               .eq('status', 'enviado'),
-          ]).then(([e1, e2, e3, e4, e5]) => {
+            supabase.from('tarefas').select('*')
+              .eq('setor_id', usuario.setor_id)
+              .in('status', ['pendente', 'em_andamento']),
+            supabase.from('romaneios').select('*')
+              .eq('status', 'confirmado')
+              .eq('unidade_destino', usuario.loja_id)
+              .in('tipo', ['envio', 'transferencia']),
+          ]).then(([e1, e2, e3, e4, e5, tarefasRes, recebimentosRes]) => {
             setStats({
               totalEstoque: e1.count || 0,
               vencendo: e2.count || 0,
@@ -156,14 +183,24 @@ function DashboardContent() {
               ordensProducao: e4.count || 0,
               lotesPendentes: e5.count || 0,
             })
+            setTarefas(tarefasRes.data || [])
+            setRecebimentos(recebimentosRes.data || [])
           })
         }
 
         if (usuario?.role === 'cozinha' || usuario?.role === 'admin') {
-          supabase.from('ordens_producao')
-            .select('*, produto:produtos(nome)')
-            .order('data_entrega')
-            .then(({ data }) => setOrdens(data || []))
+          Promise.all([
+            supabase.from('ordens_producao')
+              .select('*, produto:produtos(nome)')
+              .order('data_entrega'),
+            supabase.from('tarefas')
+              .select('*')
+              .eq('setor_id', usuario.setor_id)
+              .in('status', ['pendente', 'em_andamento']),
+          ]).then(([ordensRes, tarefasRes]) => {
+            setOrdens(ordensRes.data || [])
+            setTarefasCozinha(tarefasRes.data || [])
+          })
         }
       }
     }
@@ -214,318 +251,310 @@ function DashboardContent() {
   // RENDER PARA COZINHA
   if (usuario?.role === 'cozinha') {
     const hoje = new Date().toISOString().split('T')[0]
-    const amanha = new Date(Date.now() + 86400000).toISOString().split('T')[0]
 
-    // Filtrar por status e destino
-    const ordensFiltradasPorStatus = ordens.filter(o => o.status === statusFiltro)
-    const ordensFiltradasPorDestino = lojaFiltro === 'todas'
-      ? ordensFiltradasPorStatus
-      : ordensFiltradasPorStatus.filter(o => o.loja_destino === lojaFiltro)
+    // Calcular tarefas
+    const tarefasHoje = tarefasCozinha.filter(t => t.data_vencimento === hoje)
+    const tarefasAtrasadas = tarefasCozinha.filter(t => t.data_vencimento < hoje && t.status !== 'concluida')
 
-    const ordensAgrupadas = {
-      atrasadas: ordensFiltradasPorDestino.filter(o => o.data_entrega < hoje),
-      hoje: ordensFiltradasPorDestino.filter(o => o.data_entrega === hoje),
-      amanha: ordensFiltradasPorDestino.filter(o => o.data_entrega === amanha),
-      proximos: ordensFiltradasPorDestino.filter(o => o.data_entrega > amanha && o.data_entrega <= new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]),
-    }
-
-    const statusLabel = (status: string) => {
-      const labels: Record<string, string> = {
-        pendente: 'Pendente',
-        em_producao: 'Em Produção',
-        concluida: 'Concluída',
-      }
-      return labels[status] || status
-    }
-
-    const statusColor = (status: string) => {
-      const colors: Record<string, string> = {
-        pendente: 'bg-amber-100 text-amber-700',
-        em_producao: 'bg-blue-100 text-blue-700',
-        concluida: 'bg-green-100 text-green-700',
-      }
-      return colors[status] || 'bg-gray-100 text-gray-700'
-    }
+    // Calcular ordens
+    const ordensAtrasadas = ordens.filter(o => o.data_entrega < hoje && o.status !== 'concluida')
+    const ordensHoje = ordens.filter(o => o.data_entrega === hoje)
+    const ordensEmProducao = ordens.filter(o => o.status === 'em_producao')
+    const ordensAguardando = ordens.filter(o => o.status === 'pendente')
 
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gray-50 pb-20">
         {/* Header */}
-        <div className="bg-white border-b border-gray-200 p-4">
-          <h1 className="text-2xl font-bold text-gray-800">Produção</h1>
-          <p className="text-sm text-gray-600">Cronograma de ordens</p>
+        <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-4 sticky top-0 z-40 shadow-md">
+          <h1 className="text-2xl font-bold text-white">🍳 Produção</h1>
+          <p className="text-sm text-orange-100 mt-1">Painel da Cozinha</p>
         </div>
 
-        {/* Atalhos */}
-        <div className="p-4 max-w-6xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <Link href="/producao" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
-              <p className="text-2xl mb-2">⏳</p>
-              <p className="font-medium text-sm">Ordens Pendentes</p>
-            </Link>
-            <Link href="/producao/ordem-interna" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
-              <p className="text-2xl mb-2">➕</p>
-              <p className="font-medium text-sm">Criar Ordem Interna</p>
-            </Link>
-            <Link href="/estoque" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
-              <p className="text-2xl mb-2">📦</p>
-              <p className="font-medium text-sm">Criar Envio</p>
-            </Link>
-            <Link href="/producao/reimprimir" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
-              <p className="text-2xl mb-2">🖨️</p>
-              <p className="font-medium text-sm">Reimprimir</p>
-            </Link>
-          </div>
-        </div>
-
-        {/* Filtros */}
-        <div className="p-4 max-w-6xl mx-auto mb-4">
-          <div className="flex flex-col gap-4">
-            {/* Filtro por Destino */}
-            <div>
-              <p className="text-xs font-semibold text-gray-600 mb-2">Filtrar por destino:</p>
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  onClick={() => setLojaFiltro('todas')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    lojaFiltro === 'todas'
-                      ? 'bg-gray-800 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Todas
-                </button>
-                <button
-                  onClick={() => setLojaFiltro('loja1')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    lojaFiltro === 'loja1'
-                      ? 'bg-gray-800 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Paraisópolis
-                </button>
-                <button
-                  onClick={() => setLojaFiltro('loja2')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    lojaFiltro === 'loja2'
-                      ? 'bg-gray-800 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Itajubá
-                </button>
-                <button
-                  onClick={() => setLojaFiltro('cozinha')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    lojaFiltro === 'cozinha'
-                      ? 'bg-gray-800 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  🍳 Cozinha (Internas)
-                </button>
-              </div>
-            </div>
-
-            {/* Filtro por Status */}
-            <div>
-              <p className="text-xs font-semibold text-gray-600 mb-2">Filtrar por status:</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setStatusFiltro('pendente')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    statusFiltro === 'pendente'
-                      ? 'bg-amber-100 text-amber-700 border-2 border-amber-300'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Pendente
-                </button>
-                <button
-                  onClick={() => setStatusFiltro('em_producao')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    statusFiltro === 'em_producao'
-                      ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  Em Produção
-                </button>
-              </div>
+        <div className="p-4 max-w-2xl mx-auto">
+          {/* Ações Rápidas */}
+          <div className="mb-8">
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Ações Rápidas</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Link href="/producao" className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <Clock size={24} className="mb-2" />
+                <p className="font-medium text-sm">Ordens Pendentes</p>
+              </Link>
+              <Link href="/producao/ordem-interna" className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <Plus size={24} className="mb-2" />
+                <p className="font-medium text-sm">Ordem Interna</p>
+              </Link>
+              <Link href="/expedicao" className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <Truck size={24} className="mb-2" />
+                <p className="font-medium text-sm">Expedição</p>
+              </Link>
+              <Link href="/tarefas" className="bg-gradient-to-br from-amber-500 to-amber-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <CheckCircle2 size={24} className="mb-2" />
+                <p className="font-medium text-sm">Tarefas</p>
+              </Link>
+              <Link href="/estoque" className="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <Package size={24} className="mb-2" />
+                <p className="font-medium text-sm">Criar Envio</p>
+              </Link>
+              <Link href="/producao/reimprimir" className="bg-gradient-to-br from-red-500 to-red-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <AlertCircle size={24} className="mb-2" />
+                <p className="font-medium text-sm">Reimprimir</p>
+              </Link>
             </div>
           </div>
-        </div>
 
-        {/* Timeline */}
-        <div className="max-w-6xl mx-auto px-4 pb-6">
-          {/* Atrasadas */}
-          {ordensAgrupadas.atrasadas.length > 0 && (
-            <div className="mb-8">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-2 h-8 bg-red-500 rounded-full"></div>
-                <h2 className="text-lg font-bold text-gray-800">🔴 Atrasadas ({ordensAgrupadas.atrasadas.length})</h2>
-              </div>
-              <div className="space-y-2">
-                {ordensAgrupadas.atrasadas.map((ordem) => (
-                  <div key={ordem.id} className="bg-white border-l-4 border-red-500 rounded-lg p-4 hover:shadow-sm transition-shadow">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="font-semibold text-gray-800">{ordem.produto?.nome}</p>
-                        <p className="text-sm text-gray-600 mt-1">
-                          <strong>{ordem.quantidade}</strong> un • {LOCAL_LABEL[ordem.loja_destino] || ordem.loja_destino}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Entrega: {new Date(ordem.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
-                        </p>
-                      </div>
-                      <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor(ordem.status)}`}>
-                        {statusLabel(ordem.status)}
-                      </span>
+          {/* Indicadores Críticos (Atrasados) */}
+          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0) && (
+            <div className="mb-8 space-y-3">
+              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Atenção Necessária</h2>
+
+              {ordensAtrasadas.length > 0 && (
+                <Link href="/producao" className="bg-red-50 border border-red-200 rounded-lg p-4 hover:bg-red-100 transition-all block">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-red-700 flex items-center gap-2">
+                        <AlertCircle size={18} /> Ordens Atrasadas
+                      </p>
+                      <p className="text-sm text-red-600 mt-1">Ordens com entrega vencida</p>
                     </div>
+                    <span className="bg-red-200 text-red-700 px-3 py-1 rounded-full text-sm font-bold">{ordensAtrasadas.length}</span>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                </Link>
+              )}
 
-          {/* Hoje */}
-          {ordensAgrupadas.hoje.length > 0 && (
-            <div className="mb-8">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-2 h-8 bg-amber-500 rounded-full"></div>
-                <h2 className="text-lg font-bold text-gray-800">🟡 Hoje ({ordensAgrupadas.hoje.length})</h2>
-              </div>
-              <div className="space-y-2">
-                {ordensAgrupadas.hoje.map((ordem) => (
-                  <div key={ordem.id} className="bg-white border-l-4 border-amber-500 rounded-lg p-4 hover:shadow-sm transition-shadow">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="font-semibold text-gray-800">{ordem.produto?.nome}</p>
-                        <p className="text-sm text-gray-600 mt-1">
-                          <strong>{ordem.quantidade}</strong> un • {LOCAL_LABEL[ordem.loja_destino] || ordem.loja_destino}
-                        </p>
-                      </div>
-                      <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor(ordem.status)}`}>
-                        {statusLabel(ordem.status)}
-                      </span>
+              {tarefasAtrasadas.length > 0 && (
+                <Link href="/tarefas" className="bg-orange-50 border border-orange-200 rounded-lg p-4 hover:bg-orange-100 transition-all block">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-orange-700 flex items-center gap-2">
+                        <AlertTriangle size={18} /> Tarefas Atrasadas
+                      </p>
+                      <p className="text-sm text-orange-600 mt-1">Tarefas vencidas</p>
                     </div>
+                    <span className="bg-orange-200 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">{tarefasAtrasadas.length}</span>
                   </div>
-                ))}
-              </div>
+                </Link>
+              )}
             </div>
           )}
 
-          {/* Amanhã */}
-          {ordensAgrupadas.amanha.length > 0 && (
-            <div className="mb-8">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-2 h-8 bg-green-500 rounded-full"></div>
-                <h2 className="text-lg font-bold text-gray-800">🟢 Amanhã ({ordensAgrupadas.amanha.length})</h2>
-              </div>
-              <div className="space-y-2">
-                {ordensAgrupadas.amanha.map((ordem) => (
-                  <div key={ordem.id} className="bg-white border-l-4 border-green-500 rounded-lg p-4 hover:shadow-sm transition-shadow">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="font-semibold text-gray-800">{ordem.produto?.nome}</p>
-                        <p className="text-sm text-gray-600 mt-1">
-                          <strong>{ordem.quantidade}</strong> un • {LOCAL_LABEL[ordem.loja_destino] || ordem.loja_destino}
-                        </p>
-                      </div>
-                      <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor(ordem.status)}`}>
-                        {statusLabel(ordem.status)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Indicadores Gerais */}
+          <div className="mb-8">
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Situação Atual</h2>
 
-          {/* Próximos */}
-          {ordensAgrupadas.proximos.length > 0 && (
-            <div className="mb-8">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-2 h-8 bg-blue-500 rounded-full"></div>
-                <h2 className="text-lg font-bold text-gray-800">🔵 Próximos dias ({ordensAgrupadas.proximos.length})</h2>
-              </div>
-              <div className="space-y-2">
-                {ordensAgrupadas.proximos.map((ordem) => (
-                  <div key={ordem.id} className="bg-white border-l-4 border-blue-500 rounded-lg p-4 hover:shadow-sm transition-shadow">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="font-semibold text-gray-800">{ordem.produto?.nome}</p>
-                        <p className="text-sm text-gray-600 mt-1">
-                          <strong>{ordem.quantidade}</strong> un • {LOCAL_LABEL[ordem.loja_destino] || ordem.loja_destino}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Entrega: {new Date(ordem.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
-                        </p>
-                      </div>
-                      <span className={`text-xs font-medium px-2 py-1 rounded ${statusColor(ordem.status)}`}>
-                        {statusLabel(ordem.status)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              {/* Ordens em Produção */}
+              <Link href="/producao" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <Truck size={20} className="text-blue-600" />
+                  <span className="text-xs text-gray-500">Produzindo</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{ordensEmProducao.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Ordem(ns) em produção</p>
+              </Link>
 
-          {ordens.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-gray-400">Nenhuma ordem encontrada</p>
+              {/* Ordens Aguardando */}
+              <Link href="/producao" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <Clock size={20} className="text-amber-600" />
+                  <span className="text-xs text-gray-500">Fila</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{ordensAguardando.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Ordem(ns) aguardando</p>
+              </Link>
+
+              {/* Ordens para Hoje */}
+              <Link href="/producao" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <Package size={20} className="text-green-600" />
+                  <span className="text-xs text-gray-500">Hoje</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{ordensHoje.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Entrega(s) hoje</p>
+              </Link>
+
+              {/* Tarefas do Dia */}
+              <Link href="/tarefas" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <CheckCircle2 size={20} className="text-orange-600" />
+                  <span className="text-xs text-gray-500">Hoje</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{tarefasHoje.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Tarefa(s) do dia</p>
+              </Link>
             </div>
-          )}
+
+            {/* Total de Ordens */}
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <TrendingUp size={20} className="text-purple-600" />
+                <span className="text-xs text-gray-500">Total</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-800">{ordens.length}</p>
+              <p className="text-xs text-gray-600 mt-1">Ordem(ns) no sistema</p>
+            </div>
+          </div>
+
+          {/* Rodapé com Auditoria */}
+          <div className="text-xs text-gray-500 text-center py-4 border-t border-gray-200">
+            <p>✓ Dados em tempo real • Ordens globais • Atualizado automaticamente</p>
+          </div>
         </div>
       </div>
     )
   }
 
   // RENDER PARA LOJA
+  const hoje = new Date().toISOString().split('T')[0]
+
+  // Calcular tarefas do dia
+  const tarefasHoje = tarefas.filter(t => t.data_vencimento === hoje)
+  const tarefasAtrasadas = tarefas.filter(t => t.data_vencimento < hoje && t.status !== 'concluida')
+
+  // Calcular ordens
+  const ordensHoje = ordens.filter(o => o.data_entrega === hoje && o.loja_destino === usuario?.loja_id)
+  const ordensEmAberto = ordens.filter(o => (o.status === 'pendente' || o.status === 'em_producao') && o.loja_destino === usuario?.loja_id)
+
   return (
-    <div className="p-4">
-      <div className="flex items-center justify-between pt-4 mb-6">
-        <h1 className="text-xl font-bold text-gray-800">{LOCAL_LABEL[usuario?.loja_id || 'cozinha']}</h1>
+    <div className="min-h-screen bg-gray-50 pb-20">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 p-4 sticky top-0 z-40">
+        <h1 className="text-2xl font-bold text-gray-800">{LOCAL_LABEL[usuario?.loja_id || 'cozinha']}</h1>
+        <p className="text-sm text-gray-600 mt-1">Painel de gestão da unidade</p>
       </div>
 
-      {/* Atalhos */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        <Link href="/ordens/nova" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
-          <p className="text-2xl mb-2">➕</p>
-          <p className="font-medium text-sm">Criar Ordem</p>
-        </Link>
-        <Link href="/estoque" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
-          <p className="text-2xl mb-2">📥</p>
-          <p className="font-medium text-sm">Receber Estoque</p>
-        </Link>
-        <Link href="/scanner" className="bg-white border border-gray-200 text-gray-800 rounded-lg p-4 hover:border-gray-300 hover:shadow-sm transition-all">
-          <p className="text-2xl mb-2">📱</p>
-          <p className="font-medium text-sm">Scanner</p>
-        </Link>
-      </div>
+      <div className="p-4 max-w-2xl mx-auto">
+        {/* Atalhos de Ação Rápida */}
+        <div className="mb-8">
+          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Ações Rápidas</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <Link href="/ordens/nova" className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+              <Plus size={24} className="mb-2" />
+              <p className="font-medium text-sm">Criar Ordem</p>
+            </Link>
+            <Link href="/estoque" className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+              <Package size={24} className="mb-2" />
+              <p className="font-medium text-sm">Estoque</p>
+            </Link>
+            <Link href="/expedicao" className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+              <Truck size={24} className="mb-2" />
+              <p className="font-medium text-sm">Expedição</p>
+            </Link>
+            <Link href="/tarefas" className="bg-gradient-to-br from-amber-500 to-amber-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+              <CheckCircle2 size={24} className="mb-2" />
+              <p className="font-medium text-sm">Tarefas</p>
+            </Link>
+            <Link href="/ordens" className="bg-gradient-to-br from-cyan-500 to-cyan-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+              <TrendingUp size={24} className="mb-2" />
+              <p className="font-medium text-sm">Ordens</p>
+            </Link>
+            <Link href="/scanner" className="bg-gradient-to-br from-pink-500 to-pink-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+              <AlertCircle size={24} className="mb-2" />
+              <p className="font-medium text-sm">Scanner</p>
+            </Link>
+          </div>
+        </div>
 
-      {/* Stats Cards - Estoque e Vencimento */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <div className="bg-white rounded-lg p-4 border border-gray-100">
-          <p className="text-xs text-gray-600 font-semibold">Estoque</p>
-          <p className="text-2xl font-bold text-gray-800 mt-2">{stats.totalEstoque || 0}</p>
+        {/* Indicadores Críticos (Atrasados/Vencendo) */}
+        {(tarefasAtrasadas.length > 0 || stats.vencendo > 0 || recebimentos.length > 0) && (
+          <div className="mb-8 space-y-3">
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Atenção Necessária</h2>
+
+            {tarefasAtrasadas.length > 0 && (
+              <Link href="/tarefas" className="bg-red-50 border border-red-200 rounded-lg p-4 hover:bg-red-100 transition-all block">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="font-semibold text-red-700 flex items-center gap-2">
+                      <AlertCircle size={18} /> Tarefas Atrasadas
+                    </p>
+                    <p className="text-sm text-red-600 mt-1">{tarefasAtrasadas.length} tarefa(s) vencida(s)</p>
+                  </div>
+                  <span className="bg-red-200 text-red-700 px-3 py-1 rounded-full text-sm font-bold">{tarefasAtrasadas.length}</span>
+                </div>
+              </Link>
+            )}
+
+            {stats.vencendo > 0 && (
+              <Link href="/estoque" className="bg-orange-50 border border-orange-200 rounded-lg p-4 hover:bg-orange-100 transition-all block">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="font-semibold text-orange-700 flex items-center gap-2">
+                      <AlertTriangle size={18} /> Vencimento Próximo
+                    </p>
+                    <p className="text-sm text-orange-600 mt-1">Itens com validade em 7 dias</p>
+                  </div>
+                  <span className="bg-orange-200 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">{stats.vencendo}</span>
+                </div>
+              </Link>
+            )}
+
+            {recebimentos.length > 0 && (
+              <Link href="/expedicao" className="bg-blue-50 border border-blue-200 rounded-lg p-4 hover:bg-blue-100 transition-all block">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="font-semibold text-blue-700 flex items-center gap-2">
+                      <Truck size={18} /> Pendente de Recebimento
+                    </p>
+                    <p className="text-sm text-blue-600 mt-1">Envios aguardando conferência</p>
+                  </div>
+                  <span className="bg-blue-200 text-blue-700 px-3 py-1 rounded-full text-sm font-bold">{recebimentos.length}</span>
+                </div>
+              </Link>
+            )}
+          </div>
+        )}
+
+        {/* Indicadores Gerais */}
+        <div className="mb-8">
+          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Situação Atual</h2>
+
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            {/* Tarefas do Dia */}
+            <Link href="/tarefas" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+              <div className="flex items-center justify-between mb-2">
+                <Clock size={20} className="text-amber-600" />
+                <span className="text-xs text-gray-500">Hoje</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-800">{tarefasHoje.length}</p>
+              <p className="text-xs text-gray-600 mt-1">Tarefa(s) do dia</p>
+            </Link>
+
+            {/* Ordens para Hoje */}
+            <Link href="/ordens" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+              <div className="flex items-center justify-between mb-2">
+                <Package size={20} className="text-cyan-600" />
+                <span className="text-xs text-gray-500">Hoje</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-800">{ordensHoje.length}</p>
+              <p className="text-xs text-gray-600 mt-1">Entrega(s) hoje</p>
+            </Link>
+
+            {/* Estoque Total */}
+            <Link href="/estoque" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+              <div className="flex items-center justify-between mb-2">
+                <Package size={20} className="text-green-600" />
+                <span className="text-xs text-gray-500">Total</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-800">{stats.totalEstoque || 0}</p>
+              <p className="text-xs text-gray-600 mt-1">Itens em estoque</p>
+            </Link>
+
+            {/* Ordens em Aberto */}
+            <Link href="/ordens" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+              <div className="flex items-center justify-between mb-2">
+                <AlertCircle size={20} className="text-blue-600" />
+                <span className="text-xs text-gray-500">Aberto</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-800">{ordensEmAberto.length}</p>
+              <p className="text-xs text-gray-600 mt-1">Ordem(ns) em andamento</p>
+            </Link>
+          </div>
         </div>
-        <div className="bg-white rounded-lg p-4 border border-gray-100">
-          <p className="text-xs text-gray-600 font-semibold">Vencendo em 7 dias</p>
-          <p className="text-2xl font-bold text-orange-600 mt-2">{stats.vencendo || 0}</p>
+
+        {/* Rodapé com Auditoria */}
+        <div className="text-xs text-gray-500 text-center py-4 border-t border-gray-200">
+          <p>✓ Dados em tempo real • Isolado por unidade • Atualizado automaticamente</p>
         </div>
       </div>
-
-      {/* Seção de Estoque Pendente */}
-      {stats.lotesPendentes > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm font-semibold text-blue-900">📥 {stats.lotesPendentes} item(ns) pendente(s) de recebimento</p>
-          <Link href="/estoque" className="text-blue-700 text-sm font-medium hover:underline mt-2 inline-block">
-            Ver detalhes →
-          </Link>
-        </div>
-      )}
     </div>
   )
 }
