@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import Link from 'next/link'
 import { Plus, Play, Filter, ChevronRight, AlertCircle } from 'lucide-react'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 const STATUS_INFO = {
   pendente: { label: 'Pendente', color: 'bg-amber-100 text-amber-700 border-amber-300', bgContent: 'bg-amber-50' },
@@ -145,18 +146,16 @@ function ProducaoContent() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       {/* Header */}
-      <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-4 sticky top-0 z-40 shadow-md">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">🍳 Produção</h1>
-            <p className="text-sm text-orange-100 mt-1">Gerencie o cronograma de ordens</p>
-          </div>
-          {!isAdmin && (
-            <Link href="/producao/ordem-interna" className="bg-white text-orange-600 rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-orange-50 shadow-md">
-              <Plus size={18} /> Ordem Interna
-            </Link>
-          )}
+      <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between h-20">
+        <div className="flex items-center justify-center flex-1 gap-4">
+          <OluquinhasLogo size="md" variant="oluquinhas" color="branco" />
+          <OluquinhasLogo size="xs" variant="rosto" color="branco" />
         </div>
+        {!isAdmin && (
+          <Link href="/producao/ordem-interna" className="bg-white text-orange-600 rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-orange-50 shadow-md ml-4">
+            <Plus size={18} /> Ordem Interna
+          </Link>
+        )}
       </div>
 
       <div className="p-4 max-w-7xl mx-auto">
