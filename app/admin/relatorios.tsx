@@ -11,8 +11,8 @@ export default function RelatoriosTab() {
 
   // ===== RELATÓRIO 1: ESTOQUE POR UNIDADE =====
   const [estoqueData, setEstoqueData] = useState<any[]>([])
+  const [dataConsultaEstoque, setDataConsultaEstoque] = useState<string>('')
   const [filtrosEstoque, setFiltrosEstoque] = useState({
-    data: new Date().toISOString().split('T')[0],
     unidade: 'cozinha',
   })
 
@@ -36,33 +36,42 @@ export default function RelatoriosTab() {
   const [filtrosProducao, setFiltrosProducao] = useState({
     dataInicio: '',
     dataFim: '',
-    agruparPor: 'dia',
   })
 
   const [produtos, setProdutos] = useState<any[]>([])
   const [categorias, setCategorias] = useState<any[]>([])
   const [setores, setSetores] = useState<any[]>([])
+  const [setoresMap, setSetoresMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
     carregarDadosBasicos()
   }, [])
 
   async function carregarDadosBasicos() {
-    const [{ data: prods }, { data: cats }, { data: sets }] = await Promise.all([
+    const [{ data: prods }, { data: cats }, { data: setoresData }] = await Promise.all([
       supabase.from('produtos').select('id, nome').order('nome'),
       supabase.from('categorias').select('id, nome').order('nome'),
-      supabase.from('usuarios').select('setor_id'),
+      supabase.from('setores').select('id, nome'),
     ])
     setProdutos(prods || [])
     setCategorias(cats || [])
-    const setoresUnicos = [...new Set((sets || []).map(s => s.setor_id))].filter(Boolean)
-    setSetores(setoresUnicos as any[])
+    setSetores(setoresData || [])
+
+    // Criar mapa de setor_id -> nome
+    const mapa: Record<string, string> = {}
+    setoresData?.forEach(s => {
+      mapa[s.id] = s.nome
+    })
+    setSetoresMap(mapa)
   }
 
-  // ===== RELATÓRIO 1: ESTOQUE POR UNIDADE =====
+  // ===== RELATÓRIO 1: ESTOQUE POR UNIDADE (VISÃO ATUAL) =====
   async function carregarEstoque() {
     setLoading(true)
     try {
+      const agora = new Date()
+      setDataConsultaEstoque(agora.toLocaleString('pt-BR'))
+
       const { data: lotes } = await supabase
         .from('lotes_producao')
         .select('*, produto:produtos(nome, categoria_id, unidade_medida, categoria:categorias(nome))')
@@ -184,7 +193,7 @@ export default function RelatoriosTab() {
     setLoading(false)
   }
 
-  // ===== RELATÓRIO 5: PRODUÇÃO =====
+  // ===== RELATÓRIO 5: PRODUÇÃO (AGRUPADO POR PRODUTO) =====
   async function carregarProducao() {
     setLoading(true)
     try {
@@ -202,58 +211,32 @@ export default function RelatoriosTab() {
         resultado = resultado.filter(l => l.created_at <= filtrosProducao.dataFim)
       }
 
-      if (filtrosProducao.agruparPor === 'dia') {
-        const agrupado: Record<string, any> = {}
-        resultado.forEach(lote => {
-          const data = lote.created_at.split('T')[0]
-          if (!agrupado[data]) {
-            agrupado[data] = {
-              data,
-              total_lotes: 0,
-              total_unidades: 0,
-              produtos: new Set(),
-            }
+      // Sempre agrupar por produto
+      const agrupado: Record<string, any> = {}
+      resultado.forEach(lote => {
+        const produto = lote.produto?.nome || 'Desconhecido'
+        if (!agrupado[produto]) {
+          agrupado[produto] = {
+            produto,
+            total_lotes: 0,
+            total_unidades: 0,
+            datas: new Set(),
+            produtores: new Set(),
           }
-          agrupado[data].total_lotes += 1
-          agrupado[data].total_unidades += lote.quantidade || lote.peso_gramas || 1
-          agrupado[data].produtos.add(lote.produto?.nome)
-        })
+        }
+        agrupado[produto].total_lotes += 1
+        agrupado[produto].total_unidades += lote.quantidade || lote.peso_gramas || 1
+        agrupado[produto].datas.add(lote.created_at.split('T')[0])
+        if (lote.produzido_por) agrupado[produto].produtores.add(lote.produzido_por)
+      })
 
-        setProducaoData(
-          Object.values(agrupado)
-            .map((item: any) => ({
-              ...item,
-              produtos: Array.from(item.produtos).join(', '),
-            }))
-            .reverse()
-        )
-      } else {
-        const agrupado: Record<string, any> = {}
-        resultado.forEach(lote => {
-          const produto = lote.produto?.nome || 'Desconhecido'
-          if (!agrupado[produto]) {
-            agrupado[produto] = {
-              produto,
-              total_lotes: 0,
-              total_unidades: 0,
-              datas: new Set(),
-              produtores: new Set(),
-            }
-          }
-          agrupado[produto].total_lotes += 1
-          agrupado[produto].total_unidades += lote.quantidade || lote.peso_gramas || 1
-          agrupado[produto].datas.add(lote.created_at.split('T')[0])
-          if (lote.produzido_por) agrupado[produto].produtores.add(lote.produzido_por)
-        })
-
-        setProducaoData(
-          Object.values(agrupado).map((item: any) => ({
-            ...item,
-            datas: Array.from(item.datas).join(', '),
-            produtores: Array.from(item.produtores).join(', '),
-          }))
-        )
-      }
+      setProducaoData(
+        Object.values(agrupado).map((item: any) => ({
+          ...item,
+          datas: Array.from(item.datas).join(', '),
+          produtores: Array.from(item.produtores).join(', '),
+        }))
+      )
     } catch (error) {
       console.error('Erro ao carregar produção:', error)
     }
@@ -326,15 +309,6 @@ export default function RelatoriosTab() {
           {/* ESTOQUE */}
           {abaRelatorio === 'estoque' && (
             <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
-                <input
-                  type="date"
-                  value={filtrosEstoque.data}
-                  onChange={e => setFiltrosEstoque({ ...filtrosEstoque, data: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Unidade</label>
                 <select
@@ -446,17 +420,6 @@ export default function RelatoriosTab() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Agrupar por</label>
-                <select
-                  value={filtrosProducao.agruparPor}
-                  onChange={e => setFiltrosProducao({ ...filtrosProducao, agruparPor: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-                >
-                  <option value="dia">Dia</option>
-                  <option value="produto">Produto</option>
-                </select>
-              </div>
             </>
           )}
         </div>
@@ -476,9 +439,14 @@ export default function RelatoriosTab() {
       {abaRelatorio === 'estoque' && (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-800">
-              Posição de Estoque ({estoqueData.length})
-            </h3>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800">
+                Posição de Estoque ({estoqueData.length})
+              </h3>
+              {dataConsultaEstoque && (
+                <p className="text-xs text-gray-500 mt-1">Consultado em: {dataConsultaEstoque}</p>
+              )}
+            </div>
             <button
               onClick={() => {
                 const headers = ['produto', 'categoria', 'unidade_medida', 'quantidade_total', 'lotes']
@@ -716,7 +684,7 @@ export default function RelatoriosTab() {
                         {u.role}
                       </span>
                     </td>
-                    <td className="px-4 py-2">{u.setor_id || '-'}</td>
+                    <td className="px-4 py-2">{u.setor_id ? setoresMap[u.setor_id] || u.setor_id : '-'}</td>
                     <td className="px-4 py-2 text-center">
                       <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
                         u.ativo ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
@@ -736,18 +704,16 @@ export default function RelatoriosTab() {
         </div>
       )}
 
-      {/* ===== RELATÓRIO 5: PRODUÇÃO ===== */}
+      {/* ===== RELATÓRIO 5: PRODUÇÃO (AGRUPADO POR PRODUTO) ===== */}
       {abaRelatorio === 'producao' && (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-800">
-              Produção da Cozinha ({producaoData.length}) - Agrupado por {filtrosProducao.agruparPor === 'dia' ? 'Dia' : 'Produto'}
+              Produção da Cozinha ({producaoData.length}) - Por Produto
             </h3>
             <button
               onClick={() => {
-                const headers = filtrosProducao.agruparPor === 'dia'
-                  ? ['data', 'total_lotes', 'total_unidades', 'produtos']
-                  : ['produto', 'total_lotes', 'total_unidades', 'datas', 'produtores']
+                const headers = ['produto', 'total_lotes', 'total_unidades', 'datas', 'produtores']
                 exportarCSV(producaoData, headers, 'relatorio-producao')
               }}
               className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700"
@@ -760,43 +726,21 @@ export default function RelatoriosTab() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  {filtrosProducao.agruparPor === 'dia' ? (
-                    <>
-                      <th className="px-4 py-2 text-left">Data</th>
-                      <th className="px-4 py-2 text-center">Total de Lotes</th>
-                      <th className="px-4 py-2 text-center">Total de Unidades</th>
-                      <th className="px-4 py-2 text-left">Produtos Produzidos</th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="px-4 py-2 text-left">Produto</th>
-                      <th className="px-4 py-2 text-center">Qtd Lotes</th>
-                      <th className="px-4 py-2 text-center">Total Unidades</th>
-                      <th className="px-4 py-2 text-left">Período</th>
-                      <th className="px-4 py-2 text-left">Produtores</th>
-                    </>
-                  )}
+                  <th className="px-4 py-2 text-left">Produto</th>
+                  <th className="px-4 py-2 text-center">Qtd Lotes</th>
+                  <th className="px-4 py-2 text-center">Total Unidades</th>
+                  <th className="px-4 py-2 text-left">Período</th>
+                  <th className="px-4 py-2 text-left">Produtores</th>
                 </tr>
               </thead>
               <tbody>
                 {producaoData.map((p, idx) => (
                   <tr key={idx} className="border-b hover:bg-gray-50">
-                    {filtrosProducao.agruparPor === 'dia' ? (
-                      <>
-                        <td className="px-4 py-2 font-medium">{new Date(p.data).toLocaleDateString('pt-BR')}</td>
-                        <td className="px-4 py-2 text-center font-semibold text-blue-600">{p.total_lotes}</td>
-                        <td className="px-4 py-2 text-center font-semibold text-green-600">{p.total_unidades}</td>
-                        <td className="px-4 py-2 text-xs">{p.produtos}</td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="px-4 py-2 font-medium">{p.produto}</td>
-                        <td className="px-4 py-2 text-center font-semibold text-blue-600">{p.total_lotes}</td>
-                        <td className="px-4 py-2 text-center font-semibold text-green-600">{p.total_unidades}</td>
-                        <td className="px-4 py-2 text-xs">{p.datas}</td>
-                        <td className="px-4 py-2 text-xs">{p.produtores || '-'}</td>
-                      </>
-                    )}
+                    <td className="px-4 py-2 font-medium">{p.produto}</td>
+                    <td className="px-4 py-2 text-center font-semibold text-blue-600">{p.total_lotes}</td>
+                    <td className="px-4 py-2 text-center font-semibold text-green-600">{p.total_unidades}</td>
+                    <td className="px-4 py-2 text-xs">{p.datas}</td>
+                    <td className="px-4 py-2 text-xs">{p.produtores || '-'}</td>
                   </tr>
                 ))}
               </tbody>
