@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
+import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 function DashboardContent() {
   const router = useRouter()
@@ -230,9 +231,12 @@ function DashboardContent() {
     return (
       <div className="min-h-screen bg-gray-50 pb-20">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4 sticky top-0 z-40 shadow-md">
-          <h1 className="text-2xl font-bold text-white">👨‍💼 Gestão AlgoDoce</h1>
-          <p className="text-sm text-blue-100 mt-1">Painel administrativo</p>
+        <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4 sticky top-0 z-40 shadow-md flex items-center gap-3">
+          <OluquinhasLogo size="sm" variant="rosto" color="branco" />
+          <div>
+            <h1 className="text-2xl font-bold text-white">Gestão AlgoDoce</h1>
+            <p className="text-sm text-blue-100 mt-1">Painel administrativo</p>
+          </div>
         </div>
 
         <div className="p-4 max-w-2xl mx-auto">
@@ -385,9 +389,12 @@ function DashboardContent() {
     return (
       <div className="min-h-screen bg-gray-50 pb-20">
         {/* Header */}
-        <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-4 sticky top-0 z-40 shadow-md">
-          <h1 className="text-2xl font-bold text-white">🍳 Produção</h1>
-          <p className="text-sm text-orange-100 mt-1">Painel da Cozinha</p>
+        <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-4 sticky top-0 z-40 shadow-md flex items-center gap-3">
+          <OluquinhasLogo size="sm" variant="rosto" color="branco" />
+          <div>
+            <h1 className="text-2xl font-bold text-white">Produção</h1>
+            <p className="text-sm text-orange-100 mt-1">Painel da Cozinha</p>
+          </div>
         </div>
 
         <div className="p-4 max-w-2xl mx-auto">
@@ -537,9 +544,12 @@ function DashboardContent() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-4 sticky top-0 z-40">
-        <h1 className="text-2xl font-bold text-gray-800">{LOCAL_LABEL[usuario?.loja_id || 'cozinha']}</h1>
-        <p className="text-sm text-gray-600 mt-1">Painel de gestão da unidade</p>
+      <div className="bg-white border-b border-gray-200 p-4 sticky top-0 z-40 flex items-center gap-3">
+        <OluquinhasLogo size="sm" variant="rosto" color="branco" />
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800">{LOCAL_LABEL[usuario?.loja_id || 'cozinha']}</h1>
+          <p className="text-sm text-gray-600 mt-1">Painel de gestão da unidade</p>
+        </div>
       </div>
 
       <div className="p-4 max-w-2xl mx-auto">
