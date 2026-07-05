@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, ChevronRight, Package, CheckCircle, AlertCircle, ArrowRightLeft } from 'lucide-react'
+import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 export default function ExpedicaoPage() {
   const { usuario } = useAuth()
@@ -77,17 +78,19 @@ export default function ExpedicaoPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <Package size={28} />
-            Expedição
-          </h1>
+      <div className="bg-amber-300 border-b border-amber-400 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center h-20">
+        <div className="flex items-center gap-4">
+          <OluquinhasLogo size="md" variant="oluquinhas" color="marrom" />
+          <OluquinhasLogo size="xs" variant="rosto" color="marrom" />
+          <div>
+            <h1 className="text-xl font-bold text-amber-900">Expedição</h1>
+            <p className="text-xs text-amber-800">Gestão de Remessas</p>
+          </div>
         </div>
       </div>
 
       {/* Abas - diferentes por role */}
-      <div className="bg-white border-b border-gray-200 sticky top-[73px] z-30">
+      <div className="bg-white border-b border-gray-200 sticky top-20 z-30">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex gap-4">
             {usuario?.role === 'cozinha' || usuario?.role === 'admin' ? (
