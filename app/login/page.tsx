@@ -75,8 +75,17 @@ export default function LoginPage() {
             <Image src="/logo.png" alt="AlgoDoce" width={80} height={80} className="object-contain" />
           </div>
 
-          <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">AlgoDoce</h1>
-          <p className="text-center text-gray-500 text-sm mb-8">Gestão de Produção</p>
+          <h1 className="text-2xl font-bold text-center text-gray-800 mb-1">AlgoDoce</h1>
+          <p className="text-center text-gray-500 text-sm mb-6">Gestão de Produção</p>
+
+          <div className="bg-gradient-to-r from-pink-50 to-orange-50 border border-pink-200 rounded-lg p-4 mb-8">
+            <p className="text-center text-sm font-semibold text-gray-700">
+              Bem-Vindo ao <span className="text-pink-700">oluquinhas</span>
+            </p>
+            <p className="text-center text-xs text-gray-600 mt-1">
+              Sistema Interno de Gestão
+            </p>
+          </div>
 
           {erro && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
