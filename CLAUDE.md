@@ -217,3 +217,61 @@ role = 'admin' → setor_id = NULL (admin sem setor)
 - DELETE está bloqueado?
 - Foto comprimida no client?
 - Funcionalidades existentes (ordens, estoque) seguem intactas?
+
+---
+
+## Relatórios Administrativos (Implementados)
+
+### Cinco Novos Relatórios — Painel `/admin?tab=relatórios`
+
+Localização: `app/admin/relatorios.tsx` — completamente reescrito com 5 relatórios analíticos.
+
+#### 1. **Posição de Estoque por Unidade por Dia**
+- **Filtros**: Data (padrão: hoje) | Unidade (Cozinha, Paraisópolis, Itajubá)
+- **Dados**: Lotes com status `na_loja`, `na_cozinha`, `em_estoque`
+- **Colunas**: Produto | Categoria | Unidade de Medida | Quantidade Disponível | Data Validade (Próxima)
+- **Agregação**: Agrupado por produto, somando quantidades
+- **CSV**: `relatorio-estoque-YYYY-MM-DD.csv`
+
+#### 2. **Movimentações da Etiqueta (Rastreabilidade)**
+- **Filtros**: Intervalo de datas (De / Até) | QR Code | Produto | Destino
+- **Dados**: Histórico completo de cada etiqueta (lote), com referência a movimentações
+- **Colunas**: QR Code | Produto | Status Atual | Destino | Data Criação | Expansível com Movimentações
+- **Funcionalidade**: Clique em dropdown (⌄) para expandir e ver histórico de movimento
+- **CSV**: `relatorio-rastreabilidade-YYYY-MM-DD.csv`
+
+#### 3. **Tabela de Produtos Cadastrados**
+- **Sem filtros** — exibe todos os produtos
+- **Dados**: Tabela `produtos`
+- **Colunas**: Nome | Categoria | Tipo (Produzido/Insumo) | Unidade de Medida | Validade (dias) | Congelado (❄️) | Status (Ativo/Inativo)
+- **CSV**: `relatorio-produtos-YYYY-MM-DD.csv`
+
+#### 4. **Usuários Cadastrados**
+- **Filtros**: Setor (opcional) | Status (Ativo/Inativo)
+- **Dados**: Tabela `usuarios`
+- **Colunas**: Nome | E-mail | Role (admin/cozinha/loja) | Setor | Status | Data de Cadastro
+- **CSV**: `relatorio-usuarios-YYYY-MM-DD.csv`
+
+#### 5. **Produção da Cozinha por Período**
+- **Filtros**: Intervalo de datas (De / Até) | Agrupar por: Dia | Produto
+- **Dados**: Lotes criados (ato de produção) em `lotes_producao`
+- **Se Agrupar por Dia**: Data | Total de Lotes | Total de Unidades | Produtos Produzidos (lista)
+- **Se Agrupar por Produto**: Produto | Quantidade de Lotes | Total de Unidades | Período (data_início - data_fim) | Produtor(es)
+- **CSV**: `relatorio-producao-YYYY-MM-DD.csv`
+
+### Padrões Aplicados
+
+- **Layout**: Tabelas responsivas, mobile-friendly, com overflow horizontal
+- **Exportação**: Botão "Exportar CSV" em cada relatório, nome descritivo com data
+- **Filtros**: Painel fixo no topo, aplicáveis a cada aba
+- **Abas**: 5 botões no topo (navegação entre relatórios)
+- **Estilo**: Tailwind, cores do projeto (pink-700 para CTA, verde para export)
+- **Acesso**: Admin only, integrado a `/admin` (aba "Relatórios")
+
+### Fontes de Dados
+
+- `lotes_producao` — estoque, movimentações (via referência), produção
+- `movimentacoes_estoque` — rastreabilidade de etiquetas
+- `produtos` — catálogo
+- `usuarios` — gestão de pessoal
+- Sem DELETE; todas as queries são READ-only (SELECT)
