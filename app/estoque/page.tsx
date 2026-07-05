@@ -5,6 +5,7 @@ import { LOCAL_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { ShoppingCart, Trash2, Send } from 'lucide-react'
+import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 export default function EstoquePage() {
   const { usuario } = useAuth()
@@ -317,7 +318,18 @@ export default function EstoquePage() {
   }
 
   return (
-    <div className="p-4">
+    <div className="min-h-screen bg-gray-50 pb-20">
+      <div className="bg-white border-b border-gray-200 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center h-20">
+        <div className="flex items-center gap-4">
+          <OluquinhasLogo size="md" variant="oluquinhas" color="marrom" />
+          <OluquinhasLogo size="xs" variant="rosto" color="marrom" />
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">Estoque</h1>
+            <p className="text-xs text-gray-600">Gestão de Inventário</p>
+          </div>
+        </div>
+      </div>
+      <div className="p-4">
       <div className="pt-4 mb-4">
         <h1 className="text-xl font-bold text-gray-800 mb-3">Estoque</h1>
         <div className="flex gap-2 overflow-x-auto pb-1">
@@ -760,6 +772,7 @@ export default function EstoquePage() {
           })()}
         </>
       )}
+    </div>
     </div>
   )
 }
