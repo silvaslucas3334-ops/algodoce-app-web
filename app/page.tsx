@@ -231,7 +231,7 @@ function DashboardContent() {
     return (
       <div className="min-h-screen bg-gray-50 pb-20">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between gap-3 h-[185px]">
+        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between gap-3 h-20">
           <div className="flex items-center gap-2">
             <OluquinhasLogo size="xs" variant="rosto" color="branco" />
             <div>
