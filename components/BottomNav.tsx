@@ -24,7 +24,7 @@ export default function BottomNav() {
       <div className="max-w-lg mx-auto flex justify-around items-center">
         {/* Logo Oluquinhas - Left Side */}
         <div className="flex-shrink-0 p-2">
-          <OluquinhasLogo size="xs" />
+          <OluquinhasLogo size="xs" variant="rosto" color="marrom" />
         </div>
 
         {/* Links */}
