@@ -100,18 +100,8 @@ export default function PerfilPage() {
               {usuario?.nome?.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <h2 className="text-2xl font-bold text-gray-800">{usuario?.nome}</h2>
-                <div className="relative group">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center text-white text-xs font-bold cursor-help hover:shadow-lg transition-all">
-                    🔍
-                  </div>
-                  <div className="absolute bottom-full right-0 mb-2 px-3 py-1 bg-teal-600 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                    oluquinhas v1
-                  </div>
-                </div>
-              </div>
-              <p className="text-gray-600 mt-1">{usuario?.email}</p>
+              <h2 className="text-2xl font-bold text-gray-800">{usuario?.nome}</h2>
+              <p className="text-gray-600">{usuario?.email}</p>
               <div className="mt-3">
                 <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${getRoleColor(usuario?.role)}`}>
                   {getRoleLabel(usuario?.role)}
