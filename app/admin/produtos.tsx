@@ -4,6 +4,19 @@ import { supabase } from '@/lib/supabase'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { Plus, AlertCircle, Edit2, Trash2, X } from 'lucide-react'
 
+// Modal trap - prevent scroll when modal is open
+function useLockBodyScroll(isLocked: boolean) {
+  useEffect(() => {
+    if (isLocked) {
+      const originalOverflow = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+      return () => {
+        document.body.style.overflow = originalOverflow
+      }
+    }
+  }, [isLocked])
+}
+
 export default function ProdutosTab() {
   const [produtos, setProdutos] = useState<any[]>([])
   const [categorias, setCategorias] = useState<any[]>([])
@@ -168,7 +181,23 @@ export default function ProdutosTab() {
       fatias_porcoes: null,
       categoria_id: categorias[0]?.id || '',
     })
+    setErro('')
   }
+
+  function handleEscKey(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') {
+      cancelarEdicao()
+    }
+  }
+
+  function handleBackdropClick(e: React.MouseEvent) {
+    if (e.target === e.currentTarget) {
+      cancelarEdicao()
+    }
+  }
+
+  // Lock body scroll when modal is open
+  useLockBodyScroll(mostraFormulario)
 
   return (
     <div>
@@ -182,131 +211,147 @@ export default function ProdutosTab() {
         </button>
       </div>
 
+      {/* Modal Overlay */}
       {mostraFormulario && (
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-800">
-              {produtoEditando ? 'Editar Produto' : 'Cadastrar Novo Produto'}
-            </h3>
-            <button
-              onClick={cancelarEdicao}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X size={24} />
-            </button>
-          </div>
-
-          {erro && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 flex items-start gap-3">
-              <AlertCircle size={18} className="text-red-600 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-red-700">{erro}</p>
-            </div>
-          )}
-
-          <form onSubmit={salvarProduto} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Produto</label>
-              <input
-                type="text"
-                required
-                value={form.nome}
-                onChange={e => setForm({ ...form, nome: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
-              <select
-                value={form.categoria_id}
-                onChange={e => setForm({ ...form, categoria_id: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-              >
-                <option value="">Selecione uma categoria</option>
-                {categorias.map((cat: any) => (
-                  <option key={cat.id} value={cat.id}>{cat.nome}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-              <select
-                value={form.tipo}
-                onChange={e => setForm({ ...form, tipo: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-              >
-                <option value="Produzido">Produzido</option>
-                <option value="Insumo">Insumo</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Unidade de Medida</label>
-              <select
-                value={form.unidade_medida}
-                onChange={e => setForm({ ...form, unidade_medida: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-              >
-                <option value="Unidade">Unidade</option>
-                <option value="Gramas">Gramas</option>
-                <option value="Fatias">Fatias</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Validade (dias)</label>
-              <input
-                type="number"
-                min={1}
-                value={form.validade_dias}
-                onChange={e => setForm({ ...form, validade_dias: Number(e.target.value) })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Fatias/Porções</label>
-              <input
-                type="number"
-                min={0}
-                value={form.fatias_porcoes || ''}
-                onChange={e => setForm({ ...form, fatias_porcoes: e.target.value ? Number(e.target.value) : null })}
-                placeholder="Opcional"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                id="congelado"
-                checked={form.congelado}
-                onChange={e => setForm({ ...form, congelado: e.target.checked })}
-                className="w-4 h-4 rounded"
-              />
-              <label htmlFor="congelado" className="text-sm font-medium text-gray-700">
-                Produto Congelado ❄️
-              </label>
-            </div>
-
-            <div className="md:col-span-2 flex gap-3">
+        <div
+          className="fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4"
+          onClick={handleBackdropClick}
+          onKeyDown={handleEscKey}
+        >
+          {/* Modal Dialog */}
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
+              <h3 className="text-lg font-semibold text-gray-800">
+                {produtoEditando ? 'Editar Produto' : 'Cadastrar Novo Produto'}
+              </h3>
               <button
-                type="submit"
-                disabled={salvando}
-                className="flex-1 bg-pink-700 text-white rounded-lg py-2 font-semibold disabled:opacity-60"
+                onClick={cancelarEdicao}
+                className="text-gray-400 hover:text-gray-600 p-1"
+                title="Fechar (Esc)"
               >
-                {salvando ? 'Salvando...' : 'Salvar Produto'}
+                <X size={24} />
               </button>
+            </div>
+
+            {/* Content - Scrollable */}
+            <div className="overflow-y-auto flex-1 p-6">
+              {erro && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 flex items-start gap-3">
+                  <AlertCircle size={18} className="text-red-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-red-700">{erro}</p>
+                </div>
+              )}
+
+              <form onSubmit={salvarProduto} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Produto</label>
+                  <input
+                    type="text"
+                    required
+                    value={form.nome}
+                    onChange={e => setForm({ ...form, nome: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
+                  <select
+                    value={form.categoria_id}
+                    onChange={e => setForm({ ...form, categoria_id: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  >
+                    <option value="">Selecione uma categoria</option>
+                    {categorias.map((cat: any) => (
+                      <option key={cat.id} value={cat.id}>{cat.nome}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                  <select
+                    value={form.tipo}
+                    onChange={e => setForm({ ...form, tipo: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  >
+                    <option value="Produzido">Produzido</option>
+                    <option value="Insumo">Insumo</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Unidade de Medida</label>
+                  <select
+                    value={form.unidade_medida}
+                    onChange={e => setForm({ ...form, unidade_medida: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  >
+                    <option value="Unidade">Unidade</option>
+                    <option value="Gramas">Gramas</option>
+                    <option value="Fatias">Fatias</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Validade (dias)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={form.validade_dias}
+                    onChange={e => setForm({ ...form, validade_dias: Number(e.target.value) })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Fatias/Porções</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.fatias_porcoes || ''}
+                    onChange={e => setForm({ ...form, fatias_porcoes: e.target.value ? Number(e.target.value) : null })}
+                    placeholder="Opcional"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="congelado"
+                    checked={form.congelado}
+                    onChange={e => setForm({ ...form, congelado: e.target.checked })}
+                    className="w-4 h-4 rounded"
+                  />
+                  <label htmlFor="congelado" className="text-sm font-medium text-gray-700">
+                    Produto Congelado ❄️
+                  </label>
+                </div>
+
+                <div className="md:col-span-2" />
+              </form>
+            </div>
+
+            {/* Footer - Sticky */}
+            <div className="flex gap-3 p-6 border-t border-gray-200 bg-gray-50 flex-shrink-0">
               <button
                 type="button"
-                onClick={() => setMostraFormulario(false)}
-                className="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2 font-semibold"
+                onClick={cancelarEdicao}
+                className="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2 font-semibold hover:bg-gray-200"
               >
                 Cancelar
               </button>
+              <button
+                onClick={salvarProduto}
+                disabled={salvando}
+                className="flex-1 bg-pink-700 text-white rounded-lg py-2 font-semibold disabled:opacity-60 hover:bg-pink-800"
+              >
+                {salvando ? 'Salvando...' : 'Salvar Produto'}
+              </button>
             </div>
-          </form>
+          </div>
         </div>
       )}
 
