@@ -215,34 +215,154 @@ function DashboardContent() {
 
   // RENDER PARA ADMIN
   if (usuario?.role === 'admin') {
+    const hoje = new Date().toISOString().split('T')[0]
+
+    // Calcular tarefas
+    const tarefasHoje = tarefasCozinha.filter(t => t.data_vencimento === hoje)
+    const tarefasAtrasadas = tarefasCozinha.filter(t => t.data_vencimento < hoje && t.status !== 'concluida')
+
+    // Calcular ordens
+    const ordensAtrasadas = ordens.filter(o => o.data_entrega < hoje && o.status !== 'concluida')
+    const ordensHoje = ordens.filter(o => o.data_entrega === hoje)
+    const ordensEmProducao = ordens.filter(o => o.status === 'em_producao')
+    const ordensAguardando = ordens.filter(o => o.status === 'pendente')
+
     return (
-      <div className="p-4">
-        <div className="flex items-center justify-between pt-4 mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">Gestão AlgoDoce</h1>
+      <div className="min-h-screen bg-gray-50 pb-20">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4 sticky top-0 z-40 shadow-md">
+          <h1 className="text-2xl font-bold text-white">👨‍💼 Gestão AlgoDoce</h1>
+          <p className="text-sm text-blue-100 mt-1">Painel administrativo</p>
         </div>
 
-        {/* Atalhos de Gestão */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <Link href="/ordens" className="bg-white border border-gray-200 rounded-lg p-6 hover:border-gray-300 hover:shadow-md transition-all">
-            <p className="text-3xl mb-3">📋</p>
-            <p className="font-bold text-lg text-gray-800">Ordens de Produção</p>
-            <p className="text-sm text-gray-600 mt-1">Gerenciar todas as ordens</p>
-          </Link>
-          <Link href="/producao" className="bg-white border border-gray-200 rounded-lg p-6 hover:border-gray-300 hover:shadow-md transition-all">
-            <p className="text-3xl mb-3">🏭</p>
-            <p className="font-bold text-lg text-gray-800">Produção</p>
-            <p className="text-sm text-gray-600 mt-1">Acompanhar produção</p>
-          </Link>
-          <Link href="/estoque" className="bg-white border border-gray-200 rounded-lg p-6 hover:border-gray-300 hover:shadow-md transition-all">
-            <p className="text-3xl mb-3">📦</p>
-            <p className="font-bold text-lg text-gray-800">Estoque</p>
-            <p className="text-sm text-gray-600 mt-1">Gerenciar inventário</p>
-          </Link>
-          <Link href="/admin" className="bg-white border border-gray-200 rounded-lg p-6 hover:border-gray-300 hover:shadow-md transition-all">
-            <p className="text-3xl mb-3">⚙️</p>
-            <p className="font-bold text-lg text-gray-800">Configurações</p>
-            <p className="text-sm text-gray-600 mt-1">Produtos e categorias</p>
-          </Link>
+        <div className="p-4 max-w-2xl mx-auto">
+          {/* Ações Rápidas */}
+          <div className="mb-8">
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Ações Rápidas</h2>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <Link href="/ordens" className="bg-gradient-to-br from-slate-500 to-slate-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <TrendingUp size={24} className="mb-2" />
+                <p className="font-medium text-sm">Ordens</p>
+              </Link>
+              <Link href="/producao" className="bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <Clock size={24} className="mb-2" />
+                <p className="font-medium text-sm">Produção</p>
+              </Link>
+              <Link href="/estoque" className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <Package size={24} className="mb-2" />
+                <p className="font-medium text-sm">Estoque</p>
+              </Link>
+              <Link href="/expedicao" className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <Truck size={24} className="mb-2" />
+                <p className="font-medium text-sm">Expedição</p>
+              </Link>
+              <Link href="/tarefas/dashboard" className="bg-gradient-to-br from-pink-500 to-pink-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <CheckCircle2 size={24} className="mb-2" />
+                <p className="font-medium text-sm">Tarefas</p>
+              </Link>
+              <Link href="/admin" className="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <Settings size={24} className="mb-2" />
+                <p className="font-medium text-sm">Config</p>
+              </Link>
+            </div>
+          </div>
+
+          {/* Indicadores Críticos (Atrasados) */}
+          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0) && (
+            <div className="mb-8 space-y-3">
+              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Atenção Necessária</h2>
+
+              {ordensAtrasadas.length > 0 && (
+                <Link href="/producao" className="bg-red-50 border border-red-200 rounded-lg p-4 hover:bg-red-100 transition-all block">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-red-700 flex items-center gap-2">
+                        <AlertCircle size={18} /> Ordens Atrasadas
+                      </p>
+                      <p className="text-sm text-red-600 mt-1">Ordens com entrega vencida</p>
+                    </div>
+                    <span className="bg-red-200 text-red-700 px-3 py-1 rounded-full text-sm font-bold">{ordensAtrasadas.length}</span>
+                  </div>
+                </Link>
+              )}
+
+              {tarefasAtrasadas.length > 0 && (
+                <Link href="/tarefas/dashboard" className="bg-orange-50 border border-orange-200 rounded-lg p-4 hover:bg-orange-100 transition-all block">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-orange-700 flex items-center gap-2">
+                        <AlertTriangle size={18} /> Tarefas Atrasadas
+                      </p>
+                      <p className="text-sm text-orange-600 mt-1">Tarefas vencidas</p>
+                    </div>
+                    <span className="bg-orange-200 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">{tarefasAtrasadas.length}</span>
+                  </div>
+                </Link>
+              )}
+            </div>
+          )}
+
+          {/* Indicadores Gerais */}
+          <div className="mb-8">
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Situação Geral</h2>
+
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              {/* Ordens em Produção */}
+              <Link href="/producao" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <Clock size={20} className="text-orange-600" />
+                  <span className="text-xs text-gray-500">Produzindo</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{ordensEmProducao.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Ordem(ns) em produção</p>
+              </Link>
+
+              {/* Ordens Aguardando */}
+              <Link href="/ordens" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <TrendingUp size={20} className="text-blue-600" />
+                  <span className="text-xs text-gray-500">Fila</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{ordensAguardando.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Ordem(ns) aguardando</p>
+              </Link>
+
+              {/* Ordens para Hoje */}
+              <Link href="/ordens" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <Package size={20} className="text-emerald-600" />
+                  <span className="text-xs text-gray-500">Hoje</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{ordensHoje.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Entrega(s) hoje</p>
+              </Link>
+
+              {/* Tarefas do Dia */}
+              <Link href="/tarefas/dashboard" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <CheckCircle2 size={20} className="text-pink-600" />
+                  <span className="text-xs text-gray-500">Hoje</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{tarefasHoje.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Tarefa(s) do dia</p>
+              </Link>
+            </div>
+
+            {/* Total de Ordens */}
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <AlertTriangle size={20} className="text-purple-600" />
+                <span className="text-xs text-gray-500">Total</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-800">{ordens.length}</p>
+              <p className="text-xs text-gray-600 mt-1">Ordem(ns) no sistema</p>
+            </div>
+          </div>
+
+          {/* Rodapé com Auditoria */}
+          <div className="text-xs text-gray-500 text-center py-4 border-t border-gray-200">
+            <p>✓ Dados em tempo real • Visão global do sistema • Atualizado automaticamente</p>
+          </div>
         </div>
       </div>
     )
