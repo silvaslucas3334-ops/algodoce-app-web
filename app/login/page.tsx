@@ -80,9 +80,14 @@ export default function LoginPage() {
           <h1 className="text-3xl font-bold text-center text-gray-800 mb-1">Bem-Vindo</h1>
           <p className="text-center text-gray-500 text-sm mb-8">AlgoDoce - Gestão de Produção</p>
 
-          {/* 3. Oluquinhas Logo */}
-          <div className="flex justify-center mb-8">
+          {/* 3. Oluquinhas Logo - Rosto */}
+          <div className="flex justify-center -mb-12">
             <OluquinhasLogo size="md" variant="rosto" color="marrom" />
+          </div>
+
+          {/* 4. Oluquinhas Logo - Text with Magnifier */}
+          <div className="flex justify-center mb-3">
+            <OluquinhasLogo size="lg" variant="oluquinhas" color="marrom" />
           </div>
 
           {/* 4. Formulário de Login */}
