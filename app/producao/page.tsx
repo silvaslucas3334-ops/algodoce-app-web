@@ -148,11 +148,11 @@ function ProducaoContent() {
       {/* Header */}
       <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between h-20">
         <div className="flex items-center gap-4">
-          <OluquinhasLogo size="md" variant="oluquinhas" color="branco" />
-          <OluquinhasLogo size="xs" variant="rosto" color="branco" />
+          <OluquinhasLogo size="md" variant="oluquinhas" color="marrom" />
+          <OluquinhasLogo size="xs" variant="rosto" color="marrom" />
           <div>
-            <h1 className="text-xl font-bold text-white">Produção</h1>
-            <p className="text-xs text-orange-100">Painel de produção da Cozinha</p>
+            <h1 className="text-xl font-bold" style={{color: '#401c04'}}>Produção</h1>
+            <p className="text-xs" style={{color: '#401c04'}}>Painel de produção da Cozinha</p>
           </div>
         </div>
         {!isAdmin && (
