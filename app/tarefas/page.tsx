@@ -14,6 +14,7 @@ import { getHoje, isAtrasada, formatData, getSetorTheme } from '@/lib/tarefas-ut
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, BarChart3, CreditCard, ChevronLeft, ChevronRight } from 'lucide-react'
+import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 const DIAS_LABEL = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom']
 const MESES_LABEL = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
@@ -250,13 +251,17 @@ function TarefasContent() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       {/* Header */}
-      <div className={`bg-gradient-to-r ${theme.headerGrad} px-4 sm:px-6 py-4 sticky top-0 z-40 shadow-md transition-colors`}>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-white">✓ Tarefas</h1>
-            {setorNome && (
-              <p className={`text-xs ${theme.subtext} mt-0.5`}>{setorNome}</p>
-            )}
+      <div className={`bg-gradient-to-r ${theme.headerGrad} px-4 sm:px-6 py-2 sticky top-0 z-40 shadow-md transition-colors h-20 flex items-center`}>
+        <div className="flex items-center justify-between gap-4 w-full">
+          <div className="flex items-center gap-4">
+            <OluquinhasLogo size="md" variant="oluquinhas" color="branco" />
+            <OluquinhasLogo size="xs" variant="rosto" color="branco" />
+            <div>
+              <h1 className="text-xl font-bold text-white">Tarefas</h1>
+              {setorNome && (
+                <p className={`text-xs ${theme.subtext} mt-0.5`}>{setorNome}</p>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {usuario?.role === 'admin' && setores.length > 0 && (
