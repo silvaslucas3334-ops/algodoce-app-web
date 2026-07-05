@@ -231,12 +231,12 @@ function DashboardContent() {
     return (
       <div className="min-h-screen bg-gray-50 pb-20">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between gap-3 h-20">
+        <div className="bg-gradient-to-r from-rose-700 to-rose-900 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between gap-3 h-20">
           <div className="flex items-center gap-2">
             <OluquinhasLogo size="xs" variant="rosto" color="branco" />
             <div>
               <h1 className="text-xl font-bold text-white">Gestão AlgoDoce</h1>
-              <p className="text-xs text-blue-100 mt-0.5">Painel administrativo</p>
+              <p className="text-xs text-rose-100 mt-0.5">Painel administrativo</p>
             </div>
           </div>
           <OluquinhasLogo size="md" variant="oluquinhas" color="branco" />
@@ -392,9 +392,15 @@ function DashboardContent() {
     return (
       <div className="min-h-screen bg-gray-50 pb-20">
         {/* Header */}
-        <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-center gap-4 h-20">
-          <OluquinhasLogo size="md" variant="oluquinhas" color="branco" />
-          <OluquinhasLogo size="xs" variant="rosto" color="branco" />
+        <div className="bg-gradient-to-r from-rose-700 to-rose-900 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center gap-4 h-20">
+          <div className="flex items-center gap-4">
+            <OluquinhasLogo size="md" variant="oluquinhas" color="branco" />
+            <OluquinhasLogo size="xs" variant="rosto" color="branco" />
+            <div>
+              <h1 className="text-xl font-bold text-white">Produção</h1>
+              <p className="text-xs text-rose-100 mt-0.5">Painel da Cozinha</p>
+            </div>
+          </div>
         </div>
 
         <div className="p-4 max-w-2xl mx-auto">
@@ -544,11 +550,14 @@ function DashboardContent() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-4 sticky top-0 z-40 flex items-center gap-3">
-        <OluquinhasLogo size="sm" variant="rosto" color="branco" />
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">{LOCAL_LABEL[usuario?.loja_id || 'cozinha']}</h1>
-          <p className="text-sm text-gray-600 mt-1">Painel de gestão da unidade</p>
+      <div className="bg-gradient-to-r from-rose-700 to-rose-900 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center h-20">
+        <div className="flex items-center gap-4">
+          <OluquinhasLogo size="md" variant="oluquinhas" color="marrom" />
+          <OluquinhasLogo size="xs" variant="rosto" color="marrom" />
+          <div>
+            <h1 className="text-xl font-bold text-white">{LOCAL_LABEL[usuario?.loja_id || 'cozinha']}</h1>
+            <p className="text-xs text-rose-100 mt-0.5">Painel de gestão da unidade</p>
+          </div>
         </div>
       </div>
 
