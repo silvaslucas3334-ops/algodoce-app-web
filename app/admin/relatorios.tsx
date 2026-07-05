@@ -104,15 +104,17 @@ export default function RelatoriosTab() {
     setLoading(false)
   }
 
-  // ===== RELATÓRIO 2: MOVIMENTAÇÕES =====
+  // ===== RELATÓRIO 2: MOVIMENTAÇÕES (SEM RESTRIÇÕES DE PERÍODO NA ORIGEM) =====
   async function carregarMovimentacoes() {
     setLoading(true)
     try {
+      // Carregar TODOS os lotes (sem restrição de período)
       const { data: lotes } = await supabase
         .from('lotes_producao')
         .select('*, produto:produtos(nome)')
         .order('created_at', { ascending: false })
 
+      // Carregar TODAS as movimentações (sem restrição de período)
       const { data: movimentacoes } = await supabase
         .from('movimentacoes_estoque')
         .select('*')
@@ -128,13 +130,23 @@ export default function RelatoriosTab() {
         movimentacoes: (movimentacoes || []).filter(m => m.lote_id === lote.id),
       }))
 
-      // Aplicar filtros
-      if (filtrosMov.dataInicio) {
-        resultado = resultado.filter(r => r.data_criacao >= filtrosMov.dataInicio)
+      // Aplicar filtros (período é aplicado APÓS carregar todos os dados)
+      // Filtro por período das MOVIMENTAÇÕES
+      if (filtrosMov.dataInicio || filtrosMov.dataFim) {
+        resultado = resultado.map(r => ({
+          ...r,
+          movimentacoes: r.movimentacoes.filter(m => {
+            const dataMov = m.created_at || ''
+            if (filtrosMov.dataInicio && dataMov < filtrosMov.dataInicio) return false
+            if (filtrosMov.dataFim && dataMov > filtrosMov.dataFim + 'T23:59:59') return false
+            return true
+          }),
+        }))
+        // Remove lotes sem movimentações no período
+        resultado = resultado.filter(r => r.movimentacoes.length > 0)
       }
-      if (filtrosMov.dataFim) {
-        resultado = resultado.filter(r => r.data_criacao <= filtrosMov.dataFim)
-      }
+
+      // Filtros por atributo (QR, produto, destino)
       if (filtrosMov.qrCode) {
         resultado = resultado.filter(r => r.codigo_qr?.includes(filtrosMov.qrCode))
       }
