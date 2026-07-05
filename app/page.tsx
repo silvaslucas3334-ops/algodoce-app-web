@@ -233,7 +233,7 @@ function DashboardContent() {
         {/* Header */}
         <div className="bg-gradient-to-r from-rose-700 to-rose-900 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between gap-3 h-20">
           <div className="flex items-center gap-2">
-            <OluquinhasLogo size="xs" variant="rosto" color="branco" />
+            <OluquinhasLogo size="xs" variant="rosto" color="marrom" />
             <div>
               <h1 className="text-xl font-bold text-white">Gestão AlgoDoce</h1>
               <p className="text-xs text-rose-100 mt-0.5">Painel administrativo</p>
