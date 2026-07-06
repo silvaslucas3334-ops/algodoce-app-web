@@ -84,7 +84,7 @@ export function useTaskNotifications(usuarioId: string | undefined, onNotificati
     return () => {
       channel.unsubscribe()
     }
-  }, [usuarioId, pushEnabled, onNotification])
+  }, [usuarioId])
 
   // Função para registrar Web Push
   const registrarPush = async () => {
