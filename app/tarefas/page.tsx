@@ -541,53 +541,79 @@ function TarefasContent() {
         {/* Mês - visualização calendário */}
         {modoVisualizar === 'mes' && (
           <>
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">
-              Calendário do Mês
-            </h2>
-            <div className="grid grid-cols-7 gap-2 mb-6">
-              {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'].map((dia) => (
-                <div key={dia} className="text-center text-xs font-bold text-gray-600 py-2">
-                  {dia}
+            <div className="mb-6">
+              <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <span className="text-2xl">📅</span>
+                Calendário do Mês
+              </h2>
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4">
+                <div className="grid grid-cols-7 gap-1 mb-2">
+                  {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'].map((dia) => (
+                    <div key={dia} className="text-center text-xs font-bold text-gray-700 py-2 uppercase tracking-wider">
+                      {dia}
+                    </div>
+                  ))}
                 </div>
-              ))}
-              {Array.from({ length: 35 }).map((_, idx) => {
-                const primeiroDia = new Date(dataBase.getFullYear(), dataBase.getMonth(), 1)
-                const dow = primeiroDia.getDay() === 0 ? 6 : primeiroDia.getDay() - 1
-                const diaDoMes = idx - dow + 1
-                const data = new Date(dataBase.getFullYear(), dataBase.getMonth(), diaDoMes)
-                const dataStr = toYMD(data)
-                const tarefasNoDia = tarefas.filter(
-                  (t) =>
-                    t.data_vencimento === dataStr &&
-                    t.status !== 'concluida' &&
-                    t.status !== 'cancelada'
-                )
-                const estaMes = data.getMonth() === dataBase.getMonth()
+                <div className="grid grid-cols-7 gap-1">
+                  {Array.from({ length: 35 }).map((_, idx) => {
+                    const primeiroDia = new Date(dataBase.getFullYear(), dataBase.getMonth(), 1)
+                    const dow = primeiroDia.getDay() === 0 ? 6 : primeiroDia.getDay() - 1
+                    const diaDoMes = idx - dow + 1
+                    const data = new Date(dataBase.getFullYear(), dataBase.getMonth(), diaDoMes)
+                    const dataStr = toYMD(data)
+                    const tarefasNoDia = tarefas.filter(
+                      (t) =>
+                        t.data_vencimento === dataStr &&
+                        t.status !== 'concluida' &&
+                        t.status !== 'cancelada'
+                    )
+                    const atrasadasNoDia = tarefasNoDia.filter((t) =>
+                      isAtrasada(t.data_vencimento, t.hora_limite || null, t.status)
+                    )
+                    const estaMes = data.getMonth() === dataBase.getMonth()
+                    const ehHoje = dataStr === hoje
 
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      if (estaMes) setDiaSelecionado(dataStr)
-                    }}
-                    className={`p-3 rounded-lg border-2 transition-all text-center min-h-[100px] flex flex-col ${
-                      estaMes
-                        ? tarefasNoDia.length > 0
-                          ? `${theme.dayBorderTasks} bg-white hover:shadow-sm`
-                          : 'border-gray-200 bg-white hover:border-gray-300'
-                        : 'border-gray-100 bg-gray-50 text-gray-400'
-                    } ${diaSelecionado === dataStr ? `border-blue-600 bg-blue-50` : ''}`}
-                    disabled={!estaMes}
-                  >
-                    <span className="text-sm font-bold text-gray-800">{diaDoMes}</span>
-                    {tarefasNoDia.length > 0 && (
-                      <span className={`text-xs font-bold px-2 py-1 rounded mt-1 ${theme.badge} text-white`}>
-                        {tarefasNoDia.length}
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          if (estaMes) setDiaSelecionado(dataStr)
+                        }}
+                        className={`p-2 rounded-lg border-2 transition-all text-center aspect-square flex flex-col items-center justify-center font-medium relative group ${
+                          !estaMes
+                            ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-default'
+                            : ehHoje
+                            ? 'bg-blue-600 text-white border-blue-700 shadow-md'
+                            : atrasadasNoDia.length > 0
+                            ? 'bg-red-100 border-red-300 text-red-900 hover:shadow-lg hover:scale-105'
+                            : tarefasNoDia.length > 0
+                            ? `bg-gradient-to-br ${theme.headerGrad} text-white border-transparent shadow-sm hover:shadow-md hover:scale-105`
+                            : 'border-gray-200 bg-white text-gray-800 hover:bg-gray-50'
+                        }`}
+                        disabled={!estaMes}
+                        title={estaMes ? formatData(dataStr) : ''}
+                      >
+                        <span className="text-sm">{Math.max(1, Math.min(diaDoMes, 31))}</span>
+                        {tarefasNoDia.length > 0 && (
+                          <div className="flex gap-0.5 mt-0.5 flex-wrap justify-center">
+                            {atrasadasNoDia.length > 0 && (
+                              <span className="inline-flex items-center justify-center w-4 h-4 bg-red-500 text-white text-xs rounded-full font-bold" title="Atrasadas">
+                                ⚠
+                              </span>
+                            )}
+                            <span className="text-xs font-bold bg-white bg-opacity-30 px-1.5 py-0.5 rounded">
+                              {tarefasNoDia.length}
+                            </span>
+                          </div>
+                        )}
+                        {ehHoje && (
+                          <div className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
 
             {/* Tarefas do dia selecionado no mês */}

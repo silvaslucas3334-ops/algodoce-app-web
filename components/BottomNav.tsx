@@ -20,31 +20,51 @@ export default function BottomNav() {
   const path = usePathname()
   if (path === '/login' || path === '/signup') return null
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
-      <div className="max-w-lg mx-auto flex justify-around items-center">
-        {/* Logo Oluquinhas - Left Side */}
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 shadow-lg">
+      <div className="flex items-center h-20">
+        {/* Logo Oluquinhas - Fixed Left */}
         <div className="flex-shrink-0 p-2">
           <OluquinhasLogo size="xs" variant="rosto" color="marrom" />
         </div>
 
-        {/* Links */}
-        <div className="flex justify-around flex-1">
-          {links.map(({ href, label, icon: Icon }) => {
-            const active = path === href
-            return (
-              <Link key={href} href={href} className={`flex flex-col items-center py-2 px-2 text-xs ${active ? 'text-pink-700' : 'text-gray-500'}`}>
-                <Icon size={22} strokeWidth={active ? 2.5 : 1.8} />
-                <span className="mt-0.5">{label}</span>
-              </Link>
-            )
-          })}
+        {/* Links com scroll horizontal */}
+        <div className="flex-1 overflow-x-auto scrollbar-hide">
+          <div className="flex gap-1 px-2 pb-1">
+            {links.map(({ href, label, icon: Icon }) => {
+              const active = path === href
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`flex flex-col items-center justify-center py-2 px-3 text-xs font-medium whitespace-nowrap rounded-lg transition-all flex-shrink-0 ${
+                    active
+                      ? 'bg-pink-100 text-pink-700 shadow-sm'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  <Icon size={22} strokeWidth={active ? 2.5 : 1.8} />
+                  <span className="mt-0.5">{label}</span>
+                </Link>
+              )
+            })}
+          </div>
         </div>
 
-        {/* Logo AlgoDoce - Right Side */}
+        {/* Logo AlgoDoce - Fixed Right */}
         <div className="flex-shrink-0 p-2 w-8 h-8 relative">
           <Image src="/logo.png" alt="AlgoDoce" fill className="object-contain" />
         </div>
       </div>
+
+      <style jsx>{`
+        .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+        }
+        .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}</style>
     </nav>
   )
 }
