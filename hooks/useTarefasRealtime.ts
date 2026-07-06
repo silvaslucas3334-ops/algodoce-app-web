@@ -22,7 +22,7 @@ export function useTarefasRealtime({
     console.log('[Realtime] Iniciando subscription para tarefas')
 
     const channel = supabase
-      .channel('tarefas-realtime-v2', { config: { broadcast: { self: true } } })
+      .channel('tarefas-realtime-v3', { config: { broadcast: { self: true } } })
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'tarefas' },
