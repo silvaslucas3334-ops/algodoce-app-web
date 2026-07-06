@@ -13,12 +13,14 @@ const ROLE_INFO = {
 
 export default function UsuariosTab() {
   const [usuarios, setUsuarios] = useState<any[]>([])
+  const [setores, setSetores] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [usuarioEditando, setUsuarioEditando] = useState<any>(null)
   const [formEdicao, setFormEdicao] = useState({
     nome: '',
     role: 'loja' as 'admin' | 'cozinha' | 'loja',
     loja_id: 'loja1',
+    setor_id: '',
     ativo: true,
   })
   const [salvando, setSalvando] = useState(false)
@@ -26,12 +28,22 @@ export default function UsuariosTab() {
 
   useEffect(() => {
     carregarUsuarios()
+    carregarSetores()
     const channel = supabase
       .channel('usuarios-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, carregarUsuarios)
       .subscribe()
     return () => { channel.unsubscribe() }
   }, [])
+
+  async function carregarSetores() {
+    const { data } = await supabase
+      .from('setores')
+      .select('*')
+      .eq('ativo', true)
+      .order('nome')
+    setSetores(data || [])
+  }
 
   async function carregarUsuarios() {
     setLoading(true)
@@ -46,6 +58,7 @@ export default function UsuariosTab() {
       nome: usuario.nome,
       role: usuario.role,
       loja_id: usuario.loja_id || 'loja1',
+      setor_id: usuario.setor_id || '',
       ativo: usuario.ativo,
     })
     setErro('')
@@ -68,6 +81,7 @@ export default function UsuariosTab() {
           nome: formEdicao.nome,
           role: formEdicao.role,
           loja_id: formEdicao.role === 'loja' ? formEdicao.loja_id : null,
+          setor_id: formEdicao.setor_id || null,
           ativo: formEdicao.ativo,
         })
         .eq('id', usuarioEditando.id)
@@ -135,7 +149,11 @@ export default function UsuariosTab() {
               </div>
 
               {u.role === 'loja' && u.loja_id && (
-                <p className="text-xs text-gray-500 mb-3">📍 {LOCAL_LABEL[u.loja_id]}</p>
+                <p className="text-xs text-gray-500 mb-2">📍 {LOCAL_LABEL[u.loja_id]}</p>
+              )}
+
+              {u.setor_id && (
+                <p className="text-xs text-gray-500 mb-3">🏢 {setores.find(s => s.id === u.setor_id)?.nome || 'Setor desconhecido'}</p>
               )}
 
               <div className="flex items-center justify-between text-xs mb-3">
@@ -221,6 +239,20 @@ export default function UsuariosTab() {
                   </select>
                 </div>
               )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Setor</label>
+                <select
+                  value={formEdicao.setor_id}
+                  onChange={e => setFormEdicao({ ...formEdicao, setor_id: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                >
+                  <option value="">Sem setor (Admin)</option>
+                  {setores.map(s => (
+                    <option key={s.id} value={s.id}>{s.nome}</option>
+                  ))}
+                </select>
+              </div>
 
               <div className="flex items-center gap-2">
                 <input
