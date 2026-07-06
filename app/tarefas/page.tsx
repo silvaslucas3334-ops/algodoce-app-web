@@ -262,7 +262,7 @@ function TarefasContent() {
       <TaskNotificationStack usuarioId={usuario?.id} />
 
       {/* Header */}
-      <div className={`bg-gradient-to-r ${theme.headerGrad} px-4 sm:px-6 py-2 sticky top-0 z-40 shadow-md transition-colors h-20 flex items-center`}>
+      <div className={`bg-gradient-to-r ${theme.headerGrad} px-4 sm:px-6 py-3 sm:py-2 sticky top-0 z-40 shadow-md transition-colors h-auto sm:h-20 flex items-center`}>
         <div className="flex items-center justify-between gap-4 w-full">
           <div className="flex items-center gap-4">
             <OluquinhasLogo size="md" variant="oluquinhas" color="marrom" />
@@ -319,10 +319,10 @@ function TarefasContent() {
         </div>
       </div>
 
-      <div className="px-4 sm:px-6 py-6 w-full">
+      <div className="px-4 sm:px-6 py-4 sm:py-6 w-full">
         {/* Fila de revisão (admin) */}
         {usuario?.role === 'admin' && tarefasRevisao.length > 0 && (
-          <div className="mb-8 bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="mb-6 sm:mb-8 bg-blue-50 border border-blue-200 rounded-xl p-4">
             <h2 className="text-sm font-bold text-blue-800 mb-3 flex items-center gap-2">
               🔎 Fila de revisão
               <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
@@ -346,7 +346,7 @@ function TarefasContent() {
         )}
 
         {/* Controles de Visualização */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 sm:mb-6">
           <div className="flex items-center gap-3">
             {/* Setas de navegação */}
             <button
@@ -425,10 +425,10 @@ function TarefasContent() {
         {/* Semana - largura total */}
         {modoVisualizar === 'semana' && (
           <>
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4 sm:mb-3">
               Semana
             </h2>
-        <div className="grid grid-cols-7 gap-2 sm:gap-3 mb-8">
+        <div className="grid grid-cols-7 gap-1.5 sm:gap-3 mb-8 sm:mb-8">
           {diasSemana.map((dia, idx) => {
             const count = tarefasDoDia(dia).length
             const ehHoje = dia === hoje
@@ -439,7 +439,7 @@ function TarefasContent() {
               <button
                 key={dia}
                 onClick={() => setDiaSelecionado(dia)}
-                className={`flex flex-col items-center rounded-xl border-2 py-3 px-1 transition-all ${
+                className={`flex flex-col items-center rounded-xl border-2 py-2 sm:py-3 px-1 transition-all ${
                   selecionado
                     ? `border-transparent bg-gradient-to-br ${theme.headerGrad} text-white shadow-lg scale-[1.03]`
                     : ehHoje
@@ -498,7 +498,7 @@ function TarefasContent() {
         </div>
 
         {/* Tarefas do dia selecionado */}
-        <div className="flex items-baseline justify-between mb-4">
+        <div className="flex items-baseline justify-between mb-6 sm:mb-4">
           <h2 className="text-lg font-semibold text-gray-800">
             {diaSelecionado === hoje
               ? 'Hoje'
@@ -515,7 +515,7 @@ function TarefasContent() {
             <p className="text-gray-500">Nenhuma tarefa neste dia 🎉</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-3">
             {tarefasSelecionadas.map((tarefa) => {
               const criador = usuariosMap[tarefa.criado_por]
               const criadoPorNome =
@@ -613,7 +613,7 @@ function TarefasContent() {
             </div>
 
             {/* Tarefas do dia selecionado no mês */}
-            <div className="flex items-baseline justify-between mb-4">
+            <div className="flex items-baseline justify-between mb-6 sm:mb-4">
               <h2 className="text-lg font-semibold text-gray-800">
                 {diaSelecionado === hoje ? 'Hoje' : formatData(diaSelecionado)}
               </h2>
@@ -628,7 +628,7 @@ function TarefasContent() {
                 <p className="text-gray-500">Nenhuma tarefa neste dia 🎉</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-3">
                 {tarefasSelecionadas.map((tarefa) => {
                   const criador = usuariosMap[tarefa.criado_por]
                   const criadoPorNome =
