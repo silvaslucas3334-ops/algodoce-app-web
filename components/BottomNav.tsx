@@ -20,8 +20,8 @@ export default function BottomNav() {
   const path = usePathname()
   if (path === '/login' || path === '/signup') return null
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 shadow-lg">
-      <div className="flex items-center h-20">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
+      <div className="flex items-center">
         {/* Logo Oluquinhas - Fixed Left */}
         <div className="flex-shrink-0 p-2">
           <OluquinhasLogo size="xs" variant="rosto" color="marrom" />
