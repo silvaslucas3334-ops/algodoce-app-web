@@ -86,31 +86,27 @@ export function useTaskNotifications(usuarioId: string | undefined, onNotificati
 
   // Função para registrar Web Push
   const registrarPush = async () => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    if (!('serviceWorker' in navigator) || !('Notification' in window)) {
       console.warn('Web Push não suportado')
       return false
     }
 
     try {
-      const registration = await navigator.serviceWorker.ready
+      // Solicitar permissão de notificação
       const permission = await Notification.requestPermission()
 
       if (permission === 'granted') {
-        const subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
-        })
-
-        // Aqui você poderia salvar a subscription no banco de dados
-        console.log('Web Push habilitado:', subscription)
+        console.log('✓ Notificações habilitadas')
         setPushEnabled(true)
         return true
+      } else {
+        console.log('✗ Permissão de notificação negada')
+        return false
       }
     } catch (error) {
-      console.error('Erro ao habilitar Web Push:', error)
+      console.error('Erro ao habilitar notificações:', error)
+      return false
     }
-
-    return false
   }
 
   return {

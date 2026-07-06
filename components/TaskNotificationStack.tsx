@@ -29,17 +29,15 @@ export default function TaskNotificationStack({
   )
 
   const handleEnablePush = async () => {
-    const success = await registrarPush()
-    if (success) {
-      setShowPushPrompt(false)
-    }
+    await registrarPush()
+    setShowPushPrompt(false)
   }
 
   return (
     <>
       {/* Stack de notificações */}
-      <div className="fixed bottom-6 right-6 space-y-3 pointer-events-none">
-        {displayedNotifications.map((notification, index) => (
+      <div className="fixed bottom-6 left-6 space-y-3 pointer-events-none z-40">
+        {displayedNotifications.map((notification) => (
           <div key={notification.id} className="pointer-events-auto">
             <TaskNotificationToast
               notification={notification}
@@ -53,8 +51,8 @@ export default function TaskNotificationStack({
         ))}
       </div>
 
-      {/* Prompt para habilitar Push Notifications */}
-      {!pushEnabled && showPushPrompt && (
+      {/* Prompt para habilitar Push Notifications - apenas se usuário clicar */}
+      {showPushPrompt && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-lg max-w-sm p-6">
             <div className="flex items-center gap-3 mb-4">
@@ -89,11 +87,11 @@ export default function TaskNotificationStack({
         </div>
       )}
 
-      {/* Botão para habilitar push se não ativado */}
+      {/* Botão para habilitar push - apenas se não ativado e não mostrar prompt */}
       {!pushEnabled && !showPushPrompt && (
         <button
           onClick={() => setShowPushPrompt(true)}
-          className="fixed bottom-6 left-6 bg-rose-600 hover:bg-rose-700 text-white rounded-full p-3 shadow-lg transition-all z-40"
+          className="fixed bottom-20 right-6 bg-rose-600 hover:bg-rose-700 text-white rounded-full p-3 shadow-lg transition-all z-50"
           title="Habilitar notificações"
         >
           <Bell size={20} />
