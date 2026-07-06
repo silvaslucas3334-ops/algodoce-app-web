@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import BottomNav from '@/components/BottomNav'
+import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -33,6 +34,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#c2185b" />
       </head>
       <body className="bg-gray-50">
+        <ServiceWorkerRegistration />
         <div className="pb-20">
           {children}
         </div>

@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, BarChart3, CreditCard, ChevronLeft, ChevronRight } from 'lucide-react'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
+import TaskNotificationStack from '@/components/TaskNotificationStack'
 
 const DIAS_LABEL = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom']
 const MESES_LABEL = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
@@ -257,6 +258,9 @@ function TarefasContent() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      {/* Notificações de tarefas */}
+      <TaskNotificationStack usuarioId={usuario?.id} />
+
       {/* Header */}
       <div className={`bg-gradient-to-r ${theme.headerGrad} px-4 sm:px-6 py-2 sticky top-0 z-40 shadow-md transition-colors h-20 flex items-center`}>
         <div className="flex items-center justify-between gap-4 w-full">
