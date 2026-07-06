@@ -36,10 +36,12 @@ export function useTaskNotifications(usuarioId: string | undefined, onNotificati
           event: 'INSERT',
           schema: 'public',
           table: 'tarefas',
-          filter: `responsavel_atual_id=eq.${usuarioId}`,
         },
         async (payload: any) => {
           const tarefa = payload.new
+
+          // Filtrar no código: só processar se é para este usuário
+          if (tarefa.responsavel_atual_id !== usuarioId) return
 
           // Buscar nome do setor
           const { data: setorData } = await supabase
