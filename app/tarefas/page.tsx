@@ -75,10 +75,17 @@ function TarefasContent() {
           }
         }
 
-        const { data: usuariosData } = await supabase
+        let query = supabase
           .from('usuarios')
           .select('id, nome, setor_id, role')
-          .order('nome')
+          .eq('ativo', true)
+
+        // Se não é admin, filtrar pela loja do usuário
+        if (usuario.role !== 'admin' && usuario.loja_id) {
+          query = query.eq('loja_id', usuario.loja_id)
+        }
+
+        const { data: usuariosData } = await query.order('nome')
 
         if (usuariosData) setUsuarios(usuariosData)
       } catch (err) {
