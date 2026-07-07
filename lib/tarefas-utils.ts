@@ -3,63 +3,82 @@ import { supabase } from '@/lib/supabase'
 /**
  * Comprime imagem no client antes de upload
  * Máximo 1600px no lado maior, quality 0.8
+ *
+ * Evita FileReader.readAsDataURL: fotos de câmera Android costumam vir em
+ * 15-40MB, e converter isso para base64 (que infla ~33% e fica todo em
+ * memória como string) trava/recarrega o Chrome em aparelhos intermediários
+ * no meio do processo, sem erro algum — a tarefa fica pendente do nada.
+ * createImageBitmap/ObjectURL decodificam o arquivo direto, sem esse passo.
  */
 export async function compressImage(file: File): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
+  const maxSize = 1600
 
-    reader.onload = (e) => {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        let width = img.width
-        let height = img.height
+  function toBlob(
+    sourceWidth: number,
+    sourceHeight: number,
+    draw: (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => void
+  ): Promise<Blob> {
+    let width = sourceWidth
+    let height = sourceHeight
 
-        // Redimensionar mantendo aspect ratio
-        const maxSize = 1600
-        if (width > height) {
-          if (width > maxSize) {
-            height = Math.round((height * maxSize) / width)
-            width = maxSize
-          }
-        } else {
-          if (height > maxSize) {
-            width = Math.round((width * maxSize) / height)
-            height = maxSize
-          }
-        }
-
-        canvas.width = width
-        canvas.height = height
-
-        const ctx = canvas.getContext('2d')
-        if (!ctx) {
-          reject(new Error('Falha ao obter contexto do canvas'))
-          return
-        }
-
-        ctx.drawImage(img, 0, 0, width, height)
-
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(blob)
-            } else {
-              reject(new Error('Falha ao comprimir imagem'))
-            }
-          },
-          'image/jpeg',
-          0.8
-        )
+    if (width > height) {
+      if (width > maxSize) {
+        height = Math.round((height * maxSize) / width)
+        width = maxSize
       }
-
-      img.onerror = () => reject(new Error('Falha ao carregar imagem'))
-      img.src = e.target?.result as string
+    } else {
+      if (height > maxSize) {
+        width = Math.round((width * maxSize) / height)
+        height = maxSize
+      }
     }
 
-    reader.onerror = () => reject(new Error('Falha ao ler arquivo'))
-    reader.readAsDataURL(file)
-  })
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      return Promise.reject(new Error('Falha ao obter contexto do canvas'))
+    }
+
+    draw(ctx, canvas)
+
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('Falha ao comprimir imagem'))),
+        'image/jpeg',
+        0.8
+      )
+    })
+  }
+
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(file)
+    try {
+      return await toBlob(bitmap.width, bitmap.height, (ctx, canvas) =>
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+      )
+    } finally {
+      bitmap.close()
+    }
+  }
+
+  // Fallback para navegadores sem createImageBitmap: ObjectURL ainda evita base64
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error('Falha ao carregar imagem'))
+      el.src = objectUrl
+    })
+    return await toBlob(img.naturalWidth, img.naturalHeight, (ctx, canvas) =>
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    )
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
 }
 
 /**
