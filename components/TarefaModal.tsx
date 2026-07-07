@@ -55,6 +55,8 @@ export default function TarefaModal({
   const [prazoHora, setPrazoHora] = useState('')
   const [editando, setEditando] = useState(false)
   const [mostrarEditarRecorrencia, setMostrarEditarRecorrencia] = useState(false)
+  const [mostrarConcluirGestor, setMostrarConcluirGestor] = useState(false)
+  const [comentarioGestorTexto, setComentarioGestorTexto] = useState('')
   const [recorrenciaData, setRecorrenciaData] = useState<any>(null)
   const [carregandoRecorrencia, setCarregandoRecorrencia] = useState(false)
   const inputFileRef = useRef<HTMLInputElement>(null)
@@ -95,6 +97,12 @@ export default function TarefaModal({
       tarefa.status === 'pendente' &&
       evidencias.length === 0)
   const podeRevisar = ehAdmin && tarefa.status === 'pronta_revisao'
+  // Gestor conclui em nome do colaborador uma tarefa atrasada/esquecida (sem foto,
+  // direto para concluída — o colaborador é avisado depois, na próxima vez que abrir o app)
+  const podeConcluirComoGestor =
+    ehAdmin &&
+    !ehResponsavel &&
+    (tarefa.status === 'pendente' || tarefa.status === 'refazer_pendente')
   // Admin edita qualquer tarefa não concluída/cancelada; criador só a própria
   // pendente e sem evidência (espelha a RLS).
   const podeEditar =
@@ -358,6 +366,69 @@ export default function TarefaModal({
     }
   }
 
+  const handleConcluirComoGestor = async () => {
+    if (!comentarioGestorTexto.trim()) {
+      alert('Descreva um comentário para o colaborador antes de concluir')
+      return
+    }
+
+    try {
+      setFazendoUpload(true)
+
+      const { data: updated, error } = await supabase
+        .from('tarefas')
+        .update({
+          status: 'concluida',
+          concluido_em: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', tarefa.id)
+        .select('id')
+
+      if (error) {
+        logErro('Erro ao concluir como gestor (update tarefas):', error)
+        alert('Erro ao concluir: ' + (error.message || 'sem mensagem'))
+        return
+      }
+      if (!updated || updated.length === 0) {
+        alert('Não foi possível concluir: RLS bloqueou o UPDATE.')
+        return
+      }
+
+      const { error: histError } = await supabase.from('tarefas_historico').insert({
+        tarefa_id: tarefa.id,
+        alteracao_tipo: 'status_change',
+        dados_json: {
+          from_status: tarefa.status,
+          to_status: 'concluida',
+          concluida_por_gestor: true,
+          comentario: comentarioGestorTexto.trim(),
+        },
+        registrado_por: usuarioAtualId,
+      })
+      if (histError) logErro('Concluiu como gestor, mas falhou ao gravar histórico:', histError)
+
+      if (tarefa.responsavel_atual_id) {
+        const { error: notifError } = await supabase.from('tarefas_notificacoes').insert({
+          tarefa_id: tarefa.id,
+          usuario_id: tarefa.responsavel_atual_id,
+          tipo: 'concluida_por_gestor',
+          mensagem: comentarioGestorTexto.trim(),
+          criado_por: usuariosMap[usuarioAtualId]?.nome || 'Gestor',
+        })
+        if (notifError) logErro('Concluiu como gestor, mas falhou ao gravar notificação:', notifError)
+      }
+
+      onStatusChange?.()
+      onClose()
+    } catch (err: any) {
+      logErro('Erro ao concluir como gestor (exceção):', err)
+      alert('Erro ao concluir: ' + (err?.message || 'desconhecido'))
+    } finally {
+      setFazendoUpload(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
       <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full sm:w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -608,6 +679,49 @@ export default function TarefaModal({
                 '✓ Concluir'
               )}
             </button>
+          )}
+
+          {/* Concluir em nome do colaborador (admin, tarefa atrasada/esquecida) */}
+          {podeConcluirComoGestor && (
+            <div className="border-t border-gray-200 pt-4 space-y-3">
+              {!mostrarConcluirGestor ? (
+                <button
+                  onClick={() => setMostrarConcluirGestor(true)}
+                  className="w-full py-3 rounded-lg font-semibold bg-amber-100 text-amber-800 hover:bg-amber-200"
+                >
+                  ✓ Concluir em nome do colaborador
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-600">
+                    Comentário do gestor (o colaborador verá isso na próxima vez que abrir o app)
+                  </p>
+                  <textarea
+                    value={comentarioGestorTexto}
+                    onChange={(e) => setComentarioGestorTexto(e.target.value)}
+                    rows={3}
+                    placeholder="Ex: confirmei com você por WhatsApp que já tinha feito, só esqueceu de marcar."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none"
+                  />
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => { setMostrarConcluirGestor(false); setComentarioGestorTexto('') }}
+                      disabled={fazendoUpload}
+                      className="flex-1 py-2.5 rounded-lg font-semibold text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleConcluirComoGestor}
+                      disabled={fazendoUpload || !comentarioGestorTexto.trim()}
+                      className="flex-1 py-2.5 rounded-lg font-semibold text-sm bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {fazendoUpload ? <Loader size={16} className="animate-spin" /> : '✓ Concluir'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Revisão do gestor (admin, tarefa pronta_revisao) */}
