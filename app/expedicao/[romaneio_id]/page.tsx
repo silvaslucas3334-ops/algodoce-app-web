@@ -100,9 +100,8 @@ export default function VisualizarRomaneioPage() {
 
     setCancelando(true)
     try {
-      const response = await fetch(`/api/romaneios/${romaneio.id}`, { method: 'DELETE' })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error)
+      const { error } = await supabase.from('romaneios').delete().eq('id', romaneio.id)
+      if (error) throw error
 
       router.push('/expedicao')
     } catch (err) {

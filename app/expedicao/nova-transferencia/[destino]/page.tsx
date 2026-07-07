@@ -120,24 +120,23 @@ export default function SelecioarEstoqueTransferenciaPage() {
 
     setCriando(true)
     try {
-      const response = await fetch('/api/romaneios/criar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { data: romaneioCriado, error } = await supabase
+        .from('romaneios')
+        .insert([{
           data_entrega: new Date().toISOString().split('T')[0],
           status: 'rascunho',
           tipo: 'transferencia',
           criado_por: usuario?.id || null,
           unidade_destino: destino,
           linhas,
-        }),
-      })
+        }])
+        .select()
+        .single()
 
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error)
+      if (error) throw error
 
-      if (result.data?.id) {
-        router.push(`/expedicao/transferencia/${result.data.id}`)
+      if (romaneioCriado?.id) {
+        router.push(`/expedicao/transferencia/${romaneioCriado.id}`)
       }
     } catch (err) {
       console.error('Erro:', err)

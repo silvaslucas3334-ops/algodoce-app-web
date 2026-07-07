@@ -223,23 +223,22 @@ export default function VerificacaoOrdensPage() {
 
     setSalvando(true)
     try {
-      const response = await fetch('/api/romaneios/criar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { data: romaneioCriado, error } = await supabase
+        .from('romaneios')
+        .insert([{
           data_entrega: data,
           status: 'rascunho',
           criado_por: usuario?.id || null,
           unidade_destino: unidade,
           tipo: 'envio',
           linhas,
-        }),
-      })
+        }])
+        .select()
+        .single()
 
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error)
+      if (error) throw error
 
-      router.push(`/expedicao/${result.data.id}`)
+      router.push(`/expedicao/${romaneioCriado.id}`)
     } catch (err) {
       console.error('Erro:', err)
       alert('Erro ao criar romaneio')
