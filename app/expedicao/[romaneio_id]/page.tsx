@@ -14,6 +14,8 @@ export default function VisualizarRomaneioPage() {
   const [romaneio, setRomaneio] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [confirmando, setConfirmando] = useState(false)
+  const [cancelando, setCancelando] = useState(false)
+  const [salvandoDepois, setSalvandoDepois] = useState(false)
   const [expandidas, setExpandidas] = useState<Record<string, boolean>>({})
 
   // Carregar romaneio
@@ -87,6 +89,33 @@ export default function VisualizarRomaneioPage() {
     } finally {
       setConfirmando(false)
     }
+  }
+
+  async function cancelarRomaneio() {
+    if (!romaneio) return
+    const confirmar = window.confirm(
+      'Cancelar este romaneio? Ele será excluído permanentemente e nenhuma etiqueta será enviada.'
+    )
+    if (!confirmar) return
+
+    setCancelando(true)
+    try {
+      const response = await fetch(`/api/romaneios/${romaneio.id}`, { method: 'DELETE' })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error)
+
+      router.push('/expedicao')
+    } catch (err) {
+      console.error('Erro:', err)
+      alert('Erro ao cancelar romaneio')
+    } finally {
+      setCancelando(false)
+    }
+  }
+
+  function salvarParaDepois() {
+    setSalvandoDepois(true)
+    router.push('/expedicao')
   }
 
   if (loading) {
@@ -244,25 +273,33 @@ export default function VisualizarRomaneioPage() {
         {!isPrintView && romaneio.status === 'rascunho' && (
           <div className="mt-6 flex gap-3 sticky bottom-6">
             <button
-              onClick={() => router.back()}
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50"
+              onClick={cancelarRomaneio}
+              disabled={cancelando || confirmando || salvandoDepois}
+              className="flex-1 px-4 py-3 border border-red-300 rounded-lg font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
             >
-              Voltar
+              {cancelando ? 'Cancelando...' : 'Cancelar'}
+            </button>
+            <button
+              onClick={salvarParaDepois}
+              disabled={cancelando || confirmando || salvandoDepois}
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {salvandoDepois ? 'Salvando...' : 'Salvar para Depois'}
             </button>
             <button
               onClick={confirmarRomaneio}
-              disabled={confirmando}
+              disabled={confirmando || cancelando || salvandoDepois}
               className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {confirmando ? (
                 <>
                   <Loader size={18} className="animate-spin" />
-                  Confirmando...
+                  Enviando...
                 </>
               ) : (
                 <>
                   <CheckCircle size={18} />
-                  Confirmar Romaneio & Marcar Enviado
+                  Enviar
                 </>
               )}
             </button>
