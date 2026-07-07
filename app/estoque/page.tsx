@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
-import { ShoppingCart, Trash2, Send } from 'lucide-react'
+import { ShoppingCart, Trash2, Send, History, RotateCcw } from 'lucide-react'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 export default function EstoquePage() {
@@ -34,6 +34,12 @@ export default function EstoquePage() {
   const [confirmarBaixaConsumo, setConfirmarBaixaConsumo] = useState(false)
   const [produtosExpandidos, setProdutosExpandidos] = useState<Record<string, boolean>>({})
   const [mostrarRecebimento, setMostrarRecebimento] = useState(false)
+  const [mostrarHistoricoBaixas, setMostrarHistoricoBaixas] = useState(false)
+  const [baixasRecentes, setBaixasRecentes] = useState<any[]>([])
+  const [carregandoBaixas, setCarregandoBaixas] = useState(false)
+  const [revertendoId, setRevertendoId] = useState<string | null>(null)
+  const [justificativaTexto, setJustificativaTexto] = useState('')
+  const [salvandoReversao, setSalvandoReversao] = useState(false)
 
   // Sincronizar local quando usuário muda
   useEffect(() => {
@@ -317,6 +323,82 @@ export default function EstoquePage() {
     carregarEstoque()
   }
 
+  const JANELA_REVERSAO_HORAS = 24
+
+  async function carregarBaixasRecentes() {
+    setCarregandoBaixas(true)
+    try {
+      const doisDiasAtras = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+
+      const { data: baixas } = await supabase
+        .from('movimentacoes_estoque')
+        .select('id, lote_id, tipo, local_origem, quantidade, registrado_por, created_at, justificativa, estornado_de, lote:lotes_producao(id, produto:produtos(nome, unidade_medida))')
+        .eq('tipo', 'saida')
+        .eq('local_origem', local)
+        .gte('created_at', doisDiasAtras)
+        .order('created_at', { ascending: false })
+
+      const idsBaixas = (baixas || []).map((b: any) => b.id)
+      let revertidoPorBaixa = new Map<string, any>()
+      if (idsBaixas.length > 0) {
+        const { data: reversoes } = await supabase
+          .from('movimentacoes_estoque')
+          .select('estornado_de, created_at, justificativa, registrado_por')
+          .in('estornado_de', idsBaixas)
+
+        reversoes?.forEach((r: any) => revertidoPorBaixa.set(r.estornado_de, r))
+      }
+
+      const processadas = (baixas || []).map((b: any) => ({
+        ...b,
+        reversao: revertidoPorBaixa.get(b.id) || null,
+      }))
+
+      setBaixasRecentes(processadas)
+    } catch (err) {
+      console.error('Erro ao carregar baixas recentes:', err)
+    } finally {
+      setCarregandoBaixas(false)
+    }
+  }
+
+  function horasDesde(dataIso: string) {
+    return (Date.now() - new Date(dataIso).getTime()) / (60 * 60 * 1000)
+  }
+
+  async function confirmarReversao(baixa: any) {
+    if (!justificativaTexto.trim()) {
+      alert('Informe uma justificativa para reverter esta baixa.')
+      return
+    }
+
+    setSalvandoReversao(true)
+    try {
+      const statusRestaurado = baixa.local_origem === 'cozinha' ? 'na_cozinha' : 'na_loja'
+
+      await supabase.from('lotes_producao').update({ status: statusRestaurado }).eq('id', baixa.lote_id)
+      await supabase.from('movimentacoes_estoque').insert({
+        lote_id: baixa.lote_id,
+        tipo: 'entrada',
+        local_destino: baixa.local_origem,
+        quantidade: baixa.quantidade,
+        registrado_por: operador || 'Sistema',
+        justificativa: justificativaTexto.trim(),
+        estornado_de: baixa.id,
+      })
+
+      setRevertendoId(null)
+      setJustificativaTexto('')
+      await carregarBaixasRecentes()
+      carregarEstoque()
+    } catch (err) {
+      console.error('Erro ao reverter baixa:', err)
+      alert('Erro ao reverter baixa')
+    } finally {
+      setSalvandoReversao(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       <div className="bg-white border-b border-gray-200 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center h-20">
@@ -411,6 +493,117 @@ export default function EstoquePage() {
               </div>
             </div>
           )}
+
+          {/* CARD: HISTÓRICO DE BAIXAS / REVERSÃO */}
+          <div className="mb-6">
+            <div className="bg-white rounded-lg border border-gray-200">
+              <button
+                onClick={() => {
+                  const abrir = !mostrarHistoricoBaixas
+                  setMostrarHistoricoBaixas(abrir)
+                  if (abrir) carregarBaixasRecentes()
+                }}
+                className="w-full flex items-center justify-between gap-2 p-4 hover:bg-gray-50"
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                  <History size={16} />
+                  Histórico de baixas
+                </span>
+                <span className="text-xs text-gray-500">{mostrarHistoricoBaixas ? 'Ocultar' : 'Ver / Reverter'}</span>
+              </button>
+
+              {mostrarHistoricoBaixas && (
+                <div className="border-t border-gray-200 p-4 space-y-3">
+                  <p className="text-xs text-gray-500">
+                    Baixas de até 24h podem ser revertidas mediante justificativa. Após 24h, ficam registradas mas não podem mais ser desfeitas aqui.
+                  </p>
+
+                  {carregandoBaixas ? (
+                    <p className="text-sm text-gray-400 text-center py-4">Carregando...</p>
+                  ) : baixasRecentes.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-4">Nenhuma baixa nas últimas 48h para {LOCAL_LABEL[local]}</p>
+                  ) : (
+                    baixasRecentes.map((baixa) => {
+                      const horas = horasDesde(baixa.created_at)
+                      const revertivel = horas < JANELA_REVERSAO_HORAS && !baixa.reversao
+                      const horasRestantes = Math.max(0, JANELA_REVERSAO_HORAS - horas)
+
+                      return (
+                        <div key={baixa.id} className="p-3 rounded-lg border border-gray-200 bg-gray-50">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1">
+                              <p className="font-semibold text-gray-800 text-sm">
+                                {baixa.lote?.produto?.nome || 'Produto desconhecido'}
+                              </p>
+                              <p className="text-xs text-gray-600 mt-0.5">
+                                {baixa.quantidade} {baixa.lote?.produto?.unidade_medida || 'un'} · {baixa.registrado_por} ·{' '}
+                                {new Date(baixa.created_at).toLocaleString('pt-BR')}
+                              </p>
+
+                              {baixa.reversao ? (
+                                <p className="text-xs text-green-700 font-semibold mt-1.5">
+                                  ✓ Revertida em {new Date(baixa.reversao.created_at).toLocaleString('pt-BR')} por{' '}
+                                  {baixa.reversao.registrado_por} — "{baixa.reversao.justificativa}"
+                                </p>
+                              ) : revertivel ? (
+                                <p className="text-xs text-amber-700 font-semibold mt-1.5">
+                                  {horasRestantes < 1
+                                    ? 'Menos de 1h restante para reverter'
+                                    : `${Math.floor(horasRestantes)}h restantes para reverter`}
+                                </p>
+                              ) : (
+                                <p className="text-xs text-gray-400 font-semibold mt-1.5">Prazo de reversão expirado</p>
+                              )}
+                            </div>
+
+                            {revertivel && revertendoId !== baixa.id && (
+                              <button
+                                onClick={() => {
+                                  setRevertendoId(baixa.id)
+                                  setJustificativaTexto('')
+                                }}
+                                className="flex-shrink-0 flex items-center gap-1 bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                              >
+                                <RotateCcw size={13} />
+                                Reverter
+                              </button>
+                            )}
+                          </div>
+
+                          {revertendoId === baixa.id && (
+                            <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
+                              <textarea
+                                value={justificativaTexto}
+                                onChange={(e) => setJustificativaTexto(e.target.value)}
+                                placeholder="Justificativa: por que essa baixa está sendo revertida?"
+                                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                rows={2}
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => { setRevertendoId(null); setJustificativaTexto('') }}
+                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  onClick={() => confirmarReversao(baixa)}
+                                  disabled={salvandoReversao}
+                                  className="flex-1 px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 disabled:opacity-50"
+                                >
+                                  {salvandoReversao ? 'Revertendo...' : 'Confirmar reversão'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* HEADER GERENCIAL */}
           <div className="bg-white border-b border-gray-200 rounded-xl p-6 mb-6">
