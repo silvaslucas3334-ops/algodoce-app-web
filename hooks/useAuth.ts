@@ -26,7 +26,7 @@ export function useAuth() {
               id: 'b3bdcd1b-440c-4a2d-9305-9254f890473e',
               email: 'teste@algodoce.local',
               nome: 'Usuário Teste',
-              funcao: 'cozinha',
+              role: 'admin',
               ativo: true,
             }
             if (montado) {
