@@ -286,6 +286,33 @@ export default function DetalhesOrdemPage() {
     return <div className="text-center py-12 text-gray-400">Ordem não encontrada</div>
   }
 
+  // Data de entrega real: recebimento mais recente no destino planejado da ordem
+  // (exclui reversões de baixa, que também são tipo 'entrada' mas não são recebimento).
+  // Se nunca foi recebida no destino planejado, cai para qualquer recebimento real
+  // (pode indicar que a ordem foi redirecionada para outro destino).
+  const entradasReais = movimentacoes.filter((m) => m.tipo === 'entrada' && !m.estornado_de)
+  const entradasNoDestino = entradasReais.filter((m) => m.local_destino === ordem.loja_destino)
+  const entradasConsideradas = entradasNoDestino.length > 0 ? entradasNoDestino : entradasReais
+  const ultimaEntrada = entradasConsideradas.length
+    ? entradasConsideradas.reduce((maisRecente, m) =>
+        new Date(m.created_at) > new Date(maisRecente.created_at) ? m : maisRecente
+      )
+    : null
+  const dataEntregaReal = ultimaEntrada?.created_at || null
+  const destinoDivergente = !!ultimaEntrada && ultimaEntrada.local_destino !== ordem.loja_destino
+
+  let comparacaoEntrega: { texto: string; cor: string } | null = null
+  if (ordem.data_entrega && dataEntregaReal) {
+    const planejada = new Date(ordem.data_entrega + 'T00:00:00')
+    const real = new Date(dataEntregaReal)
+    const realSoData = new Date(real.getFullYear(), real.getMonth(), real.getDate())
+    const diffDias = Math.round((realSoData.getTime() - planejada.getTime()) / 86400000)
+
+    if (diffDias === 0) comparacaoEntrega = { texto: 'Entregue no prazo', cor: 'text-green-700 bg-green-50 border-green-200' }
+    else if (diffDias > 0) comparacaoEntrega = { texto: `Entregue ${diffDias} dia${diffDias > 1 ? 's' : ''} atrasado`, cor: 'text-red-700 bg-red-50 border-red-200' }
+    else comparacaoEntrega = { texto: `Entregue ${Math.abs(diffDias)} dia${Math.abs(diffDias) > 1 ? 's' : ''} adiantado`, cor: 'text-blue-700 bg-blue-50 border-blue-200' }
+  }
+
   return (
     <div className="p-4">
       <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 mb-4 hover:text-gray-800">
@@ -301,6 +328,11 @@ export default function DetalhesOrdemPage() {
             <p className="text-sm text-gray-600 mt-1">
               📦 {ordem.quantidade} {ordem.produto?.unidade_medida} · {labelLocal(ordem.loja_destino)}
             </p>
+            {ordem.data_entrega && (
+              <p className="text-sm text-gray-600 mt-1">
+                📅 Entrega planejada: <strong>{new Date(ordem.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}</strong>
+              </p>
+            )}
           </div>
           <span className={`text-xs px-3 py-1 rounded-full font-medium ${STATUS_LABEL[ordem.status]?.color}`}>
             {STATUS_LABEL[ordem.status]?.label}
@@ -348,31 +380,33 @@ export default function DetalhesOrdemPage() {
           </div>
         )}
 
-        {/* RESUMO */}
+        {/* COMPARAÇÃO: ENTREGA PLANEJADA x REAL */}
         <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 mt-6">
-          <p className="text-xs text-gray-500 mb-2">Informações da Ordem</p>
+          <p className="text-xs text-gray-500 mb-2">📅 Entrega planejada x real</p>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <p className="text-gray-500 text-xs">Solicitado por:</p>
-              <p className="font-medium text-gray-800">{ordem.solicitado_por}</p>
-            </div>
-            <div>
-              <p className="text-gray-500 text-xs">Data da Solicitação:</p>
-              <p className="font-medium text-gray-800">
-                {ordem.data_solicitacao ? new Date(ordem.data_solicitacao + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-500 text-xs">Data de Entrega:</p>
+              <p className="text-gray-500 text-xs">Solicitada (na ordem):</p>
               <p className="font-medium text-gray-800">
                 {ordem.data_entrega ? new Date(ordem.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}
               </p>
             </div>
             <div>
-              <p className="text-gray-500 text-xs">Total de Etiquetas:</p>
-              <p className="font-medium text-gray-800">{lotes.length}</p>
+              <p className="text-gray-500 text-xs">Real (recebimento na loja):</p>
+              <p className="font-medium text-gray-800">
+                {dataEntregaReal ? new Date(dataEntregaReal).toLocaleDateString('pt-BR') : 'Ainda não recebida'}
+              </p>
+              {destinoDivergente && (
+                <p className="text-xs text-amber-700 mt-0.5">
+                  ⚠️ Recebida em {labelLocal(ultimaEntrada?.local_destino)}, não em {labelLocal(ordem.loja_destino)}
+                </p>
+              )}
             </div>
           </div>
+          {comparacaoEntrega && (
+            <div className={`mt-3 text-xs font-semibold px-3 py-2 rounded-lg border ${comparacaoEntrega.cor}`}>
+              {comparacaoEntrega.texto}
+            </div>
+          )}
         </div>
       </div>
     </div>
