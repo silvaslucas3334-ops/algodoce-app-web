@@ -84,9 +84,11 @@ function TarefasContent() {
           .select('id, nome, setor_id, role')
           .eq('ativo', true)
 
-        // Se não é admin, filtrar pela loja do usuário
+        // Se não é admin, filtrar pela loja do usuário — mas sempre incluir
+        // os admins (gestores), que não têm loja_id, para poderem ser
+        // escolhidos como responsável ao criar uma tarefa
         if (usuario.role !== 'admin' && usuario.loja_id) {
-          query = query.eq('loja_id', usuario.loja_id)
+          query = query.or(`loja_id.eq.${usuario.loja_id},role.eq.admin`)
         }
 
         const { data: usuariosData } = await query.order('nome')
@@ -111,11 +113,19 @@ function TarefasContent() {
 
   async function carregarTarefas() {
     if (!setorSelecionado) return
-    const { data: tarefasData } = await supabase
-      .from('tarefas')
-      .select('*')
-      .eq('setor_id', setorSelecionado)
-      .order('data_vencimento')
+
+    // No painel do setor Administrativo, o admin também vê as tarefas que
+    // colaboradores de qualquer unidade criaram para ele (solicitações),
+    // além das tarefas do próprio setor Administrativo.
+    const setorAtual = setores.find((s) => s.id === setorSelecionado)
+    const vendoComoGestor = usuario?.role === 'admin' && setorAtual?.tipo === 'administrativo'
+
+    let query = supabase.from('tarefas').select('*')
+    query = vendoComoGestor
+      ? query.or(`setor_id.eq.${setorSelecionado},responsavel_atual_id.eq.${usuario!.id}`)
+      : query.eq('setor_id', setorSelecionado)
+
+    const { data: tarefasData } = await query.order('data_vencimento')
 
     if (tarefasData) {
       setTarefas(tarefasData)
@@ -240,8 +250,17 @@ function TarefasContent() {
     return (a.hora_limite || '99:99').localeCompare(b.hora_limite || '99:99')
   })
 
-  const setorNome = setores.find((s) => s.id === setorSelecionado)?.nome
+  const setorAtual = setores.find((s) => s.id === setorSelecionado)
+  const setorNome = setorAtual?.nome
   const theme = getSetorTheme(setorNome)
+  // Admin vendo o setor Administrativo também enxerga solicitações feitas
+  // por colaboradores de outras unidades (ver carregarTarefas) — essas
+  // tarefas ganham um selo com a cor da unidade de origem
+  const vendoComoGestor = usuario?.role === 'admin' && setorAtual?.tipo === 'administrativo'
+  function origemSetorNome(tarefa: Tarefa): string | undefined {
+    if (!vendoComoGestor || tarefa.setor_id === setorSelecionado) return undefined
+    return setores.find((s) => s.id === tarefa.setor_id)?.nome
+  }
   // Fila de revisão do setor (tarefas aguardando aprovação do gestor)
   const tarefasRevisao = tarefas.filter((t) => t.status === 'pronta_revisao')
 
@@ -343,6 +362,7 @@ function TarefasContent() {
                   responsavelNome={
                     usuariosMap[tarefa.responsavel_atual_id]?.nome || 'Desconhecido'
                   }
+                  origemSetorNome={origemSetorNome(tarefa)}
                   onClick={() => setTarefaSelecionada(tarefa)}
                   tamanho="grande"
                 />
@@ -534,6 +554,7 @@ function TarefasContent() {
                     usuariosMap[tarefa.responsavel_atual_id]?.nome || 'Desconhecido'
                   }
                   criadoPorNome={criadoPorNome}
+                  origemSetorNome={origemSetorNome(tarefa)}
                   onClick={() => setTarefaSelecionada(tarefa)}
                   tamanho="grande"
                 />
@@ -647,6 +668,7 @@ function TarefasContent() {
                         usuariosMap[tarefa.responsavel_atual_id]?.nome || 'Desconhecido'
                       }
                       criadoPorNome={criadoPorNome}
+                      origemSetorNome={origemSetorNome(tarefa)}
                       onClick={() => setTarefaSelecionada(tarefa)}
                       tamanho="grande"
                     />
@@ -693,10 +715,14 @@ function TarefasContent() {
         const usuariosDoSetor = usuarios
           .filter((u) => u.setor_id === setorSelecionado)
           .map((u) => ({ id: u.id, nome: u.nome }))
+        const gestores = usuarios
+          .filter((u) => u.role === 'admin')
+          .map((u) => ({ id: u.id, nome: u.nome }))
         return (
           <NovaTarefaModal
             setor={setorObj}
             usuariosDoSetor={usuariosDoSetor}
+            gestores={gestores}
             criadoPor={usuario.id}
             permitirRecorrencia={true}
             onClose={() => setCriandoTarefa(false)}

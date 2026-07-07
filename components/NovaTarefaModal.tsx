@@ -8,6 +8,7 @@ import { X, Save, Sparkles } from 'lucide-react'
 interface NovaTarefaModalProps {
   setor: Setor
   usuariosDoSetor: { id: string; nome: string }[]
+  gestores?: { id: string; nome: string }[]
   criadoPor: string
   permitirRecorrencia?: boolean
   onClose: () => void
@@ -22,6 +23,7 @@ const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 export default function NovaTarefaModal({
   setor,
   usuariosDoSetor,
+  gestores = [],
   criadoPor,
   permitirRecorrencia = false,
   onClose,
@@ -382,11 +384,24 @@ export default function NovaTarefaModal({
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
               >
                 <option value="">Selecione...</option>
-                {usuariosDoSetor.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.nome}
-                  </option>
-                ))}
+                <optgroup label={setor.nome}>
+                  {usuariosDoSetor.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.nome}
+                    </option>
+                  ))}
+                </optgroup>
+                {gestores.filter((g) => !usuariosDoSetor.some((u) => u.id === g.id)).length > 0 && (
+                  <optgroup label="Gestores">
+                    {gestores
+                      .filter((g) => !usuariosDoSetor.some((u) => u.id === g.id))
+                      .map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.nome}
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
               </select>
             </div>
 

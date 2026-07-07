@@ -1,6 +1,6 @@
 'use client'
 import { Tarefa } from '@/lib/types'
-import { formatData, formatHora, isAtrasada, STATUS_INFO, getDiaSemana, getDiaMes } from '@/lib/tarefas-utils'
+import { formatData, formatHora, isAtrasada, STATUS_INFO, getDiaSemana, getDiaMes, getSetorTheme } from '@/lib/tarefas-utils'
 import { AlertTriangle } from 'lucide-react'
 
 interface TarefaCardProps {
@@ -8,6 +8,7 @@ interface TarefaCardProps {
   responsavelNome?: string
   responsavelAvatar?: string
   criadoPorNome?: string // preenchido só quando o criador não é admin
+  origemSetorNome?: string // preenchido só quando a tarefa é de outra unidade (solicitação ao gestor)
   onClick?: () => void
   tamanho?: 'pequeno' | 'grande' // pequeno = agenda, grande = lista hoje
 }
@@ -17,6 +18,7 @@ export default function TarefaCard({
   responsavelNome = 'Não atribuído',
   responsavelAvatar,
   criadoPorNome,
+  origemSetorNome,
   onClick,
   tamanho = 'pequeno',
 }: TarefaCardProps) {
@@ -48,11 +50,16 @@ export default function TarefaCard({
 
         <div className="flex items-start justify-between gap-3 p-4 pl-5">
           <div className="flex-1">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <h3 className="font-bold text-gray-800">{tarefa.titulo}</h3>
               {atrasada && (
                 <span className="inline-flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
                   <AlertTriangle size={12} /> Atrasada
+                </span>
+              )}
+              {origemSetorNome && (
+                <span className={`text-xs font-bold text-white px-2 py-0.5 rounded-full ${getSetorTheme(origemSetorNome).badge}`}>
+                  📍 {origemSetorNome}
                 </span>
               )}
             </div>
