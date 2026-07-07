@@ -40,6 +40,9 @@ export default function EstoquePage() {
   const [revertendoId, setRevertendoId] = useState<string | null>(null)
   const [justificativaTexto, setJustificativaTexto] = useState('')
   const [salvandoReversao, setSalvandoReversao] = useState(false)
+  const [buscaEtiqueta, setBuscaEtiqueta] = useState('')
+  const [resultadoBusca, setResultadoBusca] = useState<any[] | null>(null)
+  const [buscandoEtiqueta, setBuscandoEtiqueta] = useState(false)
 
   // Sincronizar local quando usuário muda
   useEffect(() => {
@@ -332,33 +335,77 @@ export default function EstoquePage() {
 
       const { data: baixas } = await supabase
         .from('movimentacoes_estoque')
-        .select('id, lote_id, tipo, local_origem, quantidade, registrado_por, created_at, justificativa, estornado_de, lote:lotes_producao(id, produto:produtos(nome, unidade_medida))')
+        .select('id, lote_id, tipo, local_origem, quantidade, registrado_por, created_at, justificativa, estornado_de, lote:lotes_producao(id, codigo_qr, produto:produtos(nome, unidade_medida))')
         .eq('tipo', 'saida')
         .eq('local_origem', local)
         .gte('created_at', doisDiasAtras)
         .order('created_at', { ascending: false })
 
-      const idsBaixas = (baixas || []).map((b: any) => b.id)
-      let revertidoPorBaixa = new Map<string, any>()
-      if (idsBaixas.length > 0) {
-        const { data: reversoes } = await supabase
-          .from('movimentacoes_estoque')
-          .select('estornado_de, created_at, justificativa, registrado_por')
-          .in('estornado_de', idsBaixas)
-
-        reversoes?.forEach((r: any) => revertidoPorBaixa.set(r.estornado_de, r))
-      }
-
-      const processadas = (baixas || []).map((b: any) => ({
-        ...b,
-        reversao: revertidoPorBaixa.get(b.id) || null,
-      }))
-
+      const processadas = await anexarReversoes(baixas || [])
       setBaixasRecentes(processadas)
     } catch (err) {
       console.error('Erro ao carregar baixas recentes:', err)
     } finally {
       setCarregandoBaixas(false)
+    }
+  }
+
+  // Anexa a movimentação de reversão (se existir) a cada baixa, para saber
+  // se já foi revertida e não pode ser revertida de novo
+  async function anexarReversoes(baixas: any[]) {
+    const idsBaixas = baixas.map((b) => b.id)
+    if (idsBaixas.length === 0) return baixas
+
+    const { data: reversoes } = await supabase
+      .from('movimentacoes_estoque')
+      .select('estornado_de, created_at, justificativa, registrado_por')
+      .in('estornado_de', idsBaixas)
+
+    const revertidoPorBaixa = new Map<string, any>()
+    reversoes?.forEach((r: any) => revertidoPorBaixa.set(r.estornado_de, r))
+
+    return baixas.map((b) => ({ ...b, reversao: revertidoPorBaixa.get(b.id) || null }))
+  }
+
+  async function buscarPorEtiqueta() {
+    const termo = buscaEtiqueta.trim()
+    if (!termo) {
+      setResultadoBusca(null)
+      return
+    }
+
+    setBuscandoEtiqueta(true)
+    try {
+      const { data: lotesEncontrados } = await supabase
+        .from('lotes_producao')
+        .select('id, codigo_qr, produto:produtos(nome, unidade_medida)')
+        .ilike('codigo_qr', `%${termo}%`)
+        .limit(20)
+
+      if (!lotesEncontrados || lotesEncontrados.length === 0) {
+        setResultadoBusca([])
+        return
+      }
+
+      const loteIds = lotesEncontrados.map((l: any) => l.id)
+      const { data: baixasEncontradas } = await supabase
+        .from('movimentacoes_estoque')
+        .select('id, lote_id, tipo, local_origem, quantidade, registrado_por, created_at, justificativa, estornado_de')
+        .in('lote_id', loteIds)
+        .eq('tipo', 'saida')
+        .order('created_at', { ascending: false })
+
+      const comLote = (baixasEncontradas || []).map((b: any) => ({
+        ...b,
+        lote: lotesEncontrados.find((l: any) => l.id === b.lote_id),
+      }))
+
+      const processadas = await anexarReversoes(comLote)
+      setResultadoBusca(processadas)
+    } catch (err) {
+      console.error('Erro ao buscar etiqueta:', err)
+    } finally {
+      setBuscandoEtiqueta(false)
     }
   }
 
@@ -389,7 +436,8 @@ export default function EstoquePage() {
 
       setRevertendoId(null)
       setJustificativaTexto('')
-      await carregarBaixasRecentes()
+      if (mostrarHistoricoBaixas) await carregarBaixasRecentes()
+      if (resultadoBusca) await buscarPorEtiqueta()
       carregarEstoque()
     } catch (err) {
       console.error('Erro ao reverter baixa:', err)
@@ -397,6 +445,84 @@ export default function EstoquePage() {
     } finally {
       setSalvandoReversao(false)
     }
+  }
+
+  function renderBaixaCard(baixa: any) {
+    const horas = horasDesde(baixa.created_at)
+    const revertivel = horas < JANELA_REVERSAO_HORAS && !baixa.reversao
+    const horasRestantes = Math.max(0, JANELA_REVERSAO_HORAS - horas)
+
+    return (
+      <div key={baixa.id} className="p-3 rounded-lg border border-gray-200 bg-gray-50">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <p className="font-semibold text-gray-800 text-sm">
+              {baixa.lote?.produto?.nome || 'Produto desconhecido'}
+            </p>
+            <p className="text-xs text-gray-500 font-mono mt-0.5">{baixa.lote?.codigo_qr}</p>
+            <p className="text-xs text-gray-600 mt-0.5">
+              {baixa.quantidade} {baixa.lote?.produto?.unidade_medida || 'un'} · {baixa.registrado_por} ·{' '}
+              {new Date(baixa.created_at).toLocaleString('pt-BR')}
+            </p>
+
+            {baixa.reversao ? (
+              <p className="text-xs text-green-700 font-semibold mt-1.5">
+                ✓ Revertida em {new Date(baixa.reversao.created_at).toLocaleString('pt-BR')} por{' '}
+                {baixa.reversao.registrado_por} — "{baixa.reversao.justificativa}"
+              </p>
+            ) : revertivel ? (
+              <p className="text-xs text-amber-700 font-semibold mt-1.5">
+                {horasRestantes < 1
+                  ? 'Menos de 1h restante para reverter'
+                  : `${Math.floor(horasRestantes)}h restantes para reverter`}
+              </p>
+            ) : (
+              <p className="text-xs text-gray-400 font-semibold mt-1.5">Prazo de reversão expirado</p>
+            )}
+          </div>
+
+          {revertivel && revertendoId !== baixa.id && (
+            <button
+              onClick={() => {
+                setRevertendoId(baixa.id)
+                setJustificativaTexto('')
+              }}
+              className="flex-shrink-0 flex items-center gap-1 bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+            >
+              <RotateCcw size={13} />
+              Reverter
+            </button>
+          )}
+        </div>
+
+        {revertendoId === baixa.id && (
+          <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
+            <textarea
+              value={justificativaTexto}
+              onChange={(e) => setJustificativaTexto(e.target.value)}
+              placeholder="Justificativa: por que essa baixa está sendo revertida?"
+              className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              rows={2}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setRevertendoId(null); setJustificativaTexto('') }}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => confirmarReversao(baixa)}
+                disabled={salvandoReversao}
+                className="flex-1 px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 disabled:opacity-50"
+              >
+                {salvandoReversao ? 'Revertendo...' : 'Confirmar reversão'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -494,7 +620,47 @@ export default function EstoquePage() {
             </div>
           )}
 
-          {/* CARD: HISTÓRICO DE BAIXAS / REVERSÃO */}
+          {/* CARD: REVERTER BAIXA POR ETIQUETA (busca direta) */}
+          <div className="mb-6">
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <p className="text-sm font-semibold text-gray-800 flex items-center gap-2 mb-1">
+                <RotateCcw size={16} />
+                Reverter baixa por etiqueta
+              </p>
+              <p className="text-xs text-gray-500 mb-3">
+                Digite o código (ou parte dele) da etiqueta baixada por engano. Baixas de até 24h podem ser revertidas mediante justificativa.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={buscaEtiqueta}
+                  onChange={(e) => setBuscaEtiqueta(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && buscarPorEtiqueta()}
+                  placeholder="Ex: ALD-1783191721462-1"
+                  className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <button
+                  onClick={buscarPorEtiqueta}
+                  disabled={buscandoEtiqueta}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {buscandoEtiqueta ? 'Buscando...' : 'Buscar'}
+                </button>
+              </div>
+
+              {resultadoBusca && (
+                <div className="mt-3 space-y-2">
+                  {resultadoBusca.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-3">Nenhuma baixa encontrada para essa etiqueta</p>
+                  ) : (
+                    resultadoBusca.map(renderBaixaCard)
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* CARD: HISTÓRICO DE BAIXAS (últimas 48h, para consulta) */}
           <div className="mb-6">
             <div className="bg-white rounded-lg border border-gray-200">
               <button
@@ -509,13 +675,13 @@ export default function EstoquePage() {
                   <History size={16} />
                   Histórico de baixas
                 </span>
-                <span className="text-xs text-gray-500">{mostrarHistoricoBaixas ? 'Ocultar' : 'Ver / Reverter'}</span>
+                <span className="text-xs text-gray-500">{mostrarHistoricoBaixas ? 'Ocultar' : 'Ver'}</span>
               </button>
 
               {mostrarHistoricoBaixas && (
                 <div className="border-t border-gray-200 p-4 space-y-3">
                   <p className="text-xs text-gray-500">
-                    Baixas de até 24h podem ser revertidas mediante justificativa. Após 24h, ficam registradas mas não podem mais ser desfeitas aqui.
+                    Últimas 48h em {LOCAL_LABEL[local]}. Para reverter, use a busca por etiqueta acima.
                   </p>
 
                   {carregandoBaixas ? (
@@ -523,82 +689,7 @@ export default function EstoquePage() {
                   ) : baixasRecentes.length === 0 ? (
                     <p className="text-sm text-gray-400 text-center py-4">Nenhuma baixa nas últimas 48h para {LOCAL_LABEL[local]}</p>
                   ) : (
-                    baixasRecentes.map((baixa) => {
-                      const horas = horasDesde(baixa.created_at)
-                      const revertivel = horas < JANELA_REVERSAO_HORAS && !baixa.reversao
-                      const horasRestantes = Math.max(0, JANELA_REVERSAO_HORAS - horas)
-
-                      return (
-                        <div key={baixa.id} className="p-3 rounded-lg border border-gray-200 bg-gray-50">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1">
-                              <p className="font-semibold text-gray-800 text-sm">
-                                {baixa.lote?.produto?.nome || 'Produto desconhecido'}
-                              </p>
-                              <p className="text-xs text-gray-600 mt-0.5">
-                                {baixa.quantidade} {baixa.lote?.produto?.unidade_medida || 'un'} · {baixa.registrado_por} ·{' '}
-                                {new Date(baixa.created_at).toLocaleString('pt-BR')}
-                              </p>
-
-                              {baixa.reversao ? (
-                                <p className="text-xs text-green-700 font-semibold mt-1.5">
-                                  ✓ Revertida em {new Date(baixa.reversao.created_at).toLocaleString('pt-BR')} por{' '}
-                                  {baixa.reversao.registrado_por} — "{baixa.reversao.justificativa}"
-                                </p>
-                              ) : revertivel ? (
-                                <p className="text-xs text-amber-700 font-semibold mt-1.5">
-                                  {horasRestantes < 1
-                                    ? 'Menos de 1h restante para reverter'
-                                    : `${Math.floor(horasRestantes)}h restantes para reverter`}
-                                </p>
-                              ) : (
-                                <p className="text-xs text-gray-400 font-semibold mt-1.5">Prazo de reversão expirado</p>
-                              )}
-                            </div>
-
-                            {revertivel && revertendoId !== baixa.id && (
-                              <button
-                                onClick={() => {
-                                  setRevertendoId(baixa.id)
-                                  setJustificativaTexto('')
-                                }}
-                                className="flex-shrink-0 flex items-center gap-1 bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                              >
-                                <RotateCcw size={13} />
-                                Reverter
-                              </button>
-                            )}
-                          </div>
-
-                          {revertendoId === baixa.id && (
-                            <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
-                              <textarea
-                                value={justificativaTexto}
-                                onChange={(e) => setJustificativaTexto(e.target.value)}
-                                placeholder="Justificativa: por que essa baixa está sendo revertida?"
-                                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                rows={2}
-                              />
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => { setRevertendoId(null); setJustificativaTexto('') }}
-                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                                >
-                                  Cancelar
-                                </button>
-                                <button
-                                  onClick={() => confirmarReversao(baixa)}
-                                  disabled={salvandoReversao}
-                                  className="flex-1 px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 disabled:opacity-50"
-                                >
-                                  {salvandoReversao ? 'Revertendo...' : 'Confirmar reversão'}
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })
+                    baixasRecentes.map(renderBaixaCard)
                   )}
                 </div>
               )}

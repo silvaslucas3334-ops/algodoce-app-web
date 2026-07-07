@@ -6,7 +6,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { temPermissao } from '@/lib/permissions'
 import Link from 'next/link'
-import { Plus } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Plus, Search } from 'lucide-react'
 import EmptyState from '@/components/EmptyState'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
 
@@ -19,10 +20,14 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
 
 export default function OrdensPage() {
   const { usuario } = useAuth()
+  const router = useRouter()
   const [filtro, setFiltro] = useState('pendente')
   const [ordens, setOrdens] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const podecriarOrdens = temPermissao(usuario?.role, 'criarOrdens')
+  const [buscaEtiqueta, setBuscaEtiqueta] = useState('')
+  const [buscandoEtiqueta, setBuscandoEtiqueta] = useState(false)
+  const [resultadoBuscaEtiqueta, setResultadoBuscaEtiqueta] = useState<any[] | null>(null)
 
   useEffect(() => {
     carregarOrdens()
@@ -67,6 +72,38 @@ export default function OrdensPage() {
     }
   }
 
+  async function buscarOrdemPorEtiqueta() {
+    const termo = buscaEtiqueta.trim()
+    if (!termo) {
+      setResultadoBuscaEtiqueta(null)
+      return
+    }
+
+    setBuscandoEtiqueta(true)
+    try {
+      const { data } = await supabase
+        .from('lotes_producao')
+        .select('id, codigo_qr, ordem_id, produto:produtos(nome), ordem:ordens_producao(numero_ordem)')
+        .ilike('codigo_qr', `%${termo}%`)
+        .limit(20)
+
+      const encontrados = data || []
+
+      // Achou exatamente uma etiqueta: vai direto para a rastreabilidade da ordem
+      if (encontrados.length === 1 && encontrados[0].ordem_id) {
+        router.push(`/ordens/${encontrados[0].ordem_id}`)
+        return
+      }
+
+      setResultadoBuscaEtiqueta(encontrados)
+    } catch (err) {
+      console.error('Erro ao buscar etiqueta:', err)
+      setResultadoBuscaEtiqueta([])
+    } finally {
+      setBuscandoEtiqueta(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       <div className="bg-gradient-to-r from-slate-500 to-slate-600 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between h-20">
@@ -86,6 +123,52 @@ export default function OrdensPage() {
       </div>
 
       <div className="p-4">
+        {/* BUSCA POR ETIQUETA: rastrear a ordem de origem */}
+        <div className="bg-white rounded-xl p-4 border border-gray-200 mb-4">
+          <p className="text-sm font-semibold text-gray-800 flex items-center gap-2 mb-1">
+            <Search size={16} />
+            Rastrear etiqueta
+          </p>
+          <p className="text-xs text-gray-500 mb-3">Digite o código (ou parte dele) para encontrar a ordem de origem</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={buscaEtiqueta}
+              onChange={(e) => setBuscaEtiqueta(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && buscarOrdemPorEtiqueta()}
+              placeholder="Ex: ALD-1783191721462-1"
+              className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+            />
+            <button
+              onClick={buscarOrdemPorEtiqueta}
+              disabled={buscandoEtiqueta}
+              className="px-4 py-2 bg-slate-600 text-white rounded-lg text-sm font-semibold hover:bg-slate-700 disabled:opacity-50"
+            >
+              {buscandoEtiqueta ? 'Buscando...' : 'Buscar'}
+            </button>
+          </div>
+
+          {resultadoBuscaEtiqueta && (
+            <div className="mt-3 space-y-2">
+              {resultadoBuscaEtiqueta.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-2">Nenhuma etiqueta encontrada com esse código</p>
+              ) : (
+                resultadoBuscaEtiqueta.map((lote: any) => (
+                  <Link
+                    key={lote.id}
+                    href={`/ordens/${lote.ordem_id}`}
+                    className="block p-3 rounded-lg border border-gray-200 hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <p className="text-sm font-semibold text-gray-800">{lote.produto?.nome || 'Produto desconhecido'}</p>
+                    <p className="text-xs text-gray-500 font-mono mt-0.5">{lote.codigo_qr}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Ordem #{lote.ordem?.numero_ordem}</p>
+                  </Link>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
           {Object.entries(STATUS_LABEL).map(([key, { label, color }]) => (
             <button key={key} onClick={() => setFiltro(key)}
