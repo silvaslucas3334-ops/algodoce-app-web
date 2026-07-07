@@ -387,12 +387,15 @@ export default function EstoquePage() {
         return
       }
 
+      // Restrito à unidade selecionada: um usuário só pode reverter baixas
+      // feitas na mesma unidade que está visualizando, igual ao histórico
       const loteIds = lotesEncontrados.map((l: any) => l.id)
       const { data: baixasEncontradas } = await supabase
         .from('movimentacoes_estoque')
         .select('id, lote_id, tipo, local_origem, quantidade, registrado_por, created_at, justificativa, estornado_de')
         .in('lote_id', loteIds)
         .eq('tipo', 'saida')
+        .eq('local_origem', local)
         .order('created_at', { ascending: false })
 
       const comLote = (baixasEncontradas || []).map((b: any) => ({
@@ -628,7 +631,9 @@ export default function EstoquePage() {
                 Reverter baixa por etiqueta
               </p>
               <p className="text-xs text-gray-500 mb-3">
-                Digite o código (ou parte dele) da etiqueta baixada por engano. Baixas de até 24h podem ser revertidas mediante justificativa.
+                Digite o código (ou parte dele) da etiqueta baixada por engano. Busca apenas baixas feitas em{' '}
+                <strong>{LOCAL_LABEL[local]}</strong> (troque a unidade acima se necessário). Baixas de até 24h podem
+                ser revertidas mediante justificativa.
               </p>
               <div className="flex gap-2">
                 <input
