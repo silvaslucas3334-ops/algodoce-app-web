@@ -46,6 +46,8 @@ export default function SelecionarEstoquePage() {
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [expandidas, setExpandidas] = useState<Record<string, boolean>>({})
+  const [showModalVerificacao, setShowModalVerificacao] = useState(false)
+  const [ordensNaoEnviadas, setOrdensNaoEnviadas] = useState<Ordem[]>([])
 
   // Carregar ordens e estoque
   useEffect(() => {
@@ -124,6 +126,7 @@ export default function SelecionarEstoquePage() {
 
         setEstoque(estoqueMap)
         setOrdens(ordensProcessadas)
+        setOrdensNaoEnviadas(ordensProcessadas.filter((o) => !o.ja_enviada))
         setLoading(false)
       } catch (err) {
         console.error('Erro:', err)
@@ -133,6 +136,43 @@ export default function SelecionarEstoquePage() {
 
     carregar()
   }, [data, unidade])
+
+  function abrirModalVerificacao() {
+    // Pré-selecionar etiquetas dos produtos que têm ordens
+    setEstoque((prev) => {
+      const novo = new Map(prev)
+
+      ordensNaoEnviadas.forEach((ordem) => {
+        const prod = novo.get(ordem.produto_id)
+        if (prod && prod.etiquetas.length > 0 && prod.selecionadas.length === 0) {
+          // Pré-selecionar as primeiras etiquetas até atingir a quantidade necessária
+          let quantidadeRestante = ordem.quantidade
+          const novasSelecionadas = [...prod.selecionadas]
+
+          for (const etiqueta of prod.etiquetas) {
+            if (quantidadeRestante <= 0) break
+            if (!novasSelecionadas.includes(etiqueta.id)) {
+              novasSelecionadas.push(etiqueta.id)
+              quantidadeRestante -= etiqueta.quantidade || etiqueta.peso_gramas || 0
+            }
+          }
+
+          novo.set(ordem.produto_id, {
+            ...prod,
+            selecionadas: novasSelecionadas,
+            total_selecionado: novasSelecionadas.reduce((acc, id) => {
+              const et = prod.etiquetas.find(e => e.id === id)
+              return acc + (et?.quantidade || et?.peso_gramas || 0)
+            }, 0)
+          })
+        }
+      })
+
+      return novo
+    })
+
+    setShowModalVerificacao(true)
+  }
 
   function toggleEtiqueta(produtoId: string, loteId: string) {
     setEstoque((prev) => {
@@ -358,6 +398,14 @@ export default function SelecionarEstoquePage() {
                   >
                     Cancelar
                   </button>
+                  {ordensNaoEnviadas.length > 0 && (
+                    <button
+                      onClick={abrirModalVerificacao}
+                      className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 flex items-center justify-center gap-2"
+                    >
+                      🔍 Verificar Ordens
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       const temSelecionados = Array.from(estoque.values()).some(p => p.selecionadas.length > 0)
@@ -402,6 +450,98 @@ export default function SelecionarEstoquePage() {
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50"
             >
               Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // MODAL: Verificação de Ordens
+  if (showModalVerificacao) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          {/* Header */}
+          <div className="sticky top-0 bg-white border-b border-gray-200 p-6">
+            <h2 className="text-2xl font-bold text-gray-800">✅ Verificação de Ordens</h2>
+            <p className="text-sm text-gray-600 mt-1">Confirme os itens que serão enviados para atender aos pedidos</p>
+          </div>
+
+          {/* Content */}
+          <div className="p-6 space-y-6">
+            {ordensNaoEnviadas.map((ordem) => {
+              const prod = estoque.get(ordem.produto_id)
+              const temEstoque = prod && prod.selecionadas.length > 0
+              const falta = !temEstoque || (prod?.total_selecionado || 0) < ordem.quantidade
+
+              return (
+                <div
+                  key={ordem.id}
+                  className={`p-4 rounded-lg border-2 ${
+                    temEstoque
+                      ? 'bg-green-50 border-green-300'
+                      : 'bg-amber-50 border-amber-300'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <p className="font-bold text-gray-800">Pedido #{ordem.numero_ordem}</p>
+                      <p className="text-sm text-gray-600">{ordem.produto_nome}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-lg text-gray-800">{ordem.quantidade}</p>
+                      <p className="text-xs text-gray-600">{prod?.unidade_medida || 'un'}</p>
+                    </div>
+                  </div>
+
+                  {temEstoque ? (
+                    <div className="bg-white rounded p-3 border border-green-200">
+                      <p className="text-xs font-semibold text-green-700 mb-2">✅ Etiquetas Selecionadas:</p>
+                      <div className="space-y-1">
+                        {prod?.selecionadas.map((loteId) => {
+                          const et = prod?.etiquetas.find(e => e.id === loteId)
+                          return (
+                            <p key={loteId} className="text-xs text-gray-700 font-mono">
+                              {et?.codigo_qr} ({et?.quantidade || et?.peso_gramas} {prod?.unidade_medida})
+                            </p>
+                          )
+                        })}
+                      </div>
+                      {falta && (
+                        <p className="text-xs text-amber-700 mt-2 font-semibold">
+                          ⚠️ Quantidade enviada: {prod?.total_selecionado} de {ordem.quantidade}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded p-3 border border-amber-200">
+                      <p className="text-xs text-amber-700 font-semibold">
+                        ⚠️ Nenhuma etiqueta disponível - Este produto ainda está em produção ou falta em estoque
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Footer */}
+          <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-6 flex gap-3">
+            <button
+              onClick={() => setShowModalVerificacao(false)}
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-100"
+            >
+              Voltar e Ajustar
+            </button>
+            <button
+              onClick={() => {
+                setShowModalVerificacao(false)
+                criarRomaneio()
+              }}
+              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+            >
+              ✓ Confirmar e Criar Romaneio
             </button>
           </div>
         </div>
