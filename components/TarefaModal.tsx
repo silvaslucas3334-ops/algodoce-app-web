@@ -307,11 +307,16 @@ export default function TarefaModal({
         )
       }
 
+      // Se quem conclui já é o próprio gestor (admin), não há necessidade de uma
+      // segunda aprovação — vai direto para concluída, pulando pronta_revisao.
+      const statusFinal = ehAdmin ? 'concluida' : 'pronta_revisao'
+
       // Atualizar status da tarefa
       const { data: updated, error: updateError } = await supabase
         .from('tarefas')
         .update({
-          status: 'pronta_revisao',
+          status: statusFinal,
+          ...(ehAdmin ? { concluido_em: new Date().toISOString() } : {}),
           updated_at: new Date().toISOString(),
         })
         .eq('id', tarefa.id)
@@ -349,7 +354,7 @@ export default function TarefaModal({
         alteracao_tipo: 'status_change',
         dados_json: {
           from_status: tarefa.status,
-          to_status: 'pronta_revisao',
+          to_status: statusFinal,
           com_foto: !!fotoUrl,
         },
         registrado_por: usuarioAtualId,
