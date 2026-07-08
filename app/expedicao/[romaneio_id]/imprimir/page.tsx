@@ -38,23 +38,11 @@ export default function ImprimirRomaneioPage() {
 
     const produtosHtml = linhas
       .map((linha: any) => {
-        const etiquetasHtml = (linha.etiquetas_selecionadas || [])
-          .map((loteId: string) => {
-            const lote = linha.etiquetas_disponiveis?.find((e: any) => e.id === loteId)
-            const validade = lote?.data_validade
-              ? new Date(lote.data_validade + 'T00:00:00').toLocaleDateString('pt-BR')
-              : '-'
-            return `<div class="etiqueta">
-              <div class="etiqueta-codigo">${lote?.codigo_qr || 'QR'}</div>
-              <div class="etiqueta-info">${lote?.quantidade || lote?.peso_gramas || ''} ${linha.unidade_medida} &middot; Val: ${validade}</div>
-            </div>`
-          })
-          .join('')
-
+        const qtdEtiquetas = linha.etiquetas_selecionadas?.length || 0
         return `<div class="produto-bloco">
           <div class="produto-nome">${linha.nome_produto} &mdash; ${linha.qtd_ajustada} ${linha.unidade_medida}</div>
+          <div class="produto-contador">${qtdEtiquetas} etiqueta${qtdEtiquetas === 1 ? '' : 's'}</div>
           ${linha.aviso ? `<div class="aviso">&#9888; ${linha.aviso}</div>` : ''}
-          <div class="etiquetas">${etiquetasHtml}</div>
         </div>`
       })
       .join('')
@@ -117,23 +105,14 @@ export default function ImprimirRomaneioPage() {
           font-weight: 800;
           margin-bottom: 4px;
         }
+        .produto-contador {
+          font-size: 13px;
+          font-weight: 700;
+        }
         .aviso {
           font-size: 12px;
           font-weight: 700;
-          margin-bottom: 4px;
-        }
-        .etiqueta {
-          padding-left: 6px;
-          margin-bottom: 3px;
-        }
-        .etiqueta-codigo {
-          font-size: 13px;
-          font-weight: 700;
-          font-family: 'Courier New', monospace;
-        }
-        .etiqueta-info {
-          font-size: 11px;
-          font-weight: 700;
+          margin-top: 2px;
         }
         .rodape {
           margin-top: 8px;
