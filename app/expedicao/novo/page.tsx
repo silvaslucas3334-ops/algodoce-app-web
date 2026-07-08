@@ -6,8 +6,13 @@ import { LOCAL_LABEL } from '@/lib/constants'
 
 const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
+// Usa os componentes de data LOCAIS (não toISOString, que converte para UTC e
+// pode "pular" para o dia seguinte à noite no fuso do Brasil).
 function toISODate(d: Date): string {
-  return d.toISOString().split('T')[0]
+  const ano = d.getFullYear()
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const dia = String(d.getDate()).padStart(2, '0')
+  return `${ano}-${mes}-${dia}`
 }
 
 export default function NovoRomaneioPage() {
@@ -118,8 +123,8 @@ export default function NovoRomaneioPage() {
                   onClick={() => setUnidadeDestino(u)}
                   className={`px-4 py-4 rounded-xl border-2 font-bold text-center transition-colors ${
                     unidadeDestino === u
-                      ? 'border-blue-600 bg-blue-600 text-white'
-                      : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300'
+                      ? 'border-amber-500 bg-amber-500 text-white'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-amber-300'
                   }`}
                 >
                   {LOCAL_LABEL[u]}
