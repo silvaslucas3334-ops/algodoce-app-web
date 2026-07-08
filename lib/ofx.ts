@@ -4,6 +4,7 @@ export interface TransacaoOFX {
   data: string // YYYY-MM-DD
   valor: number // negativo = saída (pagamento)
   nome: string
+  fitid: string | null // <FITID> do OFX, usado como chave de dedupe na conciliação de extrato
 }
 
 export type FrequenciaPagamento = 'diaria' | 'semanal' | 'mensal'
@@ -35,13 +36,14 @@ export function parseOFX(texto: string): TransacaoOFX[] {
     const dtRaw = tag(bloco, 'DTPOSTED')
     const amtRaw = tag(bloco, 'TRNAMT')
     const nome = tag(bloco, 'NAME') || tag(bloco, 'MEMO') || 'Beneficiário'
+    const fitidRaw = tag(bloco, 'FITID')
     if (!dtRaw || !amtRaw) continue
 
     const data = `${dtRaw.substring(0, 4)}-${dtRaw.substring(4, 6)}-${dtRaw.substring(6, 8)}`
     const valor = parseFloat(amtRaw.replace(',', '.'))
     if (isNaN(valor)) continue
 
-    transacoes.push({ data, valor, nome: nome.trim() })
+    transacoes.push({ data, valor, nome: nome.trim(), fitid: fitidRaw ? fitidRaw.trim() : null })
   }
   return transacoes
 }

@@ -1,0 +1,55 @@
+'use client'
+import { useAuth } from '@/hooks/useAuth'
+import ProtectedRoute from '@/components/ProtectedRoute'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, Receipt, ShoppingCart, Users, Package, BookOpen, Landmark } from 'lucide-react'
+
+export default function FinanceiroHubPage() {
+  const { usuario } = useAuth()
+  const router = useRouter()
+
+  const cards = [
+    { href: '/financeiro/despesas', label: 'Despesas Gerais', desc: 'Lançar e acompanhar contas a pagar', icon: Receipt, roles: ['admin', 'loja', 'cozinha'] },
+    { href: '/financeiro/compras', label: 'Compras de Insumos', desc: 'Lançar notinhas de matéria-prima', icon: ShoppingCart, roles: ['admin', 'loja', 'cozinha'] },
+    { href: '/financeiro/materias-primas', label: 'Matérias-Primas', desc: 'Cadastro controlado e custo médio', icon: Package, roles: ['admin'] },
+    { href: '/financeiro/partes', label: 'Fornecedores/Beneficiários', desc: 'Cadastro de quem recebe pagamento', icon: Users, roles: ['admin'] },
+    { href: '/financeiro/contas', label: 'Plano de Contas', desc: 'Consulta de centro de custo e conta', icon: BookOpen, roles: ['admin'] },
+    { href: '/financeiro/extrato', label: 'Extrato Bancário', desc: 'Importar OFX e conciliar pagamentos', icon: Landmark, roles: ['admin'] },
+  ]
+
+  const cardsVisiveis = cards.filter((c) => c.roles.includes(usuario?.role))
+
+  return (
+    <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
+      <div className="min-h-screen bg-gray-50 pb-20">
+        <div className="bg-white border-b border-gray-200">
+          <div className="max-w-4xl mx-auto px-4 py-4 flex items-center gap-3">
+            <button onClick={() => router.push('/')} className="text-gray-500 hover:text-gray-700">
+              <ArrowLeft size={22} />
+            </button>
+            <h1 className="text-xl font-bold text-gray-800">Financeiro</h1>
+          </div>
+        </div>
+
+        <div className="max-w-4xl mx-auto px-4 py-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {cardsVisiveis.map((c) => (
+              <Link key={c.href} href={c.href}>
+                <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md hover:border-gray-200 cursor-pointer transition-all flex items-start gap-4">
+                  <div className="bg-pink-100 text-pink-700 rounded-lg p-3">
+                    <c.icon size={22} />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">{c.label}</p>
+                    <p className="text-sm text-gray-500 mt-0.5">{c.desc}</p>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+    </ProtectedRoute>
+  )
+}

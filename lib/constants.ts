@@ -13,3 +13,14 @@ export const ROMANEIO_STATUS_LABEL: Record<string, string> = {
   em_estoque: 'Recebido',
   cancelado: 'Cancelado',
 }
+
+export const FINANCEIRO_STATUS_LABEL: Record<string, string> = {
+  aberto: 'Em aberto',
+  pago: 'Pago',
+  cancelado: 'Cancelado',
+}
+
+export const UNIDADE_LABEL: Record<string, string> = {
+  ...LOCAL_LABEL,
+  rateio: 'Rateio (compartilhado)',
+}

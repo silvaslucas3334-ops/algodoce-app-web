@@ -145,3 +145,143 @@ export interface TarefaRecorrencia {
   created_at: string
   updated_at: string
 }
+
+// MÓDULO FINANCEIRO
+export type UnidadeFinanceiro = 'cozinha' | 'loja1' | 'loja2' | 'rateio'
+export type StatusFinanceiro = 'aberto' | 'pago' | 'cancelado'
+export type StatusConciliacao = 'pendente' | 'conciliado' | 'ignorado'
+
+export interface FinanceiroParte {
+  id: string
+  nome: string
+  documento?: string
+  papel_fornecedor: boolean
+  papel_beneficiario: boolean
+  telefone?: string
+  email?: string
+  observacoes?: string
+  ativo: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface FinanceiroCentroCusto {
+  id: string
+  codigo: string
+  nome: string
+  ativo: boolean
+  created_at: string
+}
+
+export interface FinanceiroConta {
+  id: string
+  codigo: string
+  nome: string
+  centro_custo_id: string
+  centro_custo?: FinanceiroCentroCusto
+  grupo_dre: string
+  aplicavel_a: 'compras_insumos' | 'despesas_gerais' | 'ambos'
+  ativo: boolean
+  created_at: string
+}
+
+export interface FinanceiroMateriaPrima {
+  id: string
+  nome: string
+  unidade_medida: string
+  unidade_compra: string
+  fator_conversao: number
+  conta_id?: string // conta contábil padrão do item; cada compra herda esta conta no lançamento
+  conta?: FinanceiroConta
+  descricao?: string
+  ativo: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface FinanceiroCompraInsumo {
+  id: string
+  materia_prima_id: string
+  materia_prima?: FinanceiroMateriaPrima
+  fornecedor_id: string
+  fornecedor?: FinanceiroParte
+  numero_nota_fiscal?: string
+  quantidade: number
+  valor_unitario: number
+  valor_total: number
+  data_compra: string
+  data_pagamento?: string
+  unidade: UnidadeFinanceiro
+  conta_id?: string
+  conta?: FinanceiroConta
+  status: StatusFinanceiro
+  forma_pagamento?: string
+  extrato_transacao_id?: string
+  observacoes?: string
+  criado_por: string
+  created_at: string
+  updated_at: string
+}
+
+export interface FinanceiroDespesa {
+  id: string
+  parte_id: string
+  parte?: FinanceiroParte
+  descricao: string
+  valor: number
+  data_vencimento: string
+  data_pagamento?: string
+  unidade: UnidadeFinanceiro
+  conta_id?: string
+  conta?: FinanceiroConta
+  status: StatusFinanceiro
+  forma_pagamento?: string
+  numero_documento?: string
+  extrato_transacao_id?: string
+  observacoes?: string
+  criado_por: string
+  created_at: string
+  updated_at: string
+}
+
+export interface FinanceiroExtratoTransacao {
+  id: string
+  conta_bancaria: string
+  fitid: string
+  data: string
+  valor: number
+  descricao_original: string
+  documento_extraido?: string
+  parte_id?: string
+  tipo_match?: 'compra_insumo' | 'despesa_geral'
+  compra_insumo_id?: string
+  despesa_id?: string
+  status_conciliacao: StatusConciliacao
+  importado_por: string
+  importado_em: string
+}
+
+export interface FinanceiroCustoMedioMensal {
+  materia_prima_id: string
+  mes_referencia: string
+  materia_prima_nome: string
+  unidade_medida: string
+  unidade_compra: string
+  fator_conversao: number
+  quantidade_total: number
+  valor_total: number
+  custo_medio_por_unidade_compra: number
+  custo_medio_por_unidade_medida: number
+  numero_compras: number
+}
+
+// Candidato de conciliação: normalmente 1 registro, mas uma NF com vários
+// itens vira várias linhas de compra pagas num boleto só — nesse caso o
+// candidato agrupa todas as linhas da nota (registros.length > 1) e o match
+// é pela SOMA dos valores, não pelo valor de cada linha.
+export interface CandidatoConciliacao {
+  tipo: 'compra_insumo' | 'despesa_geral'
+  registros: (FinanceiroCompraInsumo | FinanceiroDespesa)[]
+  numero_nota_fiscal?: string // preenchido quando é grupo de NF multi-item
+  confianca: 'alta' | 'media' | 'baixa'
+}

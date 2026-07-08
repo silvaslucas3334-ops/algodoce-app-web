@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, ClipboardList, ChefHat, ScanLine, Package, User, CheckSquare, Truck } from 'lucide-react'
+import { LayoutDashboard, ClipboardList, ChefHat, ScanLine, Package, User, CheckSquare, Truck, Wallet } from 'lucide-react'
 import OluquinhasLogo from './OluquinhasLogo'
 
 const links = [
@@ -13,6 +13,7 @@ const links = [
   { href: '/scanner', label: 'Scanner', icon: ScanLine },
   { href: '/estoque', label: 'Estoque', icon: Package },
   { href: '/expedicao', label: 'Expedição', icon: Truck },
+  { href: '/financeiro', label: 'Financeiro', icon: Wallet },
   { href: '/perfil', label: 'Perfil', icon: User },
 ]
 
