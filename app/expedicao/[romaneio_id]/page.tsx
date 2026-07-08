@@ -135,13 +135,10 @@ export default function VisualizarRomaneioPage() {
     )
   }
 
-  const isPrintView = typeof window !== 'undefined' && window.location.pathname.includes('/imprimir')
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      {!isPrintView && (
-        <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
           <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button
@@ -180,7 +177,7 @@ export default function VisualizarRomaneioPage() {
                 </button>
               )}
               <button
-                onClick={() => window.print()}
+                onClick={() => router.push(`/expedicao/${romaneio.id}/imprimir`)}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold flex items-center gap-2"
               >
                 <Printer size={18} />
@@ -189,54 +186,49 @@ export default function VisualizarRomaneioPage() {
             </div>
           </div>
         </div>
-      )}
 
       {/* Content */}
       <div className="max-w-5xl mx-auto px-4 py-6">
         {/* Info */}
-        {!isPrintView && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-            <p className="text-sm text-blue-700">
-              <strong>Total de produtos:</strong> {romaneio.linhas?.length || 0} •{' '}
-              <strong>Etiquetas selecionadas:</strong> {romaneio.linhas?.reduce((sum: number, l: any) => sum + l.etiquetas_selecionadas.length, 0)}
-            </p>
-          </div>
-        )}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-blue-700">
+            <strong>Total de produtos:</strong> {romaneio.linhas?.length || 0} •{' '}
+            <strong>Etiquetas selecionadas:</strong> {romaneio.linhas?.reduce((sum: number, l: any) => sum + l.etiquetas_selecionadas.length, 0)}
+          </p>
+        </div>
 
         {/* Linhas do Romaneio */}
         <div className="space-y-4">
           {romaneio.linhas?.map((linha: any, idx: number) => (
             <div key={idx} className="bg-white rounded-lg border border-gray-200">
               {/* Header (Expandível) */}
-              {!isPrintView && (
-                <button
-                  onClick={() =>
-                    setExpandidas((prev) => ({
-                      ...prev,
-                      [idx]: !prev[idx],
-                    }))
-                  }
-                  className="w-full px-6 py-4 hover:bg-gray-50 transition-colors text-left border-b border-gray-100"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <p className="font-bold text-gray-800 text-lg">{linha.nome_produto}</p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Pedido: <span className="font-semibold">{linha.qtd_pedida}</span> {linha.unidade_medida} | Enviando:{' '}
-                        <span className="font-semibold">{linha.qtd_ajustada}</span>
-                      </p>
-                    </div>
-                    {linha.aviso && (
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 ml-4">
-                        <p className="text-xs text-amber-700 font-semibold">⚠️ {linha.aviso}</p>
-                      </div>
-                    )}
+              <button
+                onClick={() =>
+                  setExpandidas((prev) => ({
+                    ...prev,
+                    [idx]: !prev[idx],
+                  }))
+                }
+                className="w-full px-6 py-4 hover:bg-gray-50 transition-colors text-left border-b border-gray-100"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <p className="font-bold text-gray-800 text-lg">{linha.nome_produto}</p>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Pedido: <span className="font-semibold">{linha.qtd_pedida}</span> {linha.unidade_medida} | Enviando:{' '}
+                      <span className="font-semibold">{linha.qtd_ajustada}</span>
+                    </p>
                   </div>
-                </button>
-              )}
+                  {linha.aviso && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 ml-4">
+                      <p className="text-xs text-amber-700 font-semibold">⚠️ {linha.aviso}</p>
+                    </div>
+                  )}
+                </div>
+              </button>
 
-              {/* Conteúdo (Expandido ou Print) */}
-              {(isPrintView || expandidas[idx]) && (
+              {/* Conteúdo (Expandido) */}
+              {expandidas[idx] && (
                 <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
                   <p className="text-sm font-semibold text-gray-700 mb-3">
                     Etiquetas Selecionadas ({linha.etiquetas_selecionadas.length}):
@@ -270,13 +262,11 @@ export default function VisualizarRomaneioPage() {
                   </div>
 
                   {/* Saldo */}
-                  {!isPrintView && (
-                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
-                      <p className="text-sm text-blue-700">
-                        <strong>Saldo na cozinha:</strong> {linha.qtd_pedida - linha.qtd_ajustada} {linha.unidade_medida}
-                      </p>
-                    </div>
-                  )}
+                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                    <p className="text-sm text-blue-700">
+                      <strong>Saldo na cozinha:</strong> {linha.qtd_pedida - linha.qtd_ajustada} {linha.unidade_medida}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -284,7 +274,7 @@ export default function VisualizarRomaneioPage() {
         </div>
 
         {/* Botões de Ação */}
-        {!isPrintView && romaneio.status === 'rascunho' && (
+        {romaneio.status === 'rascunho' && (
           <div className="mt-6 flex gap-3 sticky bottom-6">
             <button
               onClick={cancelarRomaneio}
@@ -341,32 +331,6 @@ export default function VisualizarRomaneioPage() {
           </div>
         )}
       </div>
-
-      {/* Print Styles */}
-      <style>{`
-        @media print {
-          body {
-            background: white;
-          }
-          .bg-gray-50,
-          .bg-blue-50,
-          .bg-amber-50,
-          .bg-green-50 {
-            background: white !important;
-            border: 1px solid #ccc !important;
-          }
-          .space-y-4 > * + * {
-            margin-top: 0.5rem;
-          }
-          .page-break {
-            page-break-before: always;
-          }
-        }
-        @page {
-          size: 80mm auto;
-          margin: 4mm;
-        }
-      `}</style>
     </div>
   )
 }
