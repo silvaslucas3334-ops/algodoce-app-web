@@ -51,22 +51,25 @@ export default function VerificacaoOrdensPage() {
   useEffect(() => {
     const carregar = async () => {
       try {
-        // Ordens emitidas para essa data/unidade, ainda não finalizadas
+        // Ordens emitidas para essa data/unidade. 'concluida' entra também:
+        // ordem produzida (etiqueta gerada, em estoque) continua sendo um pedido
+        // do dia até ser efetivamente enviada — o que já foi enviado é excluído
+        // logo abaixo pelos romaneios confirmados/recebidos.
         const { data: ordensData } = await supabase
           .from('ordens_producao')
           .select('id, numero_ordem, produto_id, quantidade, produto:produtos(nome, unidade_medida)')
           .eq('data_entrega', data)
           .eq('loja_destino', unidade)
-          .in('status', ['pendente', 'em_producao'])
+          .in('status', ['pendente', 'em_producao', 'concluida'])
           .order('numero_ordem')
 
-        // Romaneios já confirmados para excluir ordens já enviadas
+        // Romaneios já enviados (ou já recebidos pela loja) para excluir ordens já atendidas
         const { data: romaneiosEnviados } = await supabase
           .from('romaneios')
           .select('linhas')
           .eq('data_entrega', data)
           .eq('unidade_destino', unidade)
-          .eq('status', 'confirmado')
+          .in('status', ['confirmado', 'em_estoque'])
 
         const ordemIdJaEnviadas = new Set<string>()
         romaneiosEnviados?.forEach((rom: any) => {
