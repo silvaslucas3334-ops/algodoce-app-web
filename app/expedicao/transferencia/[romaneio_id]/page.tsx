@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { LOCAL_LABEL } from '@/lib/constants'
+import { LOCAL_LABEL, ROMANEIO_STATUS_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter, useParams } from 'next/navigation'
 import { ArrowLeft, CheckCircle, Loader, ArrowRightLeft } from 'lucide-react'
@@ -75,7 +75,7 @@ export default function ConfirmarTransferenciaPage() {
 
       if (error) throw error
 
-      alert('✓ Transferência confirmada!')
+      alert('✓ Transferência enviada!')
       router.push('/expedicao')
     } catch (err) {
       console.error('Erro:', err)
@@ -123,7 +123,7 @@ export default function ConfirmarTransferenciaPage() {
         <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <p className="text-sm text-blue-700">
-              <strong>Status:</strong> {romaneio.status === 'rascunho' ? 'Rascunho' : 'Confirmado'}
+              <strong>Status:</strong> {ROMANEIO_STATUS_LABEL[romaneio.status] || romaneio.status}
             </p>
           </div>
 

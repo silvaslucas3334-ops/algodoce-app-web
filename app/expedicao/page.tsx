@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, ChevronRight, Package, CheckCircle, AlertCircle, ArrowRightLeft } from 'lucide-react'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
+import { ROMANEIO_STATUS_LABEL } from '@/lib/constants'
 
 export default function ExpedicaoPage() {
   const { usuario } = useAuth()
@@ -178,7 +179,7 @@ export default function ExpedicaoPage() {
                               Entrega: {new Date(romaneio.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
                             </p>
                             <span className={`px-3 py-1 rounded-full text-xs font-semibold ${romaneio.status === 'rascunho' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                              {romaneio.status === 'rascunho' ? 'Rascunho' : 'Confirmado'}
+                              {ROMANEIO_STATUS_LABEL[romaneio.status] || romaneio.status}
                             </span>
                           </div>
                           <p className="text-sm text-gray-600">
@@ -299,7 +300,7 @@ export default function ExpedicaoPage() {
                               Para: {romaneio.unidade_destino === 'loja1' ? 'Paraisópolis' : romaneio.unidade_destino === 'loja2' ? 'Itajubá' : 'Cozinha'}
                             </p>
                             <span className={`px-3 py-1 rounded-full text-xs font-semibold ${romaneio.status === 'rascunho' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                              {romaneio.status === 'rascunho' ? 'Rascunho' : 'Confirmado'}
+                              {ROMANEIO_STATUS_LABEL[romaneio.status] || romaneio.status}
                             </span>
                           </div>
                           <p className="text-sm text-gray-600">

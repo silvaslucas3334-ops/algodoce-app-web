@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter, useParams } from 'next/navigation'
-import { ArrowLeft, Printer, CheckCircle, AlertCircle, Loader } from 'lucide-react'
+import { ArrowLeft, Printer, CheckCircle, AlertCircle, Loader, Pencil } from 'lucide-react'
+import { ROMANEIO_STATUS_LABEL } from '@/lib/constants'
 
 export default function VisualizarRomaneioPage() {
   const { usuario } = useAuth()
@@ -81,7 +82,7 @@ export default function VisualizarRomaneioPage() {
         })
         .eq('id', romaneioId)
 
-      alert('✓ Romaneio confirmado e etiquetas marcadas como enviado')
+      alert('✓ Romaneio enviado com sucesso')
       router.push('/expedicao')
     } catch (err) {
       console.error('Erro:', err)
@@ -154,7 +155,8 @@ export default function VisualizarRomaneioPage() {
                   Romaneio {new Date(romaneio.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
                 </h1>
                 <p className="text-sm text-gray-600">
-                  {romaneio.status === 'rascunho' ? '📝 Rascunho' : '✓ Confirmado'}
+                  {romaneio.status === 'rascunho' ? '📝 ' : '✓ '}
+                  {ROMANEIO_STATUS_LABEL[romaneio.status] || romaneio.status}
                   {romaneio.unidade_destino && (
                     <span className="ml-3 inline-block bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-semibold">
                       📍 {romaneio.unidade_destino === 'loja1' ? 'Paraisópolis' : 'Itajubá'}
@@ -164,6 +166,19 @@ export default function VisualizarRomaneioPage() {
               </div>
             </div>
             <div className="flex gap-2">
+              {romaneio.status === 'rascunho' && (
+                <button
+                  onClick={() =>
+                    router.push(
+                      `/expedicao/novo/${romaneio.data_entrega}/${romaneio.unidade_destino}?romaneio=${romaneio.id}`
+                    )
+                  }
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold flex items-center gap-2"
+                >
+                  <Pencil size={18} />
+                  Editar
+                </button>
+              )}
               <button
                 onClick={() => window.print()}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold flex items-center gap-2"
@@ -305,13 +320,23 @@ export default function VisualizarRomaneioPage() {
           </div>
         )}
 
-        {/* Status Confirmado */}
+        {/* Status Enviado */}
         {romaneio.status === 'confirmado' && (
           <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
             <p className="text-green-700 font-semibold flex items-center gap-2">
               <CheckCircle size={20} />
-              ✓ Romaneio confirmado em {new Date(romaneio.confirmado_em).toLocaleDateString('pt-BR')} às{' '}
+              ✓ Romaneio enviado em {new Date(romaneio.confirmado_em).toLocaleDateString('pt-BR')} às{' '}
               {new Date(romaneio.confirmado_em).toLocaleTimeString('pt-BR')}
+            </p>
+          </div>
+        )}
+
+        {/* Status Recebido */}
+        {romaneio.status === 'em_estoque' && (
+          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-blue-700 font-semibold flex items-center gap-2">
+              <CheckCircle size={20} />
+              ✓ Romaneio recebido pela loja
             </p>
           </div>
         )}
