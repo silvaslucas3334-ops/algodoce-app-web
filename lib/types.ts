@@ -150,13 +150,19 @@ export interface TarefaRecorrencia {
 export type UnidadeFinanceiro = 'cozinha' | 'loja1' | 'loja2' | 'rateio'
 export type StatusFinanceiro = 'aberto' | 'pago' | 'cancelado'
 export type StatusConciliacao = 'pendente' | 'conciliado' | 'ignorado'
+export type FormaPagamento = 'boleto' | 'pix' | 'cartao_debito' | 'dinheiro'
+export type CondicaoPagamento = 'a_vista' | 'a_prazo'
+export type TipoLancamento = 'despesa' | 'compra_insumos'
 
 export interface FinanceiroParte {
   id: string
   nome: string
-  documento?: string
+  documento: string // CPF/CNPJ obrigatório — chave do match com o extrato
   papel_fornecedor: boolean
   papel_beneficiario: boolean
+  forma_pagamento_padrao?: FormaPagamento
+  condicao_pagamento: CondicaoPagamento
+  prazo_dias?: number // 7 | 15 | 30, quando a prazo
   telefone?: string
   email?: string
   observacoes?: string
@@ -199,46 +205,66 @@ export interface FinanceiroMateriaPrima {
   updated_at: string
 }
 
-export interface FinanceiroCompraInsumo {
+// Tabela ÚNICA de lançamentos financeiros: despesa manual OU nota de compra
+// de insumos (que gera a sua "despesa" automaticamente; itens em
+// FinanceiroLancamentoItem alimentam o CMV).
+export interface FinanceiroLancamento {
   id: string
-  materia_prima_id: string
-  materia_prima?: FinanceiroMateriaPrima
-  fornecedor_id: string
-  fornecedor?: FinanceiroParte
-  numero_nota_fiscal?: string
-  quantidade: number
-  valor_unitario: number
+  tipo: TipoLancamento
+  parte_id: string
+  parte?: FinanceiroParte
+  descricao: string
   valor_total: number
-  data_compra: string
+  numero_documento?: string
+  data_lancamento: string // data da compra/competência
+  data_vencimento: string
   data_pagamento?: string
-  unidade: UnidadeFinanceiro
-  conta_id?: string
-  conta?: FinanceiroConta
   status: StatusFinanceiro
-  forma_pagamento?: string
+  forma_pagamento?: FormaPagamento
+  condicao_pagamento?: CondicaoPagamento
+  parcela_num?: number
+  parcela_total?: number
+  grupo_parcelamento?: string
+  recorrencia_id?: string
+  unidade: UnidadeFinanceiro
+  conta_id?: string // obrigatória quando tipo='despesa' (CHECK no banco)
+  conta?: FinanceiroConta
   extrato_transacao_id?: string
   observacoes?: string
   criado_por: string
   created_at: string
   updated_at: string
+  itens?: FinanceiroLancamentoItem[]
 }
 
-export interface FinanceiroDespesa {
+export interface FinanceiroLancamentoItem {
+  id: string
+  lancamento_id: string
+  materia_prima_id: string
+  materia_prima?: FinanceiroMateriaPrima
+  quantidade: number // na unidade_nota
+  unidade_nota: string // unidade impressa na NF
+  fator_conversao: number // unidade_medida por 1 unidade_nota
+  valor_unitario: number
+  valor_total: number
+  conta_id?: string
+  conta?: FinanceiroConta
+  created_at: string
+}
+
+export interface FinanceiroRecorrencia {
   id: string
   parte_id: string
   parte?: FinanceiroParte
   descricao: string
   valor: number
-  data_vencimento: string
-  data_pagamento?: string
+  dia_vencimento: number // 1..28
+  forma_pagamento?: FormaPagamento
   unidade: UnidadeFinanceiro
-  conta_id?: string
+  conta_id: string
   conta?: FinanceiroConta
-  status: StatusFinanceiro
-  forma_pagamento?: string
-  numero_documento?: string
-  extrato_transacao_id?: string
-  observacoes?: string
+  ativa: boolean
+  proxima_data: string
   criado_por: string
   created_at: string
   updated_at: string
@@ -253,9 +279,7 @@ export interface FinanceiroExtratoTransacao {
   descricao_original: string
   documento_extraido?: string
   parte_id?: string
-  tipo_match?: 'compra_insumo' | 'despesa_geral'
-  compra_insumo_id?: string
-  despesa_id?: string
+  lancamento_id?: string
   status_conciliacao: StatusConciliacao
   importado_por: string
   importado_em: string
@@ -266,22 +290,13 @@ export interface FinanceiroCustoMedioMensal {
   mes_referencia: string
   materia_prima_nome: string
   unidade_medida: string
-  unidade_compra: string
-  fator_conversao: number
-  quantidade_total: number
+  quantidade_convertida: number // já em unidade_medida (qtd × fator por linha)
   valor_total: number
-  custo_medio_por_unidade_compra: number
   custo_medio_por_unidade_medida: number
   numero_compras: number
 }
 
-// Candidato de conciliação: normalmente 1 registro, mas uma NF com vários
-// itens vira várias linhas de compra pagas num boleto só — nesse caso o
-// candidato agrupa todas as linhas da nota (registros.length > 1) e o match
-// é pela SOMA dos valores, não pelo valor de cada linha.
 export interface CandidatoConciliacao {
-  tipo: 'compra_insumo' | 'despesa_geral'
-  registros: (FinanceiroCompraInsumo | FinanceiroDespesa)[]
-  numero_nota_fiscal?: string // preenchido quando é grupo de NF multi-item
+  lancamento: FinanceiroLancamento
   confianca: 'alta' | 'media' | 'baixa'
 }

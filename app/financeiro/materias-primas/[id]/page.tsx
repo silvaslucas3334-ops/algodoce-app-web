@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import { useRouter, useParams } from 'next/navigation'
 import { ArrowLeft, Loader } from 'lucide-react'
-import { FinanceiroMateriaPrima, FinanceiroCompraInsumo, FinanceiroConta, FinanceiroCustoMedioMensal } from '@/lib/types'
+import { FinanceiroMateriaPrima, FinanceiroConta, FinanceiroCustoMedioMensal } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 
 export default function DetalheMateriaPrimaPage() {
@@ -13,7 +13,7 @@ export default function DetalheMateriaPrimaPage() {
   const materiaId = params.id as string
 
   const [materia, setMateria] = useState<FinanceiroMateriaPrima | null>(null)
-  const [compras, setCompras] = useState<FinanceiroCompraInsumo[]>([])
+  const [compras, setCompras] = useState<any[]>([])
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [custosMensais, setCustosMensais] = useState<FinanceiroCustoMedioMensal[]>([])
   const [loading, setLoading] = useState(true)
@@ -39,10 +39,10 @@ export default function DetalheMateriaPrimaPage() {
     const [{ data: mp }, { data: comprasData }, { data: custosData }] = await Promise.all([
       supabase.from('financeiro_materias_primas').select('*').eq('id', materiaId).single(),
       supabase
-        .from('financeiro_compras_insumos')
-        .select('*, fornecedor:financeiro_partes!fornecedor_id(nome)')
+        .from('financeiro_lancamento_itens')
+        .select('*, lancamento:financeiro_lancamentos(data_lancamento, status, parte:financeiro_partes!parte_id(nome))')
         .eq('materia_prima_id', materiaId)
-        .order('data_compra', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(20),
       supabase
         .from('financeiro_custo_medio_mensal')
@@ -51,7 +51,7 @@ export default function DetalheMateriaPrimaPage() {
         .order('mes_referencia', { ascending: false }),
     ])
     setMateria(mp)
-    setCompras(comprasData || [])
+    setCompras((comprasData || []).filter((c: any) => c.lancamento?.status !== 'cancelado'))
     setCustosMensais(custosData || [])
     setLoading(false)
   }
@@ -197,8 +197,8 @@ export default function DetalheMateriaPrimaPage() {
                   <thead>
                     <tr className="text-left text-gray-500 border-b border-gray-200">
                       <th className="py-2 pr-3">Mês</th>
-                      <th className="py-2 pr-3">Qtd. comprada</th>
-                      <th className="py-2 pr-3">Custo médio/{materia.unidade_compra}</th>
+                      <th className="py-2 pr-3">Qtd. ({materia.unidade_medida})</th>
+                      <th className="py-2 pr-3">Total gasto</th>
                       <th className="py-2 pr-3">Custo médio/{materia.unidade_medida}</th>
                     </tr>
                   </thead>
@@ -208,8 +208,8 @@ export default function DetalheMateriaPrimaPage() {
                         <td className="py-2 pr-3 font-medium text-gray-800">
                           {new Date(c.mes_referencia + 'T00:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
                         </td>
-                        <td className="py-2 pr-3 text-gray-600">{c.quantidade_total} {materia.unidade_compra}</td>
-                        <td className="py-2 pr-3 text-gray-600">{formatBRL(c.custo_medio_por_unidade_compra)}</td>
+                        <td className="py-2 pr-3 text-gray-600">{c.quantidade_convertida}</td>
+                        <td className="py-2 pr-3 text-gray-600">{formatBRL(c.valor_total)}</td>
                         <td className="py-2 pr-3 text-gray-600">{formatBRL(c.custo_medio_por_unidade_medida)}</td>
                       </tr>
                     ))}
@@ -228,9 +228,12 @@ export default function DetalheMateriaPrimaPage() {
                 {compras.map((c) => (
                   <div key={c.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">
                     <div>
-                      <p className="font-medium text-gray-800">{c.fornecedor?.nome || 'Fornecedor'}</p>
+                      <p className="font-medium text-gray-800">{c.lancamento?.parte?.nome || 'Fornecedor'}</p>
                       <p className="text-xs text-gray-500">
-                        {new Date(c.data_compra + 'T00:00:00').toLocaleDateString('pt-BR')} · {c.quantidade} {materia.unidade_compra}
+                        {c.lancamento?.data_lancamento
+                          ? new Date(c.lancamento.data_lancamento + 'T00:00:00').toLocaleDateString('pt-BR')
+                          : '—'}{' '}
+                        · {c.quantidade} {c.unidade_nota}
                       </p>
                     </div>
                     <p className="font-semibold text-gray-800">{formatBRL(c.valor_total)}</p>

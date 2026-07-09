@@ -2,8 +2,9 @@
 import { useEffect, useState } from 'react'
 import { sugerirCorrespondencias, confirmarConciliacao, ignorarTransacao } from '@/lib/financeiro-reconciliacao'
 import { formatBRL } from '@/lib/ofx'
-import { CandidatoConciliacao, FinanceiroCompraInsumo, FinanceiroDespesa, FinanceiroExtratoTransacao } from '@/lib/types'
-import { X, Loader, CheckCircle, FileText } from 'lucide-react'
+import { CandidatoConciliacao, FinanceiroExtratoTransacao } from '@/lib/types'
+import { TIPO_LANCAMENTO_LABEL } from '@/lib/constants'
+import { X, Loader, CheckCircle } from 'lucide-react'
 
 interface Props {
   transacao: FinanceiroExtratoTransacao
@@ -13,7 +14,7 @@ interface Props {
 
 const CONFIANCA_LABEL: Record<string, { label: string; color: string }> = {
   alta: { label: 'Confiança alta (CNPJ/CPF bate)', color: 'bg-green-100 text-green-700' },
-  media: { label: 'Confiança média (data próxima)', color: 'bg-amber-100 text-amber-700' },
+  media: { label: 'Confiança média (vencimento próximo)', color: 'bg-amber-100 text-amber-700' },
   baixa: { label: 'Confiança baixa (só o valor bate)', color: 'bg-gray-100 text-gray-600' },
 }
 
@@ -56,25 +57,6 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
     }
   }
 
-  const nomeParte = (c: CandidatoConciliacao) =>
-    c.tipo === 'compra_insumo'
-      ? (c.registros[0] as FinanceiroCompraInsumo).fornecedor?.nome || 'Fornecedor'
-      : (c.registros[0] as FinanceiroDespesa).parte?.nome || 'Beneficiário'
-
-  const valorCandidato = (c: CandidatoConciliacao) =>
-    c.registros.reduce(
-      (acc, r) => acc + (c.tipo === 'compra_insumo' ? (r as FinanceiroCompraInsumo).valor_total : (r as FinanceiroDespesa).valor),
-      0
-    )
-
-  const tituloCandidato = (c: CandidatoConciliacao) => {
-    if (c.tipo === 'despesa_geral') return (c.registros[0] as FinanceiroDespesa).descricao
-    if (c.registros.length === 1) {
-      return (c.registros[0] as FinanceiroCompraInsumo).materia_prima?.nome || 'Compra de insumo'
-    }
-    return `NF ${c.numero_nota_fiscal} — ${c.registros.length} itens`
-  }
-
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
@@ -98,46 +80,35 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
           </div>
         ) : candidatos.length === 0 ? (
           <p className="text-sm text-gray-500 py-4">
-            Nenhuma despesa/compra em aberto com esse valor (nem nota fiscal cuja soma dos itens bata).
-            Confira se já foi lançada, ou ignore esta transação.
+            Nenhum lançamento em aberto com esse valor. Confira se já foi lançado, ou ignore esta transação.
           </p>
         ) : (
           <div className="space-y-2 mb-4">
             {candidatos.map((c, i) => {
               const conf = CONFIANCA_LABEL[c.confianca]
-              const ehGrupo = c.registros.length > 1
+              const l = c.lancamento
               return (
                 <div key={i} className="border border-gray-200 rounded-lg p-3">
                   <div className="flex items-start justify-between mb-2">
                     <div>
-                      <p className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
-                        {ehGrupo && <FileText size={14} className="text-blue-600" />}
-                        {tituloCandidato(c)}
+                      <p className="text-sm font-semibold text-gray-800">{l.descricao}</p>
+                      <p className="text-xs text-gray-500">
+                        {l.parte?.nome} · {formatBRL(l.valor_total)} · venc.{' '}
+                        {new Date(l.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}
                       </p>
-                      <p className="text-xs text-gray-500">{nomeParte(c)} · {formatBRL(valorCandidato(c))}</p>
+                      <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">
+                        {TIPO_LANCAMENTO_LABEL[l.tipo]}
+                        {l.parcela_num && l.parcela_total ? ` · parcela ${l.parcela_num}/${l.parcela_total}` : ''}
+                      </span>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${conf.color}`}>{conf.label}</span>
                   </div>
-
-                  {ehGrupo && (
-                    <div className="mb-2 pl-2 border-l-2 border-blue-100 space-y-0.5">
-                      {c.registros.map((r) => {
-                        const compra = r as FinanceiroCompraInsumo
-                        return (
-                          <p key={r.id} className="text-xs text-gray-600">
-                            {compra.materia_prima?.nome || 'Item'} · {formatBRL(compra.valor_total)}
-                          </p>
-                        )
-                      })}
-                    </div>
-                  )}
-
                   <button
                     onClick={() => confirmar(c)}
                     disabled={processando}
                     className="w-full bg-green-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    <CheckCircle size={16} /> {ehGrupo ? `Confirmar nota (${c.registros.length} itens)` : 'Confirmar este'}
+                    <CheckCircle size={16} /> Confirmar este
                   </button>
                 </div>
               )

@@ -14,13 +14,33 @@ export const ROMANEIO_STATUS_LABEL: Record<string, string> = {
   cancelado: 'Cancelado',
 }
 
+// Status interno no banco é aberto/pago/cancelado; na tela, "aberto" vira
+// "Planejada" ou "Atrasada" conforme o vencimento (calculado na hora, não
+// persistido — mesmo padrão do indicador de tarefas atrasadas).
 export const FINANCEIRO_STATUS_LABEL: Record<string, string> = {
-  aberto: 'Em aberto',
-  pago: 'Pago',
-  cancelado: 'Cancelado',
+  aberto: 'Planejada',
+  pago: 'Paga',
+  cancelado: 'Cancelada',
 }
 
 export const UNIDADE_LABEL: Record<string, string> = {
   ...LOCAL_LABEL,
   rateio: 'Rateio (compartilhado)',
+}
+
+export const FORMA_PAGAMENTO_LABEL: Record<string, string> = {
+  boleto: 'Boleto',
+  pix: 'PIX',
+  cartao_debito: 'Cartão de Débito',
+  dinheiro: 'Dinheiro',
+}
+
+export const CONDICAO_PAGAMENTO_LABEL: Record<string, string> = {
+  a_vista: 'À vista',
+  a_prazo: 'A prazo',
+}
+
+export const TIPO_LANCAMENTO_LABEL: Record<string, string> = {
+  despesa: 'Despesa',
+  compra_insumos: 'Nota de Insumos',
 }

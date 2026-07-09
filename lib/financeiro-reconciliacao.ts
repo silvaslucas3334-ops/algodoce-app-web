@@ -1,11 +1,7 @@
 import { supabase } from './supabase'
 import { parseOFX, TransacaoOFX } from './ofx'
 import { normalizarTitulo } from './tarefas-utils'
-import {
-  FinanceiroCompraInsumo,
-  FinanceiroDespesa,
-  CandidatoConciliacao,
-} from './types'
+import { FinanceiroLancamento, CandidatoConciliacao } from './types'
 
 const RE_CNPJ = /\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/
 const RE_CPF = /\d{3}\.?\d{3}\.?\d{3}-?\d{2}/
@@ -87,31 +83,12 @@ function diasEntre(dataA: string, dataB: string): number {
   return Math.abs(Math.round((a.getTime() - b.getTime()) / 86400000))
 }
 
-// Valores vêm de NUMERIC do Postgres serializado como número JS — comparação
-// com tolerância de meio centavo evita falso-negativo de ponto flutuante.
-function valoresIguais(a: number, b: number): boolean {
-  return Math.abs(a - b) < 0.005
-}
-
-function calcularConfianca(
-  documentoParte: string | undefined,
-  documentoExtraido: string | null,
-  dataTransacao: string,
-  dataReferencia: string
-): 'alta' | 'media' | 'baixa' {
-  if (documentoExtraido && documentoParte && documentoParte === documentoExtraido) return 'alta'
-  if (diasEntre(dataTransacao, dataReferencia) <= 5) return 'media'
-  return 'baixa'
-}
-
 /**
- * Sugere despesas/compras em aberto que podem corresponder a uma transação
- * de saída do extrato. Considera:
- *  - despesas gerais com valor exato;
- *  - compras de insumo com valor exato (NF de item único);
- *  - GRUPOS de compras da mesma NF/fornecedor cuja SOMA bate com o valor
- *    (NF multi-item paga num boleto só — caso comum: nota com vários insumos).
- * Confiança: alta (CNPJ/CPF bate) > média (data ±5 dias) > baixa (só valor).
+ * Sugere lançamentos em aberto que podem corresponder a uma transação de
+ * saída do extrato. Como a nota multi-item vira UM lançamento (valor = soma
+ * dos itens), o match por valor exato cobre notas e despesas igualmente;
+ * parcelas são lançamentos próprios e casam individualmente.
+ * Confiança: alta (CNPJ/CPF bate) > média (vencimento ±5 dias) > baixa (só valor).
  * Nunca aplica sozinho — só retorna candidatos para o usuário confirmar.
  */
 export async function sugerirCorrespondencias(
@@ -122,122 +99,59 @@ export async function sugerirCorrespondencias(
   if (transacaoValor >= 0) return []
   const valorAbs = Math.abs(transacaoValor)
 
-  // Todas as compras em aberto (não só as de valor exato): precisamos delas
-  // para montar os grupos por NF. Volume esperado é pequeno (contas a pagar
-  // em aberto), então filtrar/agrupar no cliente é ok.
-  const [{ data: compras, error: erroCompras }, { data: despesas, error: erroDespesas }] = await Promise.all([
-    supabase
-      .from('financeiro_compras_insumos')
-      .select('*, fornecedor:financeiro_partes!fornecedor_id(*), materia_prima:financeiro_materias_primas(*)')
-      .eq('status', 'aberto'),
-    supabase
-      .from('financeiro_despesas')
-      .select('*, parte:financeiro_partes!parte_id(*)')
-      .eq('status', 'aberto')
-      .eq('valor', valorAbs),
-  ])
+  const { data: lancamentos, error } = await supabase
+    .from('financeiro_lancamentos')
+    .select('*, parte:financeiro_partes!parte_id(*), conta:financeiro_contas(codigo, nome)')
+    .eq('status', 'aberto')
+    .eq('valor_total', valorAbs)
 
-  if (erroCompras) throw new Error(erroCompras.message)
-  if (erroDespesas) throw new Error(erroDespesas.message)
+  if (error) throw new Error(error.message)
 
-  const candidatos: CandidatoConciliacao[] = []
-
-  // 1) Compras individuais com valor exato
-  const comprasExatas = (compras || []).filter((c: FinanceiroCompraInsumo) => valoresIguais(c.valor_total, valorAbs))
-  comprasExatas.forEach((c: FinanceiroCompraInsumo) => {
-    candidatos.push({
-      tipo: 'compra_insumo',
-      registros: [c],
-      confianca: calcularConfianca(c.fornecedor?.documento, documentoExtraido, transacaoData, c.data_compra),
-    })
-  })
-
-  // 2) Grupos por NF: mesma nota + mesmo fornecedor, 2+ itens, soma exata.
-  //    Linhas que já bateram sozinhas (caso 1) não formam grupo consigo mesmas.
-  const idsExatos = new Set(comprasExatas.map((c: FinanceiroCompraInsumo) => c.id))
-  const grupos = new Map<string, FinanceiroCompraInsumo[]>()
-  ;(compras || []).forEach((c: FinanceiroCompraInsumo) => {
-    if (!c.numero_nota_fiscal || idsExatos.has(c.id)) return
-    const chave = `${c.fornecedor_id}|${c.numero_nota_fiscal}`
-    if (!grupos.has(chave)) grupos.set(chave, [])
-    grupos.get(chave)!.push(c)
-  })
-  grupos.forEach((linhas) => {
-    if (linhas.length < 2) return
-    const soma = linhas.reduce((acc, l) => acc + l.valor_total, 0)
-    if (!valoresIguais(soma, valorAbs)) return
-    const primeira = linhas[0]
-    candidatos.push({
-      tipo: 'compra_insumo',
-      registros: linhas,
-      numero_nota_fiscal: primeira.numero_nota_fiscal || undefined,
-      confianca: calcularConfianca(
-        primeira.fornecedor?.documento,
-        documentoExtraido,
-        transacaoData,
-        primeira.data_compra
-      ),
-    })
-  })
-
-  // 3) Despesas gerais com valor exato
-  ;(despesas || []).forEach((d: FinanceiroDespesa) => {
-    candidatos.push({
-      tipo: 'despesa_geral',
-      registros: [d],
-      confianca: calcularConfianca(d.parte?.documento, documentoExtraido, transacaoData, d.data_vencimento),
-    })
-  })
+  const candidatos: CandidatoConciliacao[] = (lancamentos || []).map((l: FinanceiroLancamento) => ({
+    lancamento: l,
+    confianca:
+      documentoExtraido && l.parte?.documento === documentoExtraido
+        ? 'alta'
+        : diasEntre(transacaoData, l.data_vencimento) <= 5
+          ? 'media'
+          : 'baixa',
+  }))
 
   const ordem = { alta: 0, media: 1, baixa: 2 }
   return candidatos.sort((a, b) => ordem[a.confianca] - ordem[b.confianca])
 }
 
 /**
- * Confirma a conciliação: marca a transação como conciliada e todos os
- * registros do candidato (1 despesa/compra, ou todas as linhas de uma NF
- * multi-item) como pagos. Atualizações sequenciais (não atômicas, mesmo
- * padrão já aceito em PagamentosOFXModal) — se alguma falhar, o erro sobe
- * pro chamador e o usuário pode tentar de novo (idempotente).
+ * Confirma a conciliação: marca a transação como conciliada e o lançamento
+ * como pago. Duas atualizações sequenciais (não atômicas, mesmo padrão já
+ * aceito em PagamentosOFXModal) — se a segunda falhar, o erro sobe pro
+ * chamador e o usuário pode tentar de novo (idempotente).
  */
 export async function confirmarConciliacao(
   transacaoId: string,
   candidato: CandidatoConciliacao,
   dataPagamento: string
 ): Promise<void> {
-  const primeiro = candidato.registros[0]
-  const parteId = candidato.tipo === 'compra_insumo'
-    ? (primeiro as FinanceiroCompraInsumo).fornecedor_id
-    : (primeiro as FinanceiroDespesa).parte_id
-
-  // Grupo de NF (várias linhas): o vínculo direto na transação fica nulo —
-  // a ligação passa a ser o extrato_transacao_id gravado em cada linha.
-  const unico = candidato.registros.length === 1 ? primeiro.id : null
-
   const { error: erroTransacao } = await supabase
     .from('financeiro_extrato_transacoes')
     .update({
       status_conciliacao: 'conciliado',
-      tipo_match: candidato.tipo,
-      compra_insumo_id: candidato.tipo === 'compra_insumo' ? unico : null,
-      despesa_id: candidato.tipo === 'despesa_geral' ? unico : null,
-      parte_id: parteId,
+      lancamento_id: candidato.lancamento.id,
+      parte_id: candidato.lancamento.parte_id,
     })
     .eq('id', transacaoId)
   if (erroTransacao) throw new Error(erroTransacao.message)
 
-  const tabela = candidato.tipo === 'compra_insumo' ? 'financeiro_compras_insumos' : 'financeiro_despesas'
-  const ids = candidato.registros.map((r) => r.id)
-  const { error: erroRegistros } = await supabase
-    .from(tabela)
+  const { error: erroLancamento } = await supabase
+    .from('financeiro_lancamentos')
     .update({
       status: 'pago',
       data_pagamento: dataPagamento,
       extrato_transacao_id: transacaoId,
       updated_at: new Date().toISOString(),
     })
-    .in('id', ids)
-  if (erroRegistros) throw new Error(erroRegistros.message)
+    .eq('id', candidato.lancamento.id)
+  if (erroLancamento) throw new Error(erroLancamento.message)
 }
 
 export async function ignorarTransacao(transacaoId: string): Promise<void> {

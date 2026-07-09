@@ -10,8 +10,8 @@ export default function FinanceiroHubPage() {
   const router = useRouter()
 
   const cards = [
-    { href: '/financeiro/despesas', label: 'Despesas Gerais', desc: 'Lançar e acompanhar contas a pagar', icon: Receipt, roles: ['admin', 'loja', 'cozinha'] },
-    { href: '/financeiro/compras', label: 'Compras de Insumos', desc: 'Lançar notinhas de matéria-prima', icon: ShoppingCart, roles: ['admin', 'loja', 'cozinha'] },
+    { href: '/financeiro/despesas', label: 'Despesas', desc: 'Tudo a pagar e pago, de notas e despesas, numa tela só', icon: Receipt, roles: ['admin', 'loja', 'cozinha'] },
+    { href: '/financeiro/compras/nova', label: 'Lançar Nota de Insumos', desc: 'Nota fiscal de compra — gera a despesa automaticamente', icon: ShoppingCart, roles: ['admin', 'loja', 'cozinha'] },
     { href: '/financeiro/materias-primas', label: 'Matérias-Primas', desc: 'Cadastro controlado e custo médio', icon: Package, roles: ['admin'] },
     { href: '/financeiro/partes', label: 'Fornecedores/Beneficiários', desc: 'Cadastro de quem recebe pagamento', icon: Users, roles: ['admin'] },
     { href: '/financeiro/contas', label: 'Plano de Contas', desc: 'Consulta de centro de custo e conta', icon: BookOpen, roles: ['admin'] },
