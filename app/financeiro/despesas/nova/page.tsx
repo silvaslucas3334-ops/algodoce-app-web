@@ -16,14 +16,15 @@ export default function NovaDespesaPage() {
   const [partes, setPartes] = useState<FinanceiroParte[]>([])
   const [contas, setContas] = useState<FinanceiroConta[]>([])
 
+  // Cozinha não é uma entidade própria — seus custos entram como rateio (0001).
   const unidadeTravada: UnidadeFinanceiro | null =
-    usuario?.role === 'cozinha' ? 'cozinha' : usuario?.role === 'loja' ? usuario?.loja_id : null
+    usuario?.role === 'cozinha' ? 'rateio' : usuario?.role === 'loja' ? usuario?.loja_id : null
 
   const [parteId, setParteId] = useState('')
   const [descricao, setDescricao] = useState('')
   const [valor, setValor] = useState('')
   const [dataLancamento, setDataLancamento] = useState(hojeISO())
-  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || 'cozinha')
+  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || 'loja1')
   const [contaId, setContaId] = useState('')
   const [numeroDocumento, setNumeroDocumento] = useState('')
 
@@ -237,7 +238,7 @@ export default function NovaDespesaPage() {
                   </div>
                 ) : (
                   <select value={unidade} onChange={(e) => setUnidade(e.target.value as UnidadeFinanceiro)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white">
-                    {(['cozinha', 'loja1', 'loja2', 'rateio'] as UnidadeFinanceiro[]).map((u) => (
+                    {(['loja1', 'loja2', 'rateio'] as UnidadeFinanceiro[]).map((u) => (
                       <option key={u} value={u}>{UNIDADE_LABEL[u]}</option>
                     ))}
                   </select>

@@ -58,7 +58,7 @@ export default function DetalheDespesaPage() {
     setLoading(false)
   }
 
-  const unidadeDoUsuario = usuario?.role === 'cozinha' ? 'cozinha' : usuario?.role === 'loja' ? usuario?.loja_id : null
+  const unidadeDoUsuario = usuario?.role === 'cozinha' ? 'rateio' : usuario?.role === 'loja' ? usuario?.loja_id : null
   const podeEditar =
     usuario?.role === 'admin' || (lancamento && lancamento.unidade === unidadeDoUsuario && lancamento.status === 'aberto')
 

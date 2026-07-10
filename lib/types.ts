@@ -147,7 +147,10 @@ export interface TarefaRecorrencia {
 }
 
 // MÓDULO FINANCEIRO
-export type UnidadeFinanceiro = 'cozinha' | 'loja1' | 'loja2' | 'rateio'
+// Entidades reais do plano de contas: 0116=Paraisópolis, 0205=Itajubá,
+// 0001=Rateio. A cozinha não é uma 4ª entidade — seus custos entram como
+// rateio (0001), já que não são atribuídos a uma loja específica.
+export type UnidadeFinanceiro = 'loja1' | 'loja2' | 'rateio'
 export type StatusFinanceiro = 'aberto' | 'pago' | 'cancelado'
 export type StatusConciliacao = 'pendente' | 'conciliado' | 'ignorado'
 export type FormaPagamento = 'boleto' | 'pix' | 'cartao_debito' | 'dinheiro'

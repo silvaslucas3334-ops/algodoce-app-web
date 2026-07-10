@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS financeiro_recorrencias (
   valor NUMERIC NOT NULL CHECK (valor > 0),
   dia_vencimento INT NOT NULL CHECK (dia_vencimento BETWEEN 1 AND 28),
   forma_pagamento TEXT CHECK (forma_pagamento IN ('boleto', 'pix', 'cartao_debito', 'dinheiro')),
-  unidade TEXT NOT NULL CHECK (unidade IN ('cozinha', 'loja1', 'loja2', 'rateio')),
+  unidade TEXT NOT NULL CHECK (unidade IN ('loja1', 'loja2', 'rateio')), -- cozinha entra como rateio (0001), não é entidade própria
   conta_id UUID NOT NULL REFERENCES financeiro_contas(id),
   ativa BOOLEAN NOT NULL DEFAULT true,
   proxima_data DATE NOT NULL,
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS financeiro_lancamentos (
   parcela_total INT,
   grupo_parcelamento UUID,
   recorrencia_id UUID REFERENCES financeiro_recorrencias(id),
-  unidade TEXT NOT NULL CHECK (unidade IN ('cozinha', 'loja1', 'loja2', 'rateio')),
+  unidade TEXT NOT NULL CHECK (unidade IN ('loja1', 'loja2', 'rateio')), -- cozinha entra como rateio (0001), não é entidade própria
   conta_id UUID REFERENCES financeiro_contas(id),
   extrato_transacao_id UUID REFERENCES financeiro_extrato_transacoes(id),
   observacoes TEXT,
@@ -243,9 +243,11 @@ GROUP BY it.materia_prima_id, date_trunc('month', l.data_lancamento), mp.nome, m
 -- ============================================================
 -- 9. Função auxiliar de RLS + RLS
 -- ============================================================
+-- Cozinha não é entidade própria no plano de contas — seus lançamentos
+-- entram como rateio (0001), já que não são atribuídos a uma loja específica.
 CREATE OR REPLACE FUNCTION financeiro_unidade_do_usuario() RETURNS TEXT AS $$
   SELECT CASE
-    WHEN role = 'cozinha' THEN 'cozinha'
+    WHEN role = 'cozinha' THEN 'rateio'
     WHEN role = 'loja' THEN loja_id
     ELSE NULL
   END

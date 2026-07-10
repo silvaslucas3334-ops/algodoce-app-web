@@ -23,9 +23,14 @@ export const FINANCEIRO_STATUS_LABEL: Record<string, string> = {
   cancelado: 'Cancelada',
 }
 
+// Entidades financeiras: só as 3 reais do plano de contas (Paraisópolis,
+// Itajubá, Rateio). Não usar LOCAL_LABEL aqui — aquele inclui "cozinha" como
+// local físico de estoque/produção, um conceito diferente da entidade
+// contábil (custos da cozinha entram como rateio, não como uma 4ª entidade).
 export const UNIDADE_LABEL: Record<string, string> = {
-  ...LOCAL_LABEL,
-  rateio: 'Rateio (compartilhado)',
+  loja1: 'Paraisópolis',
+  loja2: 'Itajubá',
+  rateio: 'Rateio (Cozinha)',
 }
 
 export const FORMA_PAGAMENTO_LABEL: Record<string, string> = {

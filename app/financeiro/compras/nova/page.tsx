@@ -17,14 +17,15 @@ export default function LancarNotaPage() {
   const [materias, setMaterias] = useState<FinanceiroMateriaPrima[]>([])
   const [fornecedores, setFornecedores] = useState<FinanceiroParte[]>([])
 
+  // Cozinha não é uma entidade própria — seus custos entram como rateio (0001).
   const unidadeTravada: UnidadeFinanceiro | null =
-    usuario?.role === 'cozinha' ? 'cozinha' : usuario?.role === 'loja' ? usuario?.loja_id : null
+    usuario?.role === 'cozinha' ? 'rateio' : usuario?.role === 'loja' ? usuario?.loja_id : null
 
   // Dados da nota
   const [fornecedorId, setFornecedorId] = useState('')
   const [numeroNota, setNumeroNota] = useState('')
   const [dataCompra, setDataCompra] = useState(hojeISO())
-  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || 'cozinha')
+  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || 'loja1')
 
   // Itens
   const [itens, setItens] = useState<ItemNota[]>([])
@@ -213,7 +214,7 @@ export default function LancarNotaPage() {
                 </div>
               ) : (
                 <select value={unidade} onChange={(e) => setUnidade(e.target.value as UnidadeFinanceiro)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white">
-                  {(['cozinha', 'loja1', 'loja2', 'rateio'] as UnidadeFinanceiro[]).map((u) => (
+                  {(['loja1', 'loja2', 'rateio'] as UnidadeFinanceiro[]).map((u) => (
                     <option key={u} value={u}>{UNIDADE_LABEL[u]}</option>
                   ))}
                 </select>
