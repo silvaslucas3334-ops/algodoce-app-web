@@ -49,3 +49,18 @@ export const TIPO_LANCAMENTO_LABEL: Record<string, string> = {
   despesa: 'Despesa',
   compra_insumos: 'Nota de Insumos',
 }
+
+// Status de pedido do PDV que contam como receita real. Só 'Finalizado -
+// Pago' e 'Finalizado - Fiado' — exclui 'Em Andamento', 'Excluído' e
+// 'Solicitou Fechamento'. Compartilhado entre lib/pdv-import.ts (aviso de
+// status desconhecido) e lib/pdv-report.ts (filtro do relatório) para não
+// desalinhar os dois.
+export const PDV_STATUS_RECEITA = ['Finalizado - Pago', 'Finalizado - Fiado']
+
+export const PDV_STATUS_CONHECIDOS = [
+  'Finalizado - Pago',
+  'Finalizado - Fiado',
+  'Em Andamento',
+  'Excluído',
+  'Solicitou Fechamento',
+]

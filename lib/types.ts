@@ -303,3 +303,72 @@ export interface CandidatoConciliacao {
   lancamento: FinanceiroLancamento
   confianca: 'alta' | 'media' | 'baixa'
 }
+
+// Import do PDV — pedidos/itens importados dos exports do sistema de PDV.
+// unidade aqui é só loja1/loja2 (o export é por loja, não existe pedido
+// "rateio"/cozinha). status é texto livre validado em lib/pdv-import.ts,
+// não um union fechado — vocabulário controlado pelo fornecedor do PDV.
+export interface FinanceiroPdvPedido {
+  id: string
+  unidade: 'loja1' | 'loja2'
+  codigo: string
+  data_abertura: string
+  data_fechamento?: string
+  status: string
+  tot_itens?: number
+  servico: number
+  desconto: number
+  valor_entrega: number
+  total: number
+  total_recebido?: number
+  forma_pagamento?: string
+  nota_emitida?: boolean
+  serie_nf?: string
+  numero_nf?: string
+  importado_por: string
+  importado_em: string
+  itens?: FinanceiroPdvItem[]
+}
+
+export interface FinanceiroPdvItem {
+  id: string
+  pedido_id: string
+  ordem_pedido: number
+  data_hora_item: string
+  quantidade: number
+  valor_unitario: number
+  valor_total_item: number
+  tipo_item: 'Produto' | 'Complemento'
+  nome_produto: string
+  tipo_produto?: string
+  categoria_produto?: string
+  codigo_produto_pdv?: string
+  importado_em: string
+}
+
+// Linha achatada do relatório "Itens Vendidos" — gerada em tempo de consulta
+// (lib/pdv-report.ts), nunca persistida. Ver nota em financeiro_pdv_pedidos:
+// os ajustes do pedido (entrega/desconto/acréscimo/NF) só aparecem na
+// primeira linha de cada pedido, replicando a coluna "X" da planilha manual.
+export interface ItemVendidoFlat {
+  dataHoraItem: string
+  nomeProduto: string
+  tipoProduto: string | null
+  categoriaProduto: string | null
+  quantidade: number
+  valorUnitario: number
+  valorTotalItem: number
+  codPedido: string
+  taxaEntrega: number
+  desconto: number
+  acrescimo: number
+  numeroNf: string | null
+  valorFinal: number
+}
+
+export interface FaturamentoPorCategoria {
+  categoria: string
+  quantidade: number
+  valorFinal: number
+  percentual: number
+}
