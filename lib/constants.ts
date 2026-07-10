@@ -64,3 +64,8 @@ export const PDV_STATUS_CONHECIDOS = [
   'Excluído',
   'Solicitou Fechamento',
 ]
+
+// Idem para "Tipo de Item" — vocabulário do PDV, não CHECK no banco. 'Item de
+// combo' tem valor real (não é um complemento gratuito) e entra nos
+// relatórios igual a 'Produto'.
+export const PDV_TIPO_ITEM_CONHECIDOS = ['Produto', 'Complemento', 'Item de combo']

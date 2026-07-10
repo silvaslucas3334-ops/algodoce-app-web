@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx'
 import { supabase } from './supabase'
-import { PDV_STATUS_CONHECIDOS } from './constants'
+import { PDV_STATUS_CONHECIDOS, PDV_TIPO_ITEM_CONHECIDOS } from './constants'
 
 // --- leitura de planilha com cabeçalhos tolerantes a pontuação -----------
 // Os exports do PDV têm pontuação inconsistente entre colunas ("Valor. Tot.
@@ -108,7 +108,11 @@ export interface PdvPedidoRaw {
 export async function parseHistoricoItens(file: File): Promise<PdvItemRaw[]> {
   const { linhas, col } = await lerPlanilha(file)
   return linhas
-    .filter((linha) => campo(linha, col, 'cod ped') != null)
+    // Exports do PDV podem terminar com uma linha residual sem dados reais
+    // (ex: linha de total/resumo que o próprio sistema anexa) — só "Cod.
+    // Ped." preenchido não basta pra considerar a linha um item de verdade,
+    // por isso exige também a data do item.
+    .filter((linha) => campo(linha, col, 'cod ped') != null && campo(linha, col, 'data/hora item') != null)
     .map((linha) => ({
       codPed: String(campo(linha, col, 'cod ped')).trim(),
       dataHoraItem: paraTimestampSP(campo(linha, col, 'data/hora item')),
@@ -125,7 +129,11 @@ export async function parseHistoricoItens(file: File): Promise<PdvItemRaw[]> {
 export async function parseFinalizados(file: File): Promise<PdvPedidoRaw[]> {
   const { linhas, col } = await lerPlanilha(file)
   return linhas
-    .filter((linha) => campo(linha, col, 'código') != null)
+    // Mesma razão do Histórico: já vimos na prática uma linha residual no
+    // fim do export real do usuário (Código preenchido, todo o resto nulo,
+    // incluindo Data Abertura) — exigir a data também descarta essa linha
+    // sem descartar nenhum pedido de verdade.
+    .filter((linha) => campo(linha, col, 'código') != null && campo(linha, col, 'data abertura') != null)
     .map((linha) => ({
       codigo: String(campo(linha, col, 'código')).trim(),
       dataAbertura: paraTimestampSP(campo(linha, col, 'data abertura')),
@@ -168,11 +176,9 @@ export async function contarPedidosExistentes(unidade: 'loja1' | 'loja2', dataMi
 export interface ResultadoMontagem {
   pedidos: any[] // payload pronto pra RPC (snake_case)
   itens: any[]
-  avisos: string[] // status desconhecido — não bloqueia
-  erros: string[] // item órfão / tipo_item inválido — bloqueia
+  avisos: string[] // status/tipo_item desconhecido — não bloqueia
+  erros: string[] // item órfão (Cod. Ped. sem pedido correspondente) — bloqueia
 }
-
-const TIPOS_ITEM_VALIDOS = new Set(['Produto', 'Complemento'])
 
 export function montarPayloadImportacao(pedidosRaw: PdvPedidoRaw[], itensRaw: PdvItemRaw[]): ResultadoMontagem {
   const avisos: string[] = []
@@ -193,9 +199,8 @@ export function montarPayloadImportacao(pedidosRaw: PdvPedidoRaw[], itensRaw: Pd
       erros.push(`Item "${item.nomeProd}" referencia o pedido ${item.codPed}, que não existe no arquivo Finalizados. Confira se os dois arquivos são do mesmo período.`)
       continue
     }
-    if (!TIPOS_ITEM_VALIDOS.has(item.tipoItem)) {
-      erros.push(`Item "${item.nomeProd}" (pedido ${item.codPed}) tem "Tipo de Item" = "${item.tipoItem}", esperado "Produto" ou "Complemento".`)
-      continue
+    if (!PDV_TIPO_ITEM_CONHECIDOS.includes(item.tipoItem)) {
+      avisos.push(`Item "${item.nomeProd}" (pedido ${item.codPed}) tem "Tipo de Item" = "${item.tipoItem}", não reconhecido — foi importado mesmo assim.`)
     }
     if (!itensPorPedido.has(item.codPed)) itensPorPedido.set(item.codPed, [])
     itensPorPedido.get(item.codPed)!.push(item)

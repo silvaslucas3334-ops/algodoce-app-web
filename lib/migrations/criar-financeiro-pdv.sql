@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS financeiro_pdv_itens (
   quantidade NUMERIC NOT NULL DEFAULT 0,
   valor_unitario NUMERIC NOT NULL DEFAULT 0,
   valor_total_item NUMERIC NOT NULL DEFAULT 0,
-  tipo_item TEXT NOT NULL CHECK (tipo_item IN ('Produto', 'Complemento')),
+  -- Vocabulário do PDV (Produto/Complemento/Item de combo/...), sem CHECK
+  -- pelo mesmo motivo do status do pedido — validado em lib/pdv-import.ts.
+  tipo_item TEXT NOT NULL,
   nome_produto TEXT NOT NULL,
   tipo_produto TEXT,
   categoria_produto TEXT,
