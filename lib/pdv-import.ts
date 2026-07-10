@@ -64,10 +64,6 @@ export function paraTimestampSP(valor: unknown): string {
   throw new Error(`Data/hora não reconhecida: "${texto}"`)
 }
 
-function paraData(valor: unknown): string {
-  return paraTimestampSP(valor).slice(0, 10)
-}
-
 function paraNumero(valor: unknown): number {
   if (valor == null || valor === '') return 0
   const n = Number(String(valor).replace(',', '.'))
@@ -156,7 +152,11 @@ export async function parseFinalizados(file: File): Promise<PdvPedidoRaw[]> {
 
 export function detectarPeriodo(pedidos: PdvPedidoRaw[]): { min: string; max: string } {
   if (pedidos.length === 0) throw new Error('Nenhum pedido encontrado no arquivo Finalizados.')
-  const datas = pedidos.map((p) => paraData(p.dataAbertura)).sort()
+  // p.dataAbertura já é a string ISO com offset produzida por paraTimestampSP
+  // (convertida em parseFinalizados) — só recortar a parte de data, nunca
+  // reprocessar: paraTimestampSP espera valor BRUTO da planilha (Date ou
+  // "M/D/YY HH:MM"), não uma ISO já pronta, e rejeitaria de volta.
+  const datas = pedidos.map((p) => p.dataAbertura.slice(0, 10)).sort()
   return { min: datas[0], max: datas[datas.length - 1] }
 }
 
