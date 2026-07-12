@@ -471,7 +471,7 @@ CREATE TABLE IF NOT EXISTS financeiro_pdv_pedidos (
   data_abertura TIMESTAMPTZ NOT NULL,
   data_fechamento TIMESTAMPTZ,
   status TEXT NOT NULL, -- vocabulário de terceiro (PDV), sem CHECK — validado em lib/pdv-import.ts
-  tot_itens INT,
+  tot_itens NUMERIC, -- é o valor (subtotal dos itens antes de ajustes), não uma contagem — nome do PDV engana
   servico NUMERIC NOT NULL DEFAULT 0,
   desconto NUMERIC NOT NULL DEFAULT 0,
   valor_entrega NUMERIC NOT NULL DEFAULT 0,
@@ -559,7 +559,7 @@ BEGIN
            x.nota_emitida, x.serie_nf, x.numero_nf, p_importado_por
     FROM jsonb_to_recordset(p_pedidos) AS x(
       codigo TEXT, data_abertura TIMESTAMPTZ, data_fechamento TIMESTAMPTZ, status TEXT,
-      tot_itens INT, servico NUMERIC, desconto NUMERIC, valor_entrega NUMERIC, total NUMERIC,
+      tot_itens NUMERIC, servico NUMERIC, desconto NUMERIC, valor_entrega NUMERIC, total NUMERIC,
       total_recebido NUMERIC, forma_pagamento TEXT, nota_emitida BOOLEAN, serie_nf TEXT, numero_nf TEXT
     )
     RETURNING id, codigo
