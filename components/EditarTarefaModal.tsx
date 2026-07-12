@@ -1,13 +1,15 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Tarefa } from '@/lib/types'
+import { Tarefa, TarefaEnvolvido } from '@/lib/types'
 import { normalizarTitulo, colapsarEspacos } from '@/lib/tarefas-utils'
 import { X, Save } from 'lucide-react'
+import SeletorPessoas from './SeletorPessoas'
 
 interface EditarTarefaModalProps {
   tarefa: Tarefa
   usuariosDoSetor: { id: string; nome: string }[]
+  envolvidosAtuais?: TarefaEnvolvido[]
   usuarioAtualId: string
   onClose: () => void
   onSaved: () => void
@@ -25,6 +27,7 @@ function logErro(contexto: string, error: any) {
 export default function EditarTarefaModal({
   tarefa,
   usuariosDoSetor,
+  envolvidosAtuais = [],
   usuarioAtualId,
   onClose,
   onSaved,
@@ -40,6 +43,8 @@ export default function EditarTarefaModal({
     foto_obrigatoria: tarefa.foto_obrigatoria,
   })
   const [titulosSetor, setTitulosSetor] = useState<{ titulo: string; count: number }[]>([])
+  const envolvidoIdsOriginais = envolvidosAtuais.map((e) => e.usuario_id).sort()
+  const [envolvidoIds, setEnvolvidoIds] = useState<string[]>(envolvidoIdsOriginais)
 
   useEffect(() => {
     async function carregarTitulos() {
@@ -102,6 +107,10 @@ export default function EditarTarefaModal({
     if (form.foto_obrigatoria !== tarefa.foto_obrigatoria)
       mudancas.foto_obrigatoria = { de: tarefa.foto_obrigatoria, para: form.foto_obrigatoria }
 
+    const envolvidosFinal = envolvidoIds.filter((id) => id !== form.responsavel_id).sort()
+    const envolvidosMudou = JSON.stringify(envolvidosFinal) !== JSON.stringify(envolvidoIdsOriginais)
+    if (envolvidosMudou) mudancas.envolvidos = { de: envolvidoIdsOriginais, para: envolvidosFinal }
+
     if (Object.keys(mudancas).length === 0) {
       onClose()
       return
@@ -134,6 +143,16 @@ export default function EditarTarefaModal({
         setErro('Você não tem permissão para editar esta tarefa (RLS).')
         setSalvando(false)
         return
+      }
+
+      if (envolvidosMudou) {
+        await supabase.from('tarefas_envolvidos').delete().eq('tarefa_id', tarefa.id)
+        if (envolvidosFinal.length > 0) {
+          const { error: envError } = await supabase
+            .from('tarefas_envolvidos')
+            .insert(envolvidosFinal.map((usuario_id) => ({ tarefa_id: tarefa.id, usuario_id })))
+          if (envError) logErro('Erro ao salvar envolvidos:', envError)
+        }
       }
 
       const { error: histError } = await supabase.from('tarefas_historico').insert({
@@ -206,17 +225,29 @@ export default function EditarTarefaModal({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Responsável *</label>
-            <select
-              value={form.responsavel_id}
-              onChange={(e) => setForm({ ...form, responsavel_id: e.target.value })}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-            >
-              {usuariosDoSetor.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.nome}
-                </option>
-              ))}
-            </select>
+            <SeletorPessoas
+              grupos={[{ label: 'Responsável', pessoas: usuariosDoSetor }]}
+              selecionados={form.responsavel_id ? [form.responsavel_id] : []}
+              onChange={(ids) => setForm({ ...form, responsavel_id: ids[0] || '' })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Envolvidos (opcional)</label>
+            <p className="text-xs text-gray-400 mb-2">
+              Além do responsável, quem mais pode concluir esta tarefa.
+            </p>
+            <SeletorPessoas
+              grupos={[
+                {
+                  label: 'Envolvidos',
+                  pessoas: usuariosDoSetor.filter((u) => u.id !== form.responsavel_id),
+                },
+              ]}
+              selecionados={envolvidoIds}
+              multi
+              onChange={setEnvolvidoIds}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-3">

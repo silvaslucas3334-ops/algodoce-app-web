@@ -124,6 +124,13 @@ export interface TarefaComentario {
   created_at: string
 }
 
+export interface TarefaEnvolvido {
+  id: string
+  tarefa_id: string
+  usuario_id: string
+  criado_em: string
+}
+
 export type FrequenciaRecorrencia = 'diaria' | 'semanal' | 'mensal'
 
 export interface TarefaRecorrencia {

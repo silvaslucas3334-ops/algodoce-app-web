@@ -105,16 +105,22 @@ FOR SELECT USING (
   setor_id IN (SELECT setor_id FROM usuarios WHERE id = auth.uid() AND setor_id IS NOT NULL)
 );
 
--- UPDATE status: colaborador onde responsavel_atual_id = auth.uid() AND status IN ('pendente', 'refazer_pendente')
+-- UPDATE status: colaborador (responsável OU envolvido) onde status IN ('pendente', 'refazer_pendente')
 CREATE POLICY tarefas_update_status_colaborador ON tarefas
 FOR UPDATE
 USING (
-  responsavel_atual_id = auth.uid()
-  AND status IN ('pendente', 'refazer_pendente')
+  status IN ('pendente', 'refazer_pendente')
+  AND (
+    responsavel_atual_id = auth.uid()
+    OR EXISTS (SELECT 1 FROM tarefas_envolvidos WHERE tarefa_id = tarefas.id AND usuario_id = auth.uid())
+  )
 )
 WITH CHECK (
-  responsavel_atual_id = auth.uid()
-  AND status IN ('pronta_revisao')
+  status IN ('pronta_revisao')
+  AND (
+    responsavel_atual_id = auth.uid()
+    OR EXISTS (SELECT 1 FROM tarefas_envolvidos WHERE tarefa_id = tarefas.id AND usuario_id = auth.uid())
+  )
 );
 
 -- UPDATE: admin pode alterar qualquer coisa (exceto DELETE)
@@ -127,10 +133,32 @@ WITH CHECK (
   (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
 );
 
--- INSERT: admin only
+-- UPDATE: colaborador edita/cancela só a própria tarefa criada, ainda
+-- pendente e sem evidência enviada (tarefa_sem_evidencia evita recursão de
+-- RLS ao consultar tarefas_evidencias dentro desta policy).
+CREATE OR REPLACE FUNCTION tarefa_sem_evidencia(p_tarefa_id UUID) RETURNS BOOLEAN AS $$
+  SELECT NOT EXISTS (SELECT 1 FROM tarefas_evidencias WHERE tarefa_id = p_tarefa_id);
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+CREATE POLICY tarefas_update_criador ON tarefas FOR UPDATE
+USING (
+  criado_por = auth.uid()
+  AND status = 'pendente'
+  AND tarefa_sem_evidencia(id)
+)
+WITH CHECK (
+  criado_por = auth.uid()
+);
+
+-- INSERT: admin em qualquer setor; colaborador só no próprio setor, criando em seu próprio nome
 CREATE POLICY tarefas_insert_admin ON tarefas
 FOR INSERT WITH CHECK (
   (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+);
+
+CREATE POLICY tarefas_insert_colaborador ON tarefas FOR INSERT WITH CHECK (
+  criado_por = auth.uid()
+  AND setor_id = (SELECT setor_id FROM usuarios WHERE id = auth.uid())
 );
 
 -- DELETE: bloqueado (preservar auditoria)
@@ -166,13 +194,51 @@ FOR SELECT USING (
   )
 );
 
--- INSERT: colaborador upload para sua tarefa (responsavel_atual_id)
+-- INSERT: colaborador upload para sua tarefa (responsável OU envolvido)
 CREATE POLICY evidencias_insert ON tarefas_evidencias
 FOR INSERT WITH CHECK (
   uploaded_by = auth.uid()
   AND tarefa_id IN (
     SELECT id FROM tarefas WHERE responsavel_atual_id = auth.uid()
+    UNION
+    SELECT tarefa_id FROM tarefas_envolvidos WHERE usuario_id = auth.uid()
   )
+);
+
+-- 4.5 TABELA TAREFAS_ENVOLVIDOS
+-- ============================================
+-- Além do responsável (1), outras pessoas que também podem concluir a
+-- tarefa — quem de fato executa às vezes não é quem foi originalmente
+-- atribuído.
+CREATE TABLE IF NOT EXISTS tarefas_envolvidos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tarefa_id UUID NOT NULL REFERENCES tarefas(id) ON DELETE CASCADE,
+  usuario_id UUID NOT NULL REFERENCES usuarios(id),
+  criado_em TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(tarefa_id, usuario_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_envolvidos_tarefa ON tarefas_envolvidos(tarefa_id);
+
+ALTER TABLE tarefas_envolvidos ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY envolvidos_select ON tarefas_envolvidos FOR SELECT USING (
+  (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+  OR tarefa_id IN (
+    SELECT id FROM tarefas
+    WHERE setor_id IN (SELECT setor_id FROM usuarios WHERE id = auth.uid() AND setor_id IS NOT NULL)
+  )
+);
+
+-- INSERT/DELETE: quem criou a tarefa ou admin (espelha quem pode editar a tarefa)
+CREATE POLICY envolvidos_insert ON tarefas_envolvidos FOR INSERT WITH CHECK (
+  (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+  OR tarefa_id IN (SELECT id FROM tarefas WHERE criado_por = auth.uid())
+);
+
+CREATE POLICY envolvidos_delete ON tarefas_envolvidos FOR DELETE USING (
+  (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+  OR tarefa_id IN (SELECT id FROM tarefas WHERE criado_por = auth.uid())
 );
 
 -- 5. TABELA TAREFAS_HISTORICO
@@ -220,10 +286,10 @@ FOR INSERT WITH CHECK (
 -- ============================================
 -- INSTRUÇÕES MANUAIS (via Supabase Dashboard)
 -- ============================================
--- 1. Criar bucket Storage: tarafas-provas (privado)
--- 2. Policies do bucket:
---    - Upload: path = "{setor_id}/{tarefa_id}/{tentativa_num}/*"
---      WHERE (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
---      OR auth.uid() IN (SELECT id FROM usuarios WHERE setor_id = CAST(storage.foldername[1] AS uuid))
---    - Download/List: mesmo acesso que upload
+-- 1. Criar bucket Storage: tarefas-provas (privado)
+-- 2. Policies do bucket: ver lib/migrations/tarefas-storage-policies.sql —
+--    UMA policy de upload e UMA de leitura, cobrindo todos os roles com uma
+--    condição OR genérica (admin OR mesmo setor via storage.foldername).
+--    Não criar uma policy por role via os templates prontos do Dashboard —
+--    foi assim que esse bucket ficou funcionando só para admin antes.
 -- 3. Criar Edge Function para geração automática de recorrências (Phase 2)

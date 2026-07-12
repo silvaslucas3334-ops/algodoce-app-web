@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { Setor } from '@/lib/types'
 import { normalizarTitulo, colapsarEspacos, detectarPadraoRecorrencia, labelDiasSemana, labelFrequencia } from '@/lib/tarefas-utils'
 import { X, Save, Sparkles } from 'lucide-react'
+import SeletorPessoas from './SeletorPessoas'
 
 interface NovaTarefaModalProps {
   setor: Setor
@@ -39,6 +40,9 @@ export default function NovaTarefaModal({
     hora_limite: '',
     foto_obrigatoria: setor.tipo === 'operacional',
   })
+
+  // Envolvidos além do responsável — só p/ tarefa avulsa (não recorrente)
+  const [envolvidoIds, setEnvolvidoIds] = useState<string[]>([])
 
   // Recorrência
   const [recorrente, setRecorrente] = useState(false)
@@ -230,23 +234,35 @@ export default function NovaTarefaModal({
         }
         alert(`Recorrência criada — ${qtd ?? 0} instâncias geradas nos próximos 30 dias.`)
       } else {
-        const { error } = await supabase.from('tarefas').insert({
-          titulo: tituloFinal,
-          descricao: form.descricao.trim() || null,
-          setor_id: setor.id,
-          status: 'pendente',
-          data_vencimento: form.data_vencimento,
-          hora_limite: form.hora_limite || null,
-          criado_por: criadoPor,
-          responsavel_original_id: form.responsavel_id,
-          responsavel_atual_id: form.responsavel_id,
-          foto_obrigatoria: form.foto_obrigatoria,
-          tentativa_num: 1,
-        })
+        const { data: novaTarefa, error } = await supabase
+          .from('tarefas')
+          .insert({
+            titulo: tituloFinal,
+            descricao: form.descricao.trim() || null,
+            setor_id: setor.id,
+            status: 'pendente',
+            data_vencimento: form.data_vencimento,
+            hora_limite: form.hora_limite || null,
+            criado_por: criadoPor,
+            responsavel_original_id: form.responsavel_id,
+            responsavel_atual_id: form.responsavel_id,
+            foto_obrigatoria: form.foto_obrigatoria,
+            tentativa_num: 1,
+          })
+          .select('id')
+          .single()
         if (error) {
           setErro(error.message)
           setSalvando(false)
           return
+        }
+
+        const envolvidosFinal = envolvidoIds.filter((id) => id !== form.responsavel_id)
+        if (envolvidosFinal.length > 0 && novaTarefa) {
+          const { error: envError } = await supabase
+            .from('tarefas_envolvidos')
+            .insert(envolvidosFinal.map((usuario_id) => ({ tarefa_id: novaTarefa.id, usuario_id })))
+          if (envError) console.error('Erro ao salvar envolvidos da tarefa:', envError)
         }
       }
 
@@ -376,34 +392,47 @@ export default function NovaTarefaModal({
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Responsável *
               </label>
-              <select
-                value={form.responsavel_id}
-                onChange={(e) =>
-                  setForm({ ...form, responsavel_id: e.target.value })
-                }
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-              >
-                <option value="">Selecione...</option>
-                <optgroup label={setor.nome}>
-                  {usuariosDoSetor.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.nome}
-                    </option>
-                  ))}
-                </optgroup>
-                {gestores.filter((g) => !usuariosDoSetor.some((u) => u.id === g.id)).length > 0 && (
-                  <optgroup label="Gestores">
-                    {gestores
-                      .filter((g) => !usuariosDoSetor.some((u) => u.id === g.id))
-                      .map((g) => (
-                        <option key={g.id} value={g.id}>
-                          {g.nome}
-                        </option>
-                      ))}
-                  </optgroup>
-                )}
-              </select>
+              <SeletorPessoas
+                grupos={[
+                  { label: setor.nome, pessoas: usuariosDoSetor },
+                  {
+                    label: 'Gestores',
+                    pessoas: gestores.filter((g) => !usuariosDoSetor.some((u) => u.id === g.id)),
+                  },
+                ]}
+                selecionados={form.responsavel_id ? [form.responsavel_id] : []}
+                onChange={(ids) => setForm({ ...form, responsavel_id: ids[0] || '' })}
+              />
             </div>
+
+            {/* Envolvidos: além do responsável, quem mais pode concluir a tarefa */}
+            {!recorrente && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Envolvidos (opcional)
+                </label>
+                <p className="text-xs text-gray-400 mb-2">
+                  Além do responsável, quem mais pode concluir esta tarefa.
+                </p>
+                <SeletorPessoas
+                  grupos={[
+                    {
+                      label: setor.nome,
+                      pessoas: usuariosDoSetor.filter((u) => u.id !== form.responsavel_id),
+                    },
+                    {
+                      label: 'Gestores',
+                      pessoas: gestores.filter(
+                        (g) => g.id !== form.responsavel_id && !usuariosDoSetor.some((u) => u.id === g.id)
+                      ),
+                    },
+                  ]}
+                  selecionados={envolvidoIds}
+                  multi
+                  onChange={setEnvolvidoIds}
+                />
+              </div>
+            )}
 
             {/* Datas: única (tarefa avulsa) OU início/fim (recorrente) */}
             {!recorrente ? (

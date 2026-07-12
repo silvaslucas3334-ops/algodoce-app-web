@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { useTarefasRealtime } from '@/hooks/useTarefasRealtime'
 import { supabase } from '@/lib/supabase'
-import { Tarefa, TarefaEvidencia, Setor, TarefaComentario } from '@/lib/types'
+import { Tarefa, TarefaEvidencia, Setor, TarefaComentario, TarefaEnvolvido } from '@/lib/types'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import TarefaCard from '@/components/TarefaCard'
 import TarefaModal from '@/components/TarefaModal'
@@ -37,6 +37,7 @@ function TarefasContent() {
   const [tarefas, setTarefas] = useState<Tarefa[]>([])
   const [evidencias, setEvidencias] = useState<TarefaEvidencia[]>([])
   const [comentarios, setComentarios] = useState<TarefaComentario[]>([])
+  const [envolvidos, setEnvolvidos] = useState<TarefaEnvolvido[]>([])
   const [setores, setSetores] = useState<Setor[]>([])
   const [usuarios, setUsuarios] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -131,7 +132,7 @@ function TarefasContent() {
       setTarefas(tarefasData)
       const ids = tarefasData.map((t) => t.id)
 
-      const [{ data: evidenciasData }, { data: comentariosData }] =
+      const [{ data: evidenciasData }, { data: comentariosData }, { data: envolvidosData }] =
         await Promise.all([
           supabase
             .from('tarefas_evidencias')
@@ -143,10 +144,15 @@ function TarefasContent() {
             .select('*')
             .in('tarefa_id', ids)
             .order('created_at', { ascending: false }),
+          supabase
+            .from('tarefas_envolvidos')
+            .select('*')
+            .in('tarefa_id', ids),
         ])
 
       if (evidenciasData) setEvidencias(evidenciasData)
       if (comentariosData) setComentarios(comentariosData)
+      if (envolvidosData) setEnvolvidos(envolvidosData)
     }
   }
 
@@ -276,6 +282,9 @@ function TarefasContent() {
     : []
   const tarefaSelecionadaComentarios = tarefaSelecionada
     ? comentarios.filter((c) => c.tarefa_id === tarefaSelecionada.id)
+    : []
+  const tarefaSelecionadaEnvolvidos = tarefaSelecionada
+    ? envolvidos.filter((e) => e.tarefa_id === tarefaSelecionada.id)
     : []
 
   return (
@@ -682,6 +691,7 @@ function TarefasContent() {
 
       {tarefaSelecionada && (
         <TarefaModal
+          key={tarefaSelecionada.id}
           tarefa={tarefaSelecionada}
           responsavelNome={
             usuariosMap[tarefaSelecionada.responsavel_atual_id]?.nome ||
@@ -689,6 +699,7 @@ function TarefasContent() {
           }
           evidencias={tarefaSelecionadaEvidencias}
           comentarios={tarefaSelecionadaComentarios}
+          envolvidos={tarefaSelecionadaEnvolvidos}
           usuariosMap={usuariosMap}
           usuariosDoSetor={usuarios
             .filter((u) => u.setor_id === tarefaSelecionada.setor_id)
@@ -706,6 +717,7 @@ function TarefasContent() {
             setTarefaSelecionada(null)
             carregarTarefas()
           }}
+          onComentario={carregarTarefas}
         />
       )}
 

@@ -1,6 +1,6 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
-import { Tarefa, TarefaEvidencia, TarefaComentario } from '@/lib/types'
+import { Tarefa, TarefaEvidencia, TarefaComentario, TarefaEnvolvido } from '@/lib/types'
 import { formatData, formatHora, compressImage, uploadFoto, STATUS_INFO, calcularPrazoRefazer } from '@/lib/tarefas-utils'
 import { supabase } from '@/lib/supabase'
 import { X, Upload, Loader, MessageSquare, Pencil, RotateCw } from 'lucide-react'
@@ -22,6 +22,7 @@ interface TarefaModalProps {
   responsavelNome: string
   evidencias: TarefaEvidencia[]
   comentarios: TarefaComentario[]
+  envolvidos: TarefaEnvolvido[]
   usuariosMap: Record<string, { nome: string; role?: string }>
   usuariosDoSetor: { id: string; nome: string }[]
   setorTipo: 'operacional' | 'administrativo'
@@ -30,6 +31,7 @@ interface TarefaModalProps {
   aberta: boolean
   onClose: () => void
   onStatusChange?: () => void
+  onComentario?: () => void
 }
 
 export default function TarefaModal({
@@ -37,6 +39,7 @@ export default function TarefaModal({
   responsavelNome,
   evidencias,
   comentarios,
+  envolvidos,
   usuariosMap,
   usuariosDoSetor,
   setorTipo,
@@ -45,6 +48,7 @@ export default function TarefaModal({
   aberta,
   onClose,
   onStatusChange,
+  onComentario,
 }: TarefaModalProps) {
   const [fazendoUpload, setFazendoUpload] = useState(false)
   const [fotoUpload, setFotoUpload] = useState<File | null>(null)
@@ -57,6 +61,8 @@ export default function TarefaModal({
   const [mostrarEditarRecorrencia, setMostrarEditarRecorrencia] = useState(false)
   const [mostrarConcluirGestor, setMostrarConcluirGestor] = useState(false)
   const [comentarioGestorTexto, setComentarioGestorTexto] = useState('')
+  const [novoComentarioTexto, setNovoComentarioTexto] = useState('')
+  const [enviandoComentario, setEnviandoComentario] = useState(false)
   const [recorrenciaData, setRecorrenciaData] = useState<any>(null)
   const [carregandoRecorrencia, setCarregandoRecorrencia] = useState(false)
   const inputFileRef = useRef<HTMLInputElement>(null)
@@ -84,10 +90,11 @@ export default function TarefaModal({
   if (!aberta) return null
 
   const ehResponsavel = usuarioAtualId === tarefa.responsavel_atual_id
+  const ehEnvolvido = envolvidos.some((e) => e.usuario_id === usuarioAtualId)
   const ehAdmin = usuarioAtualRole === 'admin'
   const ehCriador = usuarioAtualId === tarefa.criado_por
   const podeConluir =
-    ehResponsavel &&
+    (ehResponsavel || ehEnvolvido) &&
     (tarefa.status === 'pendente' || tarefa.status === 'refazer_pendente')
   // Admin cancela qualquer tarefa aberta; criador (colaborador) só a que criou,
   // ainda pendente e sem evidência enviada.
@@ -102,6 +109,7 @@ export default function TarefaModal({
   const podeConcluirComoGestor =
     ehAdmin &&
     !ehResponsavel &&
+    !ehEnvolvido &&
     (tarefa.status === 'pendente' || tarefa.status === 'refazer_pendente')
   // Admin edita qualquer tarefa não concluída/cancelada; criador só a própria
   // pendente e sem evidência (espelha a RLS).
@@ -434,6 +442,37 @@ export default function TarefaModal({
     }
   }
 
+  const handleComentar = async () => {
+    if (!novoComentarioTexto.trim()) return
+    try {
+      setEnviandoComentario(true)
+      const { error } = await supabase.from('tarefas_comentarios').insert({
+        tarefa_id: tarefa.id,
+        usuario_id: usuarioAtualId,
+        texto: novoComentarioTexto.trim(),
+        tipo: 'comentario',
+        tentativa_num: tarefa.tentativa_num,
+      })
+      if (error) {
+        logErro('Erro ao comentar:', error)
+        alert('Erro ao comentar: ' + (error.message || 'sem mensagem'))
+        return
+      }
+      setNovoComentarioTexto('')
+      onComentario?.()
+    } catch (err: any) {
+      logErro('Erro ao comentar (exceção):', err)
+      alert('Erro ao comentar: ' + (err?.message || 'desconhecido'))
+    } finally {
+      setEnviandoComentario(false)
+    }
+  }
+
+  const nomesEnvolvidos = envolvidos
+    .map((e) => usuariosMap[e.usuario_id]?.nome)
+    .filter(Boolean)
+    .join(', ')
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
       <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full sm:w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -442,6 +481,11 @@ export default function TarefaModal({
           <div>
             <h2 className="text-lg font-bold text-gray-800">{tarefa.titulo}</h2>
             <p className="text-sm text-gray-600 mt-1">{responsavelNome}</p>
+            {nomesEnvolvidos && (
+              <p className="text-xs text-gray-500 mt-0.5">
+                Envolvidos: {nomesEnvolvidos}
+              </p>
+            )}
             {criadoPorLabel && (
               <p className="text-xs text-gray-400 mt-0.5">
                 Criada por {criadoPorLabel}
@@ -610,6 +654,51 @@ export default function TarefaModal({
                       </p>
                     </div>
                   ))}
+              </div>
+            </div>
+          )}
+
+          {/* Comentários de acompanhamento — não conclui a tarefa, só registra status */}
+          {tarefa.status !== 'cancelada' && (
+            <div>
+              <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
+                <MessageSquare size={12} /> Comentários
+              </p>
+              {comentarios.filter((c) => c.tipo === 'comentario').length > 0 && (
+                <div className="space-y-2 mb-2">
+                  {comentarios
+                    .filter((c) => c.tipo === 'comentario')
+                    .slice()
+                    .reverse()
+                    .map((c) => (
+                      <div key={c.id} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                        <p className="text-sm text-gray-700">{c.texto}</p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {usuariosMap[c.usuario_id]?.nome || 'Usuário'} ·{' '}
+                          {new Date(c.created_at).toLocaleString('pt-BR')}
+                        </p>
+                      </div>
+                    ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={novoComentarioTexto}
+                  onChange={(e) => setNovoComentarioTexto(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleComentar()
+                  }}
+                  placeholder="Ex: aguardando autorização..."
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+                <button
+                  onClick={handleComentar}
+                  disabled={enviandoComentario || !novoComentarioTexto.trim()}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-gray-700 text-white hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {enviandoComentario ? <Loader size={14} className="animate-spin" /> : 'Comentar'}
+                </button>
               </div>
             </div>
           )}
@@ -840,6 +929,7 @@ export default function TarefaModal({
         <EditarTarefaModal
           tarefa={tarefa}
           usuariosDoSetor={usuariosDoSetor}
+          envolvidosAtuais={envolvidos}
           usuarioAtualId={usuarioAtualId}
           onClose={() => setEditando(false)}
           onSaved={() => {
