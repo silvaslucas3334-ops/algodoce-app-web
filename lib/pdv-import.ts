@@ -130,22 +130,33 @@ export async function parseFinalizados(file: File): Promise<PdvPedidoRaw[]> {
     // incluindo Data Abertura) — exigir a data também descarta essa linha
     // sem descartar nenhum pedido de verdade.
     .filter((linha) => campo(linha, col, 'código') != null && campo(linha, col, 'data abertura') != null)
-    .map((linha) => ({
-      codigo: String(campo(linha, col, 'código')).trim(),
-      dataAbertura: paraTimestampSP(campo(linha, col, 'data abertura')),
-      dataFechamento: campo(linha, col, 'data fechamento') ? paraTimestampSP(campo(linha, col, 'data fechamento')) : null,
-      status: String(campo(linha, col, 'status') ?? '').trim(),
-      totItens: paraNumero(campo(linha, col, 'tot itens')),
-      servico: paraNumero(campo(linha, col, 'serviço')),
-      desconto: paraNumero(campo(linha, col, 'desconto')),
-      valorEntrega: paraNumero(campo(linha, col, 'valor entrega')),
-      total: paraNumero(campo(linha, col, 'total')),
-      totalRecebido: paraNumero(campo(linha, col, 'total recebido')),
-      formaPagamento: campo(linha, col, 'forma de pagto') || null,
-      notaEmitida: String(campo(linha, col, 'nota emitida') ?? '') === '1' || String(campo(linha, col, 'nota emitida') ?? '').toLowerCase() === 'sim',
-      serieNf: campo(linha, col, 'série nf') ? String(campo(linha, col, 'série nf')) : null,
-      numeroNf: campo(linha, col, 'número nf') ? String(campo(linha, col, 'número nf')) : null,
-    }))
+    .map((linha, idx) => {
+      const rawAbertura = campo(linha, col, 'data abertura')
+      const rawFechamento = campo(linha, col, 'data fechamento')
+      const isoAbertura = paraTimestampSP(rawAbertura)
+      const isoFechamento = rawFechamento ? paraTimestampSP(rawFechamento) : null
+      if (idx === 0) {
+        // DEBUG TEMPORÁRIO — remover depois de diagnosticar o bug de fuso horário.
+        console.warn('[DEBUG-fuso] raw abertura:', rawAbertura, '| tipo:', typeof rawAbertura, '| instanceof Date:', rawAbertura instanceof Date, '| iso:', isoAbertura)
+        console.warn('[DEBUG-fuso] raw fechamento:', rawFechamento, '| tipo:', typeof rawFechamento, '| instanceof Date:', rawFechamento instanceof Date, '| iso:', isoFechamento)
+      }
+      return {
+        codigo: String(campo(linha, col, 'código')).trim(),
+        dataAbertura: isoAbertura,
+        dataFechamento: isoFechamento,
+        status: String(campo(linha, col, 'status') ?? '').trim(),
+        totItens: paraNumero(campo(linha, col, 'tot itens')),
+        servico: paraNumero(campo(linha, col, 'serviço')),
+        desconto: paraNumero(campo(linha, col, 'desconto')),
+        valorEntrega: paraNumero(campo(linha, col, 'valor entrega')),
+        total: paraNumero(campo(linha, col, 'total')),
+        totalRecebido: paraNumero(campo(linha, col, 'total recebido')),
+        formaPagamento: campo(linha, col, 'forma de pagto') || null,
+        notaEmitida: String(campo(linha, col, 'nota emitida') ?? '') === '1' || String(campo(linha, col, 'nota emitida') ?? '').toLowerCase() === 'sim',
+        serieNf: campo(linha, col, 'série nf') ? String(campo(linha, col, 'série nf')) : null,
+        numeroNf: campo(linha, col, 'número nf') ? String(campo(linha, col, 'número nf')) : null,
+      }
+    })
 }
 
 // --- período -----------------------------------------------------------
