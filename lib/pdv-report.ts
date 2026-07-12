@@ -11,10 +11,10 @@ export async function buscarPedidosDoPeriodo(
     .from('financeiro_pdv_pedidos')
     .select('*, itens:financeiro_pdv_itens(*)')
     .eq('unidade', unidade)
-    .gte('data_abertura', `${dataMin}T00:00:00-03:00`)
-    .lte('data_abertura', `${dataMax}T23:59:59-03:00`)
+    .gte('data_periodo', dataMin)
+    .lte('data_periodo', dataMax)
     .in('status', PDV_STATUS_RECEITA)
-    .order('data_abertura')
+    .order('data_periodo')
   if (error) throw new Error(error.message)
   return data || []
 }
@@ -75,14 +75,28 @@ export interface TotaisPeriodo {
   numeroPedidos: number
   faturamentoTotal: number
   ticketMedio: number
+  totalEntrega: number
+  totalDesconto: number
+  totalAcrescimo: number
 }
 
-export function calcularTotais(pedidos: FinanceiroPdvPedido[]): TotaisPeriodo {
+/**
+ * Faturamento total é a soma do Valor Final de cada linha achatada (já
+ * embute o ajuste de entrega/desconto/acréscimo aplicado só na 1ª linha de
+ * cada pedido em gerarItensVendidosFlat) — não a soma bruta de pedido.total.
+ */
+export function calcularTotais(pedidos: FinanceiroPdvPedido[], itensFlat: ItemVendidoFlat[]): TotaisPeriodo {
   const numeroPedidos = pedidos.length
-  const faturamentoTotal = pedidos.reduce((s, p) => s + p.total, 0)
+  const faturamentoTotal = itensFlat.reduce((s, l) => s + l.valorFinal, 0)
+  const totalEntrega = itensFlat.reduce((s, l) => s + l.taxaEntrega, 0)
+  const totalDesconto = itensFlat.reduce((s, l) => s + l.desconto, 0)
+  const totalAcrescimo = itensFlat.reduce((s, l) => s + l.acrescimo, 0)
   return {
     numeroPedidos,
     faturamentoTotal,
     ticketMedio: numeroPedidos ? faturamentoTotal / numeroPedidos : 0,
+    totalEntrega,
+    totalDesconto,
+    totalAcrescimo,
   }
 }

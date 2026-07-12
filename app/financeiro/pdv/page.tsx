@@ -34,15 +34,17 @@ export default function PdvHubPage() {
     setLoading(true)
     const { data, error } = await supabase
       .from('financeiro_pdv_pedidos')
-      .select('data_abertura')
+      .select('data_periodo')
       .eq('unidade', unidade)
     if (error) console.error('Erro ao carregar períodos do PDV:', error)
 
     const mapa = new Map<string, PeriodoResumo>()
-    ;(data || []).forEach((row: { data_abertura: string }) => {
-      const d = new Date(row.data_abertura)
-      const ano = d.getFullYear()
-      const mes = d.getMonth() // 0-based
+    // data_periodo é DATE ("AAAA-MM-DD"), sem timezone — extrair ano/mês por
+    // string slicing, nunca via new Date(str) (seria reinterpretado no fuso
+    // local do navegador e poderia empurrar o dia 1º pro mês anterior).
+    ;(data || []).forEach((row: { data_periodo: string }) => {
+      const ano = Number(row.data_periodo.slice(0, 4))
+      const mes = Number(row.data_periodo.slice(5, 7)) - 1 // 0-based
       const chave = `${ano}-${String(mes + 1).padStart(2, '0')}`
       if (!mapa.has(chave)) mapa.set(chave, { chave, ano, mes, quantidade: 0 })
       mapa.get(chave)!.quantidade++

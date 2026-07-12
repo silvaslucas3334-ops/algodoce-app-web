@@ -1,10 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
+import * as XLSX from 'xlsx'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import { useRouter, useParams } from 'next/navigation'
-import { ArrowLeft, Loader, Download } from 'lucide-react'
+import { ArrowLeft, Loader, Download, Trash2 } from 'lucide-react'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
+import { excluirPeriodoPDV } from '@/lib/pdv-import'
 import { buscarPedidosDoPeriodo, gerarItensVendidosFlat, gerarFaturamentoPorCategoria, calcularTotais } from '@/lib/pdv-report'
 import { ItemVendidoFlat, FaturamentoPorCategoria } from '@/lib/types'
 
@@ -13,22 +15,23 @@ const MESES = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ]
 
-function exportarCSV(dados: any[], headers: string[], filename: string) {
-  let csv = headers.join(',') + '\n'
-  dados.forEach((row) => {
-    const values = headers.map((h) => {
-      let value = row[h] ?? ''
-      if (typeof value === 'object') value = JSON.stringify(value)
-      return `"${String(value).replace(/"/g, '""')}"`
-    })
-    csv += values.join(',') + '\n'
+function exportarXLSX(dados: Record<string, any>[], colunasMonetarias: string[], filename: string) {
+  if (dados.length === 0) return
+  const ws = XLSX.utils.json_to_sheet(dados)
+  const headers = Object.keys(dados[0])
+  ws['!cols'] = headers.map((h) => ({
+    wch: dados.reduce((w, row) => Math.max(w, String(row[h] ?? '').length), h.length) + 2,
+  }))
+  headers.forEach((h, c) => {
+    if (!colunasMonetarias.includes(h)) return
+    for (let r = 1; r <= dados.length; r++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })]
+      if (cell) cell.z = '0.00'
+    }
   })
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${filename}-${new Date().toISOString().split('T')[0]}.csv`
-  link.click()
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Dados')
+  XLSX.writeFile(wb, `${filename}-${new Date().toISOString().split('T')[0]}.xlsx`)
 }
 
 export default function RelatorioPdvPeriodoPage() {
@@ -41,12 +44,25 @@ export default function RelatorioPdvPeriodoPage() {
   const [erro, setErro] = useState('')
   const [itensFlat, setItensFlat] = useState<ItemVendidoFlat[]>([])
   const [faturamentoCategoria, setFaturamentoCategoria] = useState<FaturamentoPorCategoria[]>([])
-  const [totais, setTotais] = useState({ numeroPedidos: 0, faturamentoTotal: 0, ticketMedio: 0 })
+  const [totais, setTotais] = useState({
+    numeroPedidos: 0,
+    faturamentoTotal: 0,
+    ticketMedio: 0,
+    totalEntrega: 0,
+    totalDesconto: 0,
+    totalAcrescimo: 0,
+  })
+  const [pedidosSemItem, setPedidosSemItem] = useState(0)
+  const [excluindo, setExcluindo] = useState(false)
 
   const match = periodo?.match(/^(loja1|loja2)-(\d{4})-(\d{2})$/)
   const unidade = match?.[1] as 'loja1' | 'loja2' | undefined
   const ano = match ? Number(match[2]) : 0
   const mes = match ? Number(match[3]) : 0 // 1-based
+  const dataMin = match ? `${ano}-${String(mes).padStart(2, '0')}-01` : ''
+  const dataMax = match
+    ? `${ano}-${String(mes).padStart(2, '0')}-${String(new Date(ano, mes, 0).getDate()).padStart(2, '0')}`
+    : ''
 
   useEffect(() => {
     if (unidade) carregar()
@@ -57,20 +73,32 @@ export default function RelatorioPdvPeriodoPage() {
     setLoading(true)
     setErro('')
     try {
-      const dataMin = `${ano}-${String(mes).padStart(2, '0')}-01`
-      const ultimoDia = new Date(ano, mes, 0).getDate()
-      const dataMax = `${ano}-${String(mes).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`
-
       const pedidos = await buscarPedidosDoPeriodo(unidade, dataMin, dataMax)
       const flat = gerarItensVendidosFlat(pedidos)
       setItensFlat(flat)
       setFaturamentoCategoria(gerarFaturamentoPorCategoria(flat))
-      setTotais(calcularTotais(pedidos))
+      setTotais(calcularTotais(pedidos, flat))
+      setPedidosSemItem(pedidos.filter((p) => !p.itens || p.itens.length === 0).length)
     } catch (err: any) {
       console.error('Erro ao carregar relatório:', err)
       setErro('Erro ao carregar: ' + (err?.message || 'desconhecido'))
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function excluirPeriodo() {
+    if (!unidade) return
+    if (!window.confirm(`Excluir todos os pedidos e itens importados de ${UNIDADE_LABEL[unidade]} em ${MESES[mes - 1]} de ${ano}? Essa ação não pode ser desfeita.`)) return
+    setExcluindo(true)
+    setErro('')
+    try {
+      await excluirPeriodoPDV(unidade, dataMin, dataMax)
+      router.push('/financeiro/pdv')
+    } catch (err: any) {
+      console.error('Erro ao excluir período:', err)
+      setErro('Erro ao excluir: ' + (err?.message || 'desconhecido'))
+      setExcluindo(false)
     }
   }
 
@@ -81,25 +109,29 @@ export default function RelatorioPdvPeriodoPage() {
       'Produto': l.nomeProduto,
       'Categoria': l.categoriaProduto || '',
       'Quantidade': l.quantidade,
-      'Valor Unitário': l.valorUnitario.toFixed(2),
-      'Valor Total Item': l.valorTotalItem.toFixed(2),
-      'Taxa de Entrega': l.taxaEntrega.toFixed(2),
-      'Desconto': l.desconto.toFixed(2),
-      'Acréscimo': l.acrescimo.toFixed(2),
+      'Valor Unitário': l.valorUnitario,
+      'Valor Total Item': l.valorTotalItem,
+      'Taxa de Entrega': l.taxaEntrega,
+      'Desconto': l.desconto,
+      'Acréscimo': l.acrescimo,
       'Nº NF': l.numeroNf || '',
-      'Valor Final': l.valorFinal.toFixed(2),
+      'Valor Final': l.valorFinal,
     }))
-    exportarCSV(dados, Object.keys(dados[0] || {}), `itens-vendidos-${periodo}`)
+    exportarXLSX(
+      dados,
+      ['Valor Unitário', 'Valor Total Item', 'Taxa de Entrega', 'Desconto', 'Acréscimo', 'Valor Final'],
+      `itens-vendidos-${periodo}`
+    )
   }
 
   function exportarCategoria() {
     const dados = faturamentoCategoria.map((c) => ({
       'Categoria': c.categoria,
       'Quantidade': c.quantidade,
-      'Valor Final': c.valorFinal.toFixed(2),
-      '%': c.percentual.toFixed(1),
+      'Valor Final': c.valorFinal,
+      '%': Number(c.percentual.toFixed(1)),
     }))
-    exportarCSV(dados, Object.keys(dados[0] || {}), `faturamento-categoria-${periodo}`)
+    exportarXLSX(dados, ['Valor Final'], `faturamento-categoria-${periodo}`)
   }
 
   if (!match) {
@@ -114,14 +146,23 @@ export default function RelatorioPdvPeriodoPage() {
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
         <div className="bg-white border-b border-gray-200">
-          <div className="max-w-5xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.push('/financeiro/pdv')} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-gray-800">{MESES[mes - 1]} de {ano}</h1>
-              <p className="text-sm text-gray-600">{UNIDADE_LABEL[unidade!]}</p>
+          <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <button onClick={() => router.push('/financeiro/pdv')} className="text-gray-500 hover:text-gray-700">
+                <ArrowLeft size={22} />
+              </button>
+              <div>
+                <h1 className="text-xl font-bold text-gray-800">{MESES[mes - 1]} de {ano}</h1>
+                <p className="text-sm text-gray-600">{UNIDADE_LABEL[unidade!]}</p>
+              </div>
             </div>
+            <button
+              onClick={excluirPeriodo}
+              disabled={excluindo || loading}
+              className="text-sm px-3 py-1.5 border border-red-200 rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {excluindo ? <Loader size={14} className="animate-spin" /> : <Trash2 size={14} />} Excluir período
+            </button>
           </div>
         </div>
 
@@ -134,7 +175,12 @@ export default function RelatorioPdvPeriodoPage() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-3 gap-3 mb-4">
+              {pedidosSemItem > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 mb-4">
+                  ⚠️ {pedidosSemItem} pedido(s) com receita não têm nenhum item importado — não entram no faturamento abaixo. Confira se os dois arquivos importados são do mesmo período.
+                </div>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
                 <div className="bg-white rounded-xl p-4 border border-gray-100">
                   <p className="text-xs text-gray-500 uppercase font-semibold">Pedidos</p>
                   <p className="text-xl font-bold text-gray-800 mt-1">{totais.numeroPedidos}</p>
@@ -146,6 +192,18 @@ export default function RelatorioPdvPeriodoPage() {
                 <div className="bg-white rounded-xl p-4 border border-gray-100">
                   <p className="text-xs text-gray-500 uppercase font-semibold">Ticket Médio</p>
                   <p className="text-xl font-bold text-gray-800 mt-1">{formatBRL(totais.ticketMedio)}</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 border border-gray-100">
+                  <p className="text-xs text-gray-500 uppercase font-semibold">Entrega</p>
+                  <p className="text-xl font-bold text-gray-800 mt-1">{formatBRL(totais.totalEntrega)}</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 border border-gray-100">
+                  <p className="text-xs text-gray-500 uppercase font-semibold">Desconto</p>
+                  <p className="text-xl font-bold text-gray-800 mt-1">{formatBRL(totais.totalDesconto)}</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 border border-gray-100">
+                  <p className="text-xs text-gray-500 uppercase font-semibold">Acréscimo</p>
+                  <p className="text-xl font-bold text-gray-800 mt-1">{formatBRL(totais.totalAcrescimo)}</p>
                 </div>
               </div>
 
@@ -173,7 +231,7 @@ export default function RelatorioPdvPeriodoPage() {
                       disabled={itensFlat.length === 0}
                       className="text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5"
                     >
-                      <Download size={14} /> Exportar CSV
+                      <Download size={14} /> Exportar Excel
                     </button>
                   </div>
                   <div className="overflow-x-auto">
@@ -218,7 +276,7 @@ export default function RelatorioPdvPeriodoPage() {
                       disabled={faturamentoCategoria.length === 0}
                       className="text-sm px-3 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5"
                     >
-                      <Download size={14} /> Exportar CSV
+                      <Download size={14} /> Exportar Excel
                     </button>
                   </div>
                   <table className="w-full text-sm">

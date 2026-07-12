@@ -152,11 +152,14 @@ export async function parseFinalizados(file: File): Promise<PdvPedidoRaw[]> {
 
 export function detectarPeriodo(pedidos: PdvPedidoRaw[]): { min: string; max: string } {
   if (pedidos.length === 0) throw new Error('Nenhum pedido encontrado no arquivo Finalizados.')
-  // p.dataAbertura já é a string ISO com offset produzida por paraTimestampSP
-  // (convertida em parseFinalizados) — só recortar a parte de data, nunca
-  // reprocessar: paraTimestampSP espera valor BRUTO da planilha (Date ou
-  // "M/D/YY HH:MM"), não uma ISO já pronta, e rejeitaria de volta.
-  const datas = pedidos.map((p) => p.dataAbertura.slice(0, 10)).sort()
+  // Período é baseado na data de FECHAMENTO (data de emissão da NF), com
+  // fallback pra abertura quando o pedido ainda não fechou (status 'Em
+  // Andamento'/'Solicitou Fechamento'). p.dataFechamento/dataAbertura já são
+  // strings ISO com offset produzidas por paraTimestampSP — só recortar a
+  // parte de data, nunca reprocessar: paraTimestampSP espera valor BRUTO da
+  // planilha (Date ou "M/D/YY HH:MM"), não uma ISO já pronta, e rejeitaria de
+  // volta. Simétrico à coluna gerada data_periodo do banco (ver migration).
+  const datas = pedidos.map((p) => (p.dataFechamento || p.dataAbertura).slice(0, 10)).sort()
   return { min: datas[0], max: datas[datas.length - 1] }
 }
 
@@ -165,8 +168,8 @@ export async function contarPedidosExistentes(unidade: 'loja1' | 'loja2', dataMi
     .from('financeiro_pdv_pedidos')
     .select('id', { count: 'exact', head: true })
     .eq('unidade', unidade)
-    .gte('data_abertura', `${dataMin}T00:00:00-03:00`)
-    .lte('data_abertura', `${dataMax}T23:59:59-03:00`)
+    .gte('data_periodo', dataMin)
+    .lte('data_periodo', dataMax)
   if (error) throw new Error(error.message)
   return count || 0
 }
@@ -290,4 +293,24 @@ export async function substituirPeriodoPDV(
     itensInseridos: data.itens_inseridos,
     avisos,
   }
+}
+
+/**
+ * Exclui todos os pedidos/itens de uma unidade dentro de um período (por
+ * data_periodo), sem reinserir nada. Existe pra viabilizar reteste do fluxo
+ * de importação do zero — a confirmação acontece na tela antes de chamar
+ * esta função (ver app/financeiro/pdv/[periodo]/page.tsx).
+ */
+export async function excluirPeriodoPDV(
+  unidade: 'loja1' | 'loja2',
+  dataMin: string,
+  dataMax: string
+): Promise<{ pedidosRemovidos: number }> {
+  const { data, error } = await supabase.rpc('financeiro_pdv_excluir_periodo', {
+    p_unidade: unidade,
+    p_data_min: dataMin,
+    p_data_max: dataMax,
+  })
+  if (error) throw new Error(error.message)
+  return { pedidosRemovidos: data.pedidos_removidos }
 }

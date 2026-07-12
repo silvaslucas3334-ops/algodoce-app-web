@@ -314,6 +314,7 @@ export interface FinanceiroPdvPedido {
   codigo: string
   data_abertura: string
   data_fechamento?: string
+  data_periodo: string
   status: string
   tot_itens?: number
   servico: number

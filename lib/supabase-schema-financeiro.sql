@@ -470,6 +470,12 @@ CREATE TABLE IF NOT EXISTS financeiro_pdv_pedidos (
   codigo TEXT NOT NULL,
   data_abertura TIMESTAMPTZ NOT NULL,
   data_fechamento TIMESTAMPTZ,
+  -- Data-base do período do relatório (é a data de emissão da NF). Cai para
+  -- data_abertura quando o pedido ainda não fechou. AT TIME ZONE INTERVAL
+  -- (não nome de zona): coluna gerada exige expressão IMMUTABLE.
+  data_periodo DATE GENERATED ALWAYS AS (
+    (COALESCE(data_fechamento, data_abertura) AT TIME ZONE INTERVAL '-03:00')::date
+  ) STORED,
   status TEXT NOT NULL, -- vocabulário de terceiro (PDV), sem CHECK — validado em lib/pdv-import.ts
   tot_itens NUMERIC, -- é o valor (subtotal dos itens antes de ajustes), não uma contagem — nome do PDV engana
   servico NUMERIC NOT NULL DEFAULT 0,
@@ -486,6 +492,7 @@ CREATE TABLE IF NOT EXISTS financeiro_pdv_pedidos (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fpp_dedupe ON financeiro_pdv_pedidos(unidade, codigo);
 CREATE INDEX IF NOT EXISTS idx_fpp_unidade_data ON financeiro_pdv_pedidos(unidade, data_abertura);
+CREATE INDEX IF NOT EXISTS idx_fpp_unidade_periodo ON financeiro_pdv_pedidos(unidade, data_periodo);
 CREATE INDEX IF NOT EXISTS idx_fpp_status ON financeiro_pdv_pedidos(status);
 
 CREATE TABLE IF NOT EXISTS financeiro_pdv_itens (
@@ -545,7 +552,11 @@ BEGIN
   END IF;
 
   DELETE FROM financeiro_pdv_pedidos
-  WHERE unidade = p_unidade AND data_abertura::date BETWEEN p_data_min AND p_data_max;
+  WHERE unidade = p_unidade
+    AND (
+      data_periodo BETWEEN p_data_min AND p_data_max
+      OR codigo IN (SELECT codigo FROM jsonb_to_recordset(p_pedidos) AS x(codigo TEXT))
+    );
   GET DIAGNOSTICS v_removidos = ROW_COUNT;
 
   WITH ins_pedidos AS (
@@ -591,5 +602,25 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION financeiro_pdv_substituir_periodo TO authenticated;
+
+CREATE OR REPLACE FUNCTION financeiro_pdv_excluir_periodo(
+  p_unidade TEXT, p_data_min DATE, p_data_max DATE
+) RETURNS JSONB AS $$
+DECLARE
+  v_removidos INT;
+BEGIN
+  IF (SELECT role FROM usuarios WHERE id = auth.uid()) IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'apenas admin pode excluir períodos do PDV';
+  END IF;
+
+  DELETE FROM financeiro_pdv_pedidos
+  WHERE unidade = p_unidade AND data_periodo BETWEEN p_data_min AND p_data_max;
+  GET DIAGNOSTICS v_removidos = ROW_COUNT;
+
+  RETURN jsonb_build_object('pedidos_removidos', v_removidos);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION financeiro_pdv_excluir_periodo TO authenticated;
 
 SELECT tablename, rowsecurity FROM pg_tables WHERE tablename LIKE 'financeiro_pdv_%';

@@ -16,6 +16,15 @@ CREATE TABLE IF NOT EXISTS financeiro_pdv_pedidos (
   codigo TEXT NOT NULL, -- "Código" do Finalizados = "Cod. Ped." do Histórico
   data_abertura TIMESTAMPTZ NOT NULL,
   data_fechamento TIMESTAMPTZ,
+  -- Data-base do período do relatório (é a data de emissão da NF). Cai para
+  -- data_abertura quando o pedido ainda não fechou (status 'Em Andamento'/
+  -- 'Solicitou Fechamento'). AT TIME ZONE INTERVAL (não nome de zona): coluna
+  -- gerada exige expressão IMMUTABLE, e só o offset fixo é IMMUTABLE — sem
+  -- isso um pedido fechado à noite em SP cairia no dia seguinte (sessão do
+  -- Postgres no Supabase roda em UTC).
+  data_periodo DATE GENERATED ALWAYS AS (
+    (COALESCE(data_fechamento, data_abertura) AT TIME ZONE INTERVAL '-03:00')::date
+  ) STORED,
   -- Vocabulário de um PDV de terceiros: SEM CHECK aqui (foge do padrão do
   -- módulo de propósito) para não quebrar a importação se o fornecedor
   -- introduzir um status novo. Os valores conhecidos são validados em
@@ -37,6 +46,7 @@ CREATE TABLE IF NOT EXISTS financeiro_pdv_pedidos (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fpp_dedupe ON financeiro_pdv_pedidos(unidade, codigo);
 CREATE INDEX IF NOT EXISTS idx_fpp_unidade_data ON financeiro_pdv_pedidos(unidade, data_abertura);
+CREATE INDEX IF NOT EXISTS idx_fpp_unidade_periodo ON financeiro_pdv_pedidos(unidade, data_periodo);
 CREATE INDEX IF NOT EXISTS idx_fpp_status ON financeiro_pdv_pedidos(status);
 
 -- ============================================================
@@ -126,9 +136,17 @@ BEGIN
     RAISE EXCEPTION 'apenas admin pode importar/substituir períodos do PDV';
   END IF;
 
+  -- Remove por data_periodo OU pelo código do pedido presente no lote: um
+  -- pedido "Em Andamento" importado num mês (data_periodo = abertura, via
+  -- fallback) pode fechar depois e mudar de data_periodo na reimportação
+  -- seguinte — sem o segundo critério, a linha antiga (no mês velho) não
+  -- seria removida e o INSERT abaixo colidiria no índice único (unidade, codigo).
   DELETE FROM financeiro_pdv_pedidos
   WHERE unidade = p_unidade
-    AND data_abertura::date BETWEEN p_data_min AND p_data_max;
+    AND (
+      data_periodo BETWEEN p_data_min AND p_data_max
+      OR codigo IN (SELECT codigo FROM jsonb_to_recordset(p_pedidos) AS x(codigo TEXT))
+    );
   GET DIAGNOSTICS v_removidos = ROW_COUNT;
 
   WITH ins_pedidos AS (
@@ -174,6 +192,33 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION financeiro_pdv_substituir_periodo TO authenticated;
+
+-- ============================================================
+-- 5. financeiro_pdv_excluir_periodo — exclui um período inteiro (sem
+--    reinserir). Viabiliza reteste do fluxo de importação do zero.
+-- ============================================================
+CREATE OR REPLACE FUNCTION financeiro_pdv_excluir_periodo(
+  p_unidade TEXT,
+  p_data_min DATE,
+  p_data_max DATE
+) RETURNS JSONB AS $$
+DECLARE
+  v_removidos INT;
+BEGIN
+  IF (SELECT role FROM usuarios WHERE id = auth.uid()) IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'apenas admin pode excluir períodos do PDV';
+  END IF;
+
+  DELETE FROM financeiro_pdv_pedidos
+  WHERE unidade = p_unidade
+    AND data_periodo BETWEEN p_data_min AND p_data_max;
+  GET DIAGNOSTICS v_removidos = ROW_COUNT;
+
+  RETURN jsonb_build_object('pedidos_removidos', v_removidos);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION financeiro_pdv_excluir_periodo TO authenticated;
 
 -- ============================================================
 -- Verificação
