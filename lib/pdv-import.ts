@@ -36,20 +36,23 @@ function campo(linha: Record<string, any>, col: (c: string) => string, chave: st
 }
 
 // --- datas -----------------------------------------------------------------
-// SheetJS (cellDates:true) devolve Date cujos getters UTC carregam o valor
-// literal da célula (hora de São Paulo, sem fuso aplicado) — não interpreta
-// timezone. Se a coluna vier como texto puro ("4/23/26 11:35", formato visto
-// nos exports reais) em vez de célula-data, tratamos os dois casos. Nunca
-// usar .toISOString() direto num Date do SheetJS: entra 3h adiantado no banco
-// (mesma classe de bug já corrigida em parseUTC() de app/admin/relatorios.tsx,
-// na direção oposta). Brasil não tem mais horário de verão desde 2019.
+// SheetJS (cellDates:true) devolve Date construído interpretando os dígitos
+// brutos da célula (hora de São Paulo, sem fuso) como horário LOCAL da
+// máquina que faz a importação — não como UTC. Confirmado com log real:
+// célula "31/05 17:39:39" virou Date cujo .toString() local mostra
+// "17:39:39 GMT-0300", mas .getUTCHours() dava 20 (3h adiantado). Como a
+// importação sempre acontece de máquina no Brasil (mesmo offset de SP, sem
+// horário de verão desde 2019), os getters LOCAIS (getHours/getDate/...) são
+// os que carregam o valor literal da célula — não os getters UTC. Se a
+// coluna vier como texto puro ("4/23/26 11:35", formato visto nos exports
+// reais) em vez de célula-data, tratamos os dois casos.
 export function paraTimestampSP(valor: unknown): string {
   const pad = (n: number | string) => String(n).padStart(2, '0')
 
   if (valor instanceof Date) {
     return (
-      `${valor.getUTCFullYear()}-${pad(valor.getUTCMonth() + 1)}-${pad(valor.getUTCDate())}` +
-      `T${pad(valor.getUTCHours())}:${pad(valor.getUTCMinutes())}:${pad(valor.getUTCSeconds())}-03:00`
+      `${valor.getFullYear()}-${pad(valor.getMonth() + 1)}-${pad(valor.getDate())}` +
+      `T${pad(valor.getHours())}:${pad(valor.getMinutes())}:${pad(valor.getSeconds())}-03:00`
     )
   }
 
@@ -130,33 +133,22 @@ export async function parseFinalizados(file: File): Promise<PdvPedidoRaw[]> {
     // incluindo Data Abertura) — exigir a data também descarta essa linha
     // sem descartar nenhum pedido de verdade.
     .filter((linha) => campo(linha, col, 'código') != null && campo(linha, col, 'data abertura') != null)
-    .map((linha, idx) => {
-      const rawAbertura = campo(linha, col, 'data abertura')
-      const rawFechamento = campo(linha, col, 'data fechamento')
-      const isoAbertura = paraTimestampSP(rawAbertura)
-      const isoFechamento = rawFechamento ? paraTimestampSP(rawFechamento) : null
-      if (idx === 0) {
-        // DEBUG TEMPORÁRIO — remover depois de diagnosticar o bug de fuso horário.
-        console.warn('[DEBUG-fuso] raw abertura:', rawAbertura, '| tipo:', typeof rawAbertura, '| instanceof Date:', rawAbertura instanceof Date, '| iso:', isoAbertura)
-        console.warn('[DEBUG-fuso] raw fechamento:', rawFechamento, '| tipo:', typeof rawFechamento, '| instanceof Date:', rawFechamento instanceof Date, '| iso:', isoFechamento)
-      }
-      return {
-        codigo: String(campo(linha, col, 'código')).trim(),
-        dataAbertura: isoAbertura,
-        dataFechamento: isoFechamento,
-        status: String(campo(linha, col, 'status') ?? '').trim(),
-        totItens: paraNumero(campo(linha, col, 'tot itens')),
-        servico: paraNumero(campo(linha, col, 'serviço')),
-        desconto: paraNumero(campo(linha, col, 'desconto')),
-        valorEntrega: paraNumero(campo(linha, col, 'valor entrega')),
-        total: paraNumero(campo(linha, col, 'total')),
-        totalRecebido: paraNumero(campo(linha, col, 'total recebido')),
-        formaPagamento: campo(linha, col, 'forma de pagto') || null,
-        notaEmitida: String(campo(linha, col, 'nota emitida') ?? '') === '1' || String(campo(linha, col, 'nota emitida') ?? '').toLowerCase() === 'sim',
-        serieNf: campo(linha, col, 'série nf') ? String(campo(linha, col, 'série nf')) : null,
-        numeroNf: campo(linha, col, 'número nf') ? String(campo(linha, col, 'número nf')) : null,
-      }
-    })
+    .map((linha) => ({
+      codigo: String(campo(linha, col, 'código')).trim(),
+      dataAbertura: paraTimestampSP(campo(linha, col, 'data abertura')),
+      dataFechamento: campo(linha, col, 'data fechamento') ? paraTimestampSP(campo(linha, col, 'data fechamento')) : null,
+      status: String(campo(linha, col, 'status') ?? '').trim(),
+      totItens: paraNumero(campo(linha, col, 'tot itens')),
+      servico: paraNumero(campo(linha, col, 'serviço')),
+      desconto: paraNumero(campo(linha, col, 'desconto')),
+      valorEntrega: paraNumero(campo(linha, col, 'valor entrega')),
+      total: paraNumero(campo(linha, col, 'total')),
+      totalRecebido: paraNumero(campo(linha, col, 'total recebido')),
+      formaPagamento: campo(linha, col, 'forma de pagto') || null,
+      notaEmitida: String(campo(linha, col, 'nota emitida') ?? '') === '1' || String(campo(linha, col, 'nota emitida') ?? '').toLowerCase() === 'sim',
+      serieNf: campo(linha, col, 'série nf') ? String(campo(linha, col, 'série nf')) : null,
+      numeroNf: campo(linha, col, 'número nf') ? String(campo(linha, col, 'número nf')) : null,
+    }))
 }
 
 // --- período -----------------------------------------------------------
