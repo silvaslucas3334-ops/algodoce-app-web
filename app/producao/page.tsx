@@ -5,23 +5,31 @@ import { LOCAL_LABEL } from '@/lib/constants'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { useAuth } from '@/hooks/useAuth'
 import Link from 'next/link'
-import { Plus, Play, Filter, ChevronRight, AlertCircle } from 'lucide-react'
+import { Plus, Play, AlertCircle } from 'lucide-react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 const STATUS_INFO = {
-  pendente: { label: 'Pendente', color: 'bg-amber-100 text-amber-700 border-amber-300', bgContent: 'bg-amber-50' },
-  em_producao: { label: 'Em Produção', color: 'bg-blue-100 text-blue-700 border-blue-300', bgContent: 'bg-blue-50' },
-  concluida: { label: 'Concluída', color: 'bg-green-100 text-green-700 border-green-300', bgContent: 'bg-green-50' },
+  pendente: { label: 'Pendente', emoji: '⏳', color: 'bg-amber-100 text-amber-700 border-amber-300', bgContent: 'bg-amber-50' },
+  em_producao: { label: 'Em Produção', emoji: '🔄', color: 'bg-blue-100 text-blue-700 border-blue-300', bgContent: 'bg-blue-50' },
+  concluida: { label: 'Concluída', emoji: '✅', color: 'bg-green-100 text-green-700 border-green-300', bgContent: 'bg-green-50' },
 }
+
+// Unidade é o agrupamento principal da tela: quem produz pensa primeiro em
+// "o que falta pra cada loja", então cada destino ganha sua própria seção
+// com as 3 colunas de status lado a lado — dá pra ver o quadro completo de
+// um destino sem precisar alternar entre filtro e abas.
+const DESTINOS = [
+  { id: 'loja1', label: LOCAL_LABEL.loja1 },
+  { id: 'loja2', label: LOCAL_LABEL.loja2 },
+  { id: 'cozinha', label: '🍳 Cozinha (Internas)' },
+]
 
 function ProducaoContent() {
   const { usuario } = useAuth()
   const isAdmin = usuario?.role === 'admin'
-  const [abaAtiva, setAbaAtiva] = useState<'pendente' | 'em_producao' | 'concluida'>('pendente')
   const [ordens, setOrdens] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [lojaFiltro, setLojaFiltro] = useState<string>('todas')
 
   useEffect(() => {
     carregarOrdens()
@@ -52,19 +60,11 @@ function ProducaoContent() {
     carregarOrdens()
   }
 
-  const ordensAba = ordens.filter(o => {
-    const statusMatch = o.status === abaAtiva
-    if (lojaFiltro === 'cozinha') {
-      return statusMatch && o.tipo_ordem === 'interna'
-    }
-    return statusMatch && (lojaFiltro === 'todas' || o.loja_destino === lojaFiltro)
-  })
-
   const isAtrasada = (dataEntrega: string) => dataEntrega && dataEntrega < new Date().toISOString().split('T')[0]
 
   const KanbanCard = ({ ordem }: { ordem: any }) => (
     <div className={`bg-white rounded-lg p-4 shadow-sm border-l-4 transition-all hover:shadow-md ${
-      abaAtiva === 'pendente' && isAtrasada(ordem.data_entrega)
+      ordem.status === 'pendente' && isAtrasada(ordem.data_entrega)
         ? 'border-l-red-500 border border-red-200'
         : 'border-l-gray-300 border border-gray-200'
     }`}>
@@ -73,14 +73,14 @@ function ProducaoContent() {
           <p className="text-xs text-gray-500 font-mono">Ordem #{ordem.numero_ordem}</p>
           <p className="font-bold text-gray-800 mt-1">{ordem.produto?.nome}</p>
         </div>
-        {isAtrasada(ordem.data_entrega) && abaAtiva !== 'concluida' && (
+        {isAtrasada(ordem.data_entrega) && ordem.status !== 'concluida' && (
           <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-semibold">⚠️ Atrasada</span>
         )}
       </div>
 
       <div className="space-y-1 mb-4 pb-3 border-b border-gray-100 text-sm">
         <p className="text-gray-700">
-          <strong className="text-gray-800">{ordem.quantidade}</strong> un. · <span className="font-medium">{LOCAL_LABEL[ordem.loja_destino]}</span>
+          <strong className="text-gray-800">{ordem.quantidade}</strong> un.
         </p>
         {ordem.data_entrega && (
           <p className={`text-xs ${isAtrasada(ordem.data_entrega) ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
@@ -92,7 +92,7 @@ function ProducaoContent() {
         )}
       </div>
 
-      {!isAdmin && abaAtiva === 'pendente' && (
+      {!isAdmin && ordem.status === 'pendente' && (
         <button
           onClick={async () => {
             await atualizarStatus(ordem.id, 'em_producao')
@@ -104,7 +104,7 @@ function ProducaoContent() {
         </button>
       )}
 
-      {!isAdmin && abaAtiva === 'em_producao' && (
+      {!isAdmin && ordem.status === 'em_producao' && (
         <div className="flex flex-col gap-2">
           <Link
             href={`/producao/novo-lote?ordem=${ordem.id}&produto=${ordem.produto_id}&destino=${ordem.loja_destino}`}
@@ -129,7 +129,7 @@ function ProducaoContent() {
         </div>
       )}
 
-      {!isAdmin && abaAtiva === 'concluida' && (
+      {!isAdmin && ordem.status === 'concluida' && (
         <p className="text-xs text-green-600 font-semibold text-center py-2">✓ Ordem Concluída</p>
       )}
     </div>
@@ -194,77 +194,51 @@ function ProducaoContent() {
           </div>
         )}
 
-        {/* Filtro e Abas */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-bold text-gray-700 flex items-center gap-2">
-              <Filter size={18} /> Filtrar por Loja
-            </h2>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {[
-              { id: 'todas', label: 'Todas' },
-              { id: 'loja1', label: 'Paraisópolis' },
-              { id: 'loja2', label: 'Itajubá' },
-              { id: 'cozinha', label: '🍳 Cozinha (Internas)' },
-            ].map(loja => (
-              <button
-                key={loja.id}
-                onClick={() => setLojaFiltro(loja.id)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  lojaFiltro === loja.id
-                    ? 'bg-orange-600 text-white shadow-md'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                {loja.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Abas de Status */}
-        <div className="mb-6">
-          <div className="flex gap-2 flex-wrap">
-            {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map(status => (
-              <button
-                key={status}
-                onClick={() => setAbaAtiva(status)}
-                className={`px-4 py-3 rounded-lg font-semibold transition-all flex items-center gap-2 ${
-                  abaAtiva === status
-                    ? `${STATUS_INFO[status].color} shadow-md`
-                    : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                {status === 'pendente' && '⏳'}
-                {status === 'em_producao' && '🔄'}
-                {status === 'concluida' && '✅'}
-                <span>
-                  {STATUS_INFO[status].label}
-                  <span className="ml-2 text-xs opacity-75">({ordens.filter(o => o.status === status).length})</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Ordens Kanban */}
+        {/* Quadro por unidade: cada destino com suas 3 colunas de status,
+            pra dar a visão completa do que falta produzir/entregar por loja
+            de uma vez, sem precisar alternar filtro + aba. */}
         {loading ? (
           <div className="text-center py-12 text-gray-400">Carregando ordens...</div>
         ) : (
-          <div className={`rounded-xl p-6 ${STATUS_INFO[abaAtiva].bgContent}`}>
-            {ordensAba.length === 0 ? (
-              <div className="text-center py-12">
-                <p className="text-gray-400 text-lg">Nenhuma ordem {STATUS_INFO[abaAtiva].label.toLowerCase()}</p>
-                <p className="text-gray-400 text-sm mt-2">Filtro: {lojaFiltro === 'todas' ? 'Todas as lojas' : lojaFiltro === 'cozinha' ? 'Cozinha (Internas)' : LOCAL_LABEL[lojaFiltro as keyof typeof LOCAL_LABEL]}</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {ordensAba.map((ordem: any) => (
-                  <KanbanCard key={ordem.id} ordem={ordem} />
-                ))}
-              </div>
-            )}
+          <div className="space-y-8">
+            {DESTINOS.map((destino) => {
+              const ordensDestino = ordens.filter((o) => o.loja_destino === destino.id)
+              return (
+                <div key={destino.id}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-lg font-bold text-gray-800">{destino.label}</h2>
+                    <span className="text-sm text-gray-500">
+                      {ordensDestino.length} ordem{ordensDestino.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map((status) => {
+                      const info = STATUS_INFO[status]
+                      const lista = ordensDestino.filter((o) => o.status === status)
+                      return (
+                        <div key={status} className={`rounded-xl p-3 ${info.bgContent}`}>
+                          <div className="flex items-center justify-between mb-3 px-1">
+                            <span className={`text-xs font-bold uppercase tracking-wide px-2 py-1 rounded-full border ${info.color}`}>
+                              {info.emoji} {info.label}
+                            </span>
+                            <span className="text-xs font-semibold text-gray-500">{lista.length}</span>
+                          </div>
+                          {lista.length === 0 ? (
+                            <p className="text-xs text-gray-400 text-center py-6">Nenhuma ordem</p>
+                          ) : (
+                            <div className="space-y-3">
+                              {lista.map((ordem: any) => (
+                                <KanbanCard key={ordem.id} ordem={ordem} />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
