@@ -43,6 +43,7 @@ export default function NovaTarefaModal({
 
   // Envolvidos além do responsável — só p/ tarefa avulsa (não recorrente)
   const [envolvidoIds, setEnvolvidoIds] = useState<string[]>([])
+  const [mostrarEnvolvidos, setMostrarEnvolvidos] = useState(false)
 
   // Recorrência
   const [recorrente, setRecorrente] = useState(false)
@@ -60,13 +61,11 @@ export default function NovaTarefaModal({
   // Aviso de duplicidade (não bloqueante)
   const [avisoDup, setAvisoDup] = useState<string | null>(null)
 
+  // Não pré-seleciona responsável — obriga o usuário a escolher alguém
+  // (deixar um padrão pré-marcado fazia as pessoas simplesmente não trocarem).
   useEffect(() => {
-    setForm((f) => ({
-      ...f,
-      responsavel_id: usuariosDoSetor[0]?.id || '',
-      foto_obrigatoria: setor.tipo === 'operacional',
-    }))
-  }, [setor.id, usuariosDoSetor])
+    setForm((f) => ({ ...f, foto_obrigatoria: setor.tipo === 'operacional' }))
+  }, [setor.id])
 
   // Carrega títulos existentes do setor (tarefas + recorrências ativas), por frequência de uso
   useEffect(() => {
@@ -80,15 +79,21 @@ export default function NovaTarefaModal({
           .eq('ativa', true),
       ])
 
-      const contagem: Record<string, number> = {}
+      // Agrupa por título NORMALIZADO (sem acento/caixa/espaço) — senão
+      // "Abertura de caixa" e "abertura de caixa" contam como títulos
+      // diferentes, cada um com contagem baixa, e um título que na prática
+      // se repete bastante acaba não entrando no top 10 por causa dessa
+      // fragmentação (era a causa dos chips de sugestão não aparecerem).
+      const contagem: Record<string, { titulo: string; count: number }> = {}
       ;[...(tData || []), ...(rData || [])].forEach((row: any) => {
-        const t = (row.titulo || '').trim()
-        if (!t) return
-        contagem[t] = (contagem[t] || 0) + 1
+        const raw = (row.titulo || '').trim()
+        if (!raw) return
+        const chave = normalizarTitulo(raw)
+        if (!contagem[chave]) contagem[chave] = { titulo: raw, count: 0 }
+        contagem[chave].count++
       })
 
-      const lista = Object.entries(contagem)
-        .map(([titulo, count]) => ({ titulo, count }))
+      const lista = Object.values(contagem)
         .sort((a, b) => b.count - a.count)
         .slice(0, 10)
       setTitulosSetor(lista)
@@ -403,10 +408,19 @@ export default function NovaTarefaModal({
                 selecionados={form.responsavel_id ? [form.responsavel_id] : []}
                 onChange={(ids) => setForm({ ...form, responsavel_id: ids[0] || '' })}
               />
+              {!recorrente && !mostrarEnvolvidos && (
+                <button
+                  type="button"
+                  onClick={() => setMostrarEnvolvidos(true)}
+                  className="mt-2 text-xs text-blue-600 hover:underline"
+                >
+                  + Envolver mais pessoas
+                </button>
+              )}
             </div>
 
             {/* Envolvidos: além do responsável, quem mais pode concluir a tarefa */}
-            {!recorrente && (
+            {!recorrente && mostrarEnvolvidos && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Envolvidos (opcional)
