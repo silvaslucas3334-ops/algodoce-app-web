@@ -518,45 +518,47 @@ export default function NovaTarefaModal({
               </div>
             )}
 
-            {/* Foto obrigatória */}
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="foto_obrigatoria"
-                checked={form.foto_obrigatoria}
-                onChange={(e) =>
-                  setForm({ ...form, foto_obrigatoria: e.target.checked })
-                }
-                className="w-4 h-4 rounded"
-              />
-              <label
-                htmlFor="foto_obrigatoria"
-                className="text-sm font-medium text-gray-700"
-              >
-                Exigir foto para concluir
-              </label>
-            </div>
-
-            {/* Recorrência (apenas admin) */}
-            {permitirRecorrencia && (
-            <div className="border-t border-gray-200 pt-4">
-              <div className="flex items-center gap-2 mb-3">
+            {/* Foto obrigatória + Recorrência lado a lado, pra encurtar o formulário */}
+            <div className="flex items-center gap-6 border-t border-gray-200 pt-4">
+              <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  id="recorrente"
-                  checked={recorrente}
-                  onChange={(e) => setRecorrente(e.target.checked)}
+                  id="foto_obrigatoria"
+                  checked={form.foto_obrigatoria}
+                  onChange={(e) =>
+                    setForm({ ...form, foto_obrigatoria: e.target.checked })
+                  }
                   className="w-4 h-4 rounded"
                 />
                 <label
-                  htmlFor="recorrente"
+                  htmlFor="foto_obrigatoria"
                   className="text-sm font-medium text-gray-700"
                 >
-                  🔁 Tarefa recorrente
+                  Exigir foto para concluir
                 </label>
               </div>
 
-              {recorrente && (
+              {permitirRecorrencia && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="recorrente"
+                    checked={recorrente}
+                    onChange={(e) => setRecorrente(e.target.checked)}
+                    className="w-4 h-4 rounded"
+                  />
+                  <label
+                    htmlFor="recorrente"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    🔁 Tarefa recorrente
+                  </label>
+                </div>
+              )}
+            </div>
+
+            {/* Detalhes da recorrência */}
+            {permitirRecorrencia && recorrente && (
                 <div className="space-y-3 pl-1">
                   <div className="flex gap-2">
                     {(['diaria', 'semanal', 'mensal'] as const).map((f) => (
@@ -609,8 +611,6 @@ export default function NovaTarefaModal({
                     automaticamente.
                   </p>
                 </div>
-              )}
-            </div>
             )}
 
             {/* Aviso de duplicidade (não bloqueante) */}
