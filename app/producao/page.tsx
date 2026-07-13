@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { Plus, Play, AlertCircle } from 'lucide-react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
+import OrdemNotificationStack from '@/components/OrdemNotificationStack'
 
 const STATUS_INFO = {
   pendente: { label: 'Pendente', emoji: '⏳', color: 'bg-amber-100 text-amber-700 border-amber-300', bgContent: 'bg-amber-50' },
@@ -143,6 +144,9 @@ function ProducaoContent() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      {/* Notificação de nova ordem: toast + som + push opcional */}
+      <OrdemNotificationStack ativo={!!usuario} />
+
       {/* Header */}
       <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between h-20">
         <div className="flex items-center gap-4">
