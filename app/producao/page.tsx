@@ -81,7 +81,8 @@ function ProducaoContent() {
 
       <div className="space-y-1 mb-4 pb-3 border-b border-gray-100 text-sm">
         <p className="text-gray-700">
-          <strong className="text-gray-800">{ordem.quantidade}</strong> un.
+          <strong className="text-gray-800">{ordem.quantidade}</strong> un. ·{' '}
+          <span className="font-medium">{DESTINOS.find((d) => d.id === ordem.loja_destino)?.filtroLabel}</span>
         </p>
         {ordem.data_entrega && (
           <p className={`text-xs ${isAtrasada(ordem.data_entrega) ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
@@ -138,7 +139,7 @@ function ProducaoContent() {
 
   const hoje = new Date().toISOString().split('T')[0]
   const ordensAtrasadas = ordens.filter(o => o.data_entrega && o.data_entrega < hoje && o.status !== 'concluida').length
-  const destinosVisiveis = destinoFiltro === 'todas' ? DESTINOS : DESTINOS.filter((d) => d.id === destinoFiltro)
+  const ordensFiltradas = destinoFiltro === 'todas' ? ordens : ordens.filter((o) => o.loja_destino === destinoFiltro)
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
@@ -189,53 +190,37 @@ function ProducaoContent() {
           </div>
         )}
 
-        {/* Quadro por unidade: cada destino com suas 3 colunas de status,
-            pra dar a visão completa do que falta produzir/entregar por loja
-            de uma vez, sem precisar alternar filtro + aba. */}
+        {/* Um único quadro (3 colunas de status); o filtro de unidade acima
+            troca o CONTEÚDO das colunas, não a estrutura da tela. */}
         {loading ? (
           <div className="text-center py-12 text-gray-400">Carregando ordens...</div>
         ) : (
-          <div className="space-y-8">
-            {destinosVisiveis.map((destino) => {
-              const ordensDestino = ordens.filter((o) => o.loja_destino === destino.id)
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map((status) => {
+              const info = STATUS_INFO[status]
+              // Concluída só mostra as de hoje — sem isso, o histórico
+              // completo (meses de ordens) deixa a coluna enorme e enterra
+              // o que realmente falta fazer.
+              const lista = ordensFiltradas.filter(
+                (o) => o.status === status && (status !== 'concluida' || (o.updated_at || '').slice(0, 10) === hoje)
+              )
               return (
-                <div key={destino.id}>
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-bold text-gray-800">{destino.label}</h2>
-                    <span className="text-sm text-gray-500">
-                      {ordensDestino.length} ordem{ordensDestino.length !== 1 ? 's' : ''}
+                <div key={status} className={`rounded-xl p-3 ${info.bgContent}`}>
+                  <div className="flex items-center justify-between mb-3 px-1">
+                    <span className={`text-xs font-bold uppercase tracking-wide px-2 py-1 rounded-full border ${info.color}`}>
+                      {info.emoji} {info.label}
                     </span>
+                    <span className="text-xs font-semibold text-gray-500">{lista.length}</span>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map((status) => {
-                      const info = STATUS_INFO[status]
-                      // Concluída só mostra as de hoje — sem isso, o histórico
-                      // completo (meses de ordens) deixa a coluna enorme e
-                      // enterra o que realmente falta fazer.
-                      const lista = ordensDestino.filter(
-                        (o) => o.status === status && (status !== 'concluida' || (o.updated_at || '').slice(0, 10) === hoje)
-                      )
-                      return (
-                        <div key={status} className={`rounded-xl p-3 ${info.bgContent}`}>
-                          <div className="flex items-center justify-between mb-3 px-1">
-                            <span className={`text-xs font-bold uppercase tracking-wide px-2 py-1 rounded-full border ${info.color}`}>
-                              {info.emoji} {info.label}
-                            </span>
-                            <span className="text-xs font-semibold text-gray-500">{lista.length}</span>
-                          </div>
-                          {lista.length === 0 ? (
-                            <p className="text-xs text-gray-400 text-center py-6">Nenhuma ordem</p>
-                          ) : (
-                            <div className="space-y-3">
-                              {lista.map((ordem: any) => (
-                                <KanbanCard key={ordem.id} ordem={ordem} />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
+                  {lista.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-6">Nenhuma ordem</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {lista.map((ordem: any) => (
+                        <KanbanCard key={ordem.id} ordem={ordem} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}
