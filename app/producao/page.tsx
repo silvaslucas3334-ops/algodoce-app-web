@@ -20,9 +20,9 @@ const STATUS_INFO = {
 // com as 3 colunas de status lado a lado — dá pra ver o quadro completo de
 // um destino sem precisar alternar entre filtro e abas.
 const DESTINOS = [
-  { id: 'loja1', label: LOCAL_LABEL.loja1 },
-  { id: 'loja2', label: LOCAL_LABEL.loja2 },
-  { id: 'cozinha', label: '🍳 Cozinha (Internas)' },
+  { id: 'loja1', label: LOCAL_LABEL.loja1, filtroLabel: LOCAL_LABEL.loja1 },
+  { id: 'loja2', label: LOCAL_LABEL.loja2, filtroLabel: LOCAL_LABEL.loja2 },
+  { id: 'cozinha', label: '🍳 Cozinha (Internas)', filtroLabel: 'Ordem Interna' },
 ]
 
 function ProducaoContent() {
@@ -30,6 +30,7 @@ function ProducaoContent() {
   const isAdmin = usuario?.role === 'admin'
   const [ordens, setOrdens] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [destinoFiltro, setDestinoFiltro] = useState<string>('todas')
 
   useEffect(() => {
     carregarOrdens()
@@ -136,14 +137,8 @@ function ProducaoContent() {
   )
 
   const hoje = new Date().toISOString().split('T')[0]
-
-  // Calcular estatísticas
-  const statsTotal = {
-    pendente: ordens.filter(o => o.status === 'pendente').length,
-    em_producao: ordens.filter(o => o.status === 'em_producao').length,
-    concluida: ordens.filter(o => o.status === 'concluida' && (o.updated_at || '').slice(0, 10) === hoje).length,
-  }
   const ordensAtrasadas = ordens.filter(o => o.data_entrega && o.data_entrega < hoje && o.status !== 'concluida').length
+  const destinosVisiveis = destinoFiltro === 'todas' ? DESTINOS : DESTINOS.filter((d) => d.id === destinoFiltro)
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
@@ -165,24 +160,22 @@ function ProducaoContent() {
       </div>
 
       <div className="p-4 max-w-7xl mx-auto">
-        {/* Cards de Estatísticas */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <p className="text-xs text-gray-500 font-semibold">Pendentes</p>
-            <p className="text-2xl font-bold text-amber-600 mt-2">{statsTotal.pendente}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <p className="text-xs text-gray-500 font-semibold">Em Produção</p>
-            <p className="text-2xl font-bold text-blue-600 mt-2">{statsTotal.em_producao}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <p className="text-xs text-gray-500 font-semibold">Concluídas Hoje</p>
-            <p className="text-2xl font-bold text-green-600 mt-2">{statsTotal.concluida}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <p className="text-xs text-gray-500 font-semibold">Atrasadas</p>
-            <p className="text-2xl font-bold text-red-600 mt-2">{ordensAtrasadas}</p>
-          </div>
+        {/* Filtro de destino: acesso rápido a uma unidade sem precisar rolar
+            a página inteira; "Ver Todas" mantém a visão completa. */}
+        <div className="flex gap-2 flex-wrap mb-6">
+          {[{ id: 'todas', filtroLabel: 'Ver Todas' }, ...DESTINOS].map((d) => (
+            <button
+              key={d.id}
+              onClick={() => setDestinoFiltro(d.id)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                destinoFiltro === d.id
+                  ? 'bg-orange-600 text-white shadow-md'
+                  : 'bg-white text-gray-700 border border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              {d.filtroLabel}
+            </button>
+          ))}
         </div>
 
         {/* Alerta de Atrasadas */}
@@ -203,7 +196,7 @@ function ProducaoContent() {
           <div className="text-center py-12 text-gray-400">Carregando ordens...</div>
         ) : (
           <div className="space-y-8">
-            {DESTINOS.map((destino) => {
+            {destinosVisiveis.map((destino) => {
               const ordensDestino = ordens.filter((o) => o.loja_destino === destino.id)
               return (
                 <div key={destino.id}>
