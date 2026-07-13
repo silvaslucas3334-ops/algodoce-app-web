@@ -31,7 +31,7 @@ export default function SeletorPessoas({ grupos, selecionados, multi = false, on
           g.pessoas.length > 0 && (
             <div key={g.label}>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{g.label}</p>
-              <div className="space-y-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
                 {g.pessoas.map((p) => {
                   const ativo = selecionados.includes(p.id)
                   return (
