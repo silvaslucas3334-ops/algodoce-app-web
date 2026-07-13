@@ -12,7 +12,7 @@ import OluquinhasLogo from '@/components/OluquinhasLogo'
 const STATUS_INFO = {
   pendente: { label: 'Pendente', emoji: '⏳', color: 'bg-amber-100 text-amber-700 border-amber-300', bgContent: 'bg-amber-50' },
   em_producao: { label: 'Em Produção', emoji: '🔄', color: 'bg-blue-100 text-blue-700 border-blue-300', bgContent: 'bg-blue-50' },
-  concluida: { label: 'Concluída', emoji: '✅', color: 'bg-green-100 text-green-700 border-green-300', bgContent: 'bg-green-50' },
+  concluida: { label: 'Concluída Hoje', emoji: '✅', color: 'bg-green-100 text-green-700 border-green-300', bgContent: 'bg-green-50' },
 }
 
 // Unidade é o agrupamento principal da tela: quem produz pensa primeiro em
@@ -135,13 +135,15 @@ function ProducaoContent() {
     </div>
   )
 
+  const hoje = new Date().toISOString().split('T')[0]
+
   // Calcular estatísticas
   const statsTotal = {
     pendente: ordens.filter(o => o.status === 'pendente').length,
     em_producao: ordens.filter(o => o.status === 'em_producao').length,
-    concluida: ordens.filter(o => o.status === 'concluida').length,
+    concluida: ordens.filter(o => o.status === 'concluida' && (o.updated_at || '').slice(0, 10) === hoje).length,
   }
-  const ordensAtrasadas = ordens.filter(o => o.data_entrega && o.data_entrega < new Date().toISOString().split('T')[0] && o.status !== 'concluida').length
+  const ordensAtrasadas = ordens.filter(o => o.data_entrega && o.data_entrega < hoje && o.status !== 'concluida').length
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
@@ -174,7 +176,7 @@ function ProducaoContent() {
             <p className="text-2xl font-bold text-blue-600 mt-2">{statsTotal.em_producao}</p>
           </div>
           <div className="bg-white rounded-lg p-4 border border-gray-200">
-            <p className="text-xs text-gray-500 font-semibold">Concluídas</p>
+            <p className="text-xs text-gray-500 font-semibold">Concluídas Hoje</p>
             <p className="text-2xl font-bold text-green-600 mt-2">{statsTotal.concluida}</p>
           </div>
           <div className="bg-white rounded-lg p-4 border border-gray-200">
@@ -214,7 +216,12 @@ function ProducaoContent() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {(Object.keys(STATUS_INFO) as Array<keyof typeof STATUS_INFO>).map((status) => {
                       const info = STATUS_INFO[status]
-                      const lista = ordensDestino.filter((o) => o.status === status)
+                      // Concluída só mostra as de hoje — sem isso, o histórico
+                      // completo (meses de ordens) deixa a coluna enorme e
+                      // enterra o que realmente falta fazer.
+                      const lista = ordensDestino.filter(
+                        (o) => o.status === status && (status !== 'concluida' || (o.updated_at || '').slice(0, 10) === hoje)
+                      )
                       return (
                         <div key={status} className={`rounded-xl p-3 ${info.bgContent}`}>
                           <div className="flex items-center justify-between mb-3 px-1">
