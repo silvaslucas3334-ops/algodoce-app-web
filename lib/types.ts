@@ -328,6 +328,64 @@ export interface CandidatoConciliacao {
   confianca: 'alta' | 'media' | 'baixa'
 }
 
+export interface FinanceiroCustoPorFornecedor {
+  materia_prima_id: string
+  parte_id: string
+  fornecedor_nome: string
+  quantidade_convertida: number
+  valor_total: number
+  custo_medio_por_unidade_medida: number
+  numero_compras: number
+  ultima_compra: string
+}
+
+// Cotações (RFQ) — comparar preços de fornecedores para os mesmos itens
+// antes de decidir a compra. unidade só pré-preenche a nota ao fechar,
+// não é usada para RLS (cotações são admin-only, ponto).
+export type StatusCotacao = 'aberta' | 'fechada' | 'cancelada'
+export type StatusCotacaoFornecedor = 'aguardando' | 'respondido' | 'sem_resposta'
+
+export interface FinanceiroCotacao {
+  id: string
+  titulo: string
+  unidade: UnidadeFinanceiro
+  status: StatusCotacao
+  fornecedor_vencedor_id?: string
+  fornecedor_vencedor?: FinanceiroParte
+  observacoes?: string
+  criado_por: string
+  criado_em: string
+  fechado_em?: string
+}
+
+export interface FinanceiroCotacaoItem {
+  id: string
+  cotacao_id: string
+  materia_prima_id: string
+  materia_prima?: FinanceiroMateriaPrima
+  quantidade: number
+  unidade_cotacao: string
+  observacao?: string
+}
+
+export interface FinanceiroCotacaoFornecedor {
+  id: string
+  cotacao_id: string
+  parte_id: string
+  parte?: FinanceiroParte
+  status: StatusCotacaoFornecedor
+  respondido_em?: string
+}
+
+export interface FinanceiroCotacaoPreco {
+  id: string
+  cotacao_item_id: string
+  cotacao_fornecedor_id: string
+  valor_unitario: number | null
+  valor_total: number | null
+  disponivel: boolean
+}
+
 // Import do PDV — pedidos/itens importados dos exports do sistema de PDV.
 // unidade aqui é só loja1/loja2 (o export é por loja, não existe pedido
 // "rateio"/cozinha). status é texto livre validado em lib/pdv-import.ts,

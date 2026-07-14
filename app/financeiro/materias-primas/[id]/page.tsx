@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import { useRouter, useParams } from 'next/navigation'
 import { ArrowLeft, Loader } from 'lucide-react'
-import { FinanceiroMateriaPrima, FinanceiroConta, FinanceiroCustoMedioMensal } from '@/lib/types'
+import { FinanceiroMateriaPrima, FinanceiroConta, FinanceiroCustoMedioMensal, FinanceiroCustoPorFornecedor } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 
 export default function DetalheMateriaPrimaPage() {
@@ -16,6 +16,7 @@ export default function DetalheMateriaPrimaPage() {
   const [compras, setCompras] = useState<any[]>([])
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [custosMensais, setCustosMensais] = useState<FinanceiroCustoMedioMensal[]>([])
+  const [custosPorFornecedor, setCustosPorFornecedor] = useState<FinanceiroCustoPorFornecedor[]>([])
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -36,7 +37,7 @@ export default function DetalheMateriaPrimaPage() {
 
   async function carregar() {
     setLoading(true)
-    const [{ data: mp }, { data: comprasData }, { data: custosData }] = await Promise.all([
+    const [{ data: mp }, { data: comprasData }, { data: custosData }, { data: custosFornecedorData }] = await Promise.all([
       supabase.from('financeiro_materias_primas').select('*').eq('id', materiaId).single(),
       supabase
         .from('financeiro_lancamento_itens')
@@ -49,10 +50,16 @@ export default function DetalheMateriaPrimaPage() {
         .select('*')
         .eq('materia_prima_id', materiaId)
         .order('mes_referencia', { ascending: false }),
+      supabase
+        .from('financeiro_custo_por_fornecedor')
+        .select('*')
+        .eq('materia_prima_id', materiaId)
+        .order('custo_medio_por_unidade_medida', { ascending: true }),
     ])
     setMateria(mp)
     setCompras((comprasData || []).filter((c: any) => c.lancamento?.status !== 'cancelado'))
     setCustosMensais(custosData || [])
+    setCustosPorFornecedor(custosFornecedorData || [])
     setLoading(false)
   }
 
@@ -210,6 +217,39 @@ export default function DetalheMateriaPrimaPage() {
                         </td>
                         <td className="py-2 pr-3 text-gray-600">{c.quantidade_convertida}</td>
                         <td className="py-2 pr-3 text-gray-600">{formatBRL(c.valor_total)}</td>
+                        <td className="py-2 pr-3 text-gray-600">{formatBRL(c.custo_medio_por_unidade_medida)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+            <h2 className="font-semibold text-gray-800 mb-4">Custo por fornecedor</h2>
+            <p className="text-xs text-gray-400 mb-3">
+              Todo o histórico (sem limite) — pra identificar aumento de preço ou fornecedor mais barato de verdade.
+            </p>
+            {custosPorFornecedor.length === 0 ? (
+              <p className="text-sm text-gray-400">Nenhuma compra registrada ainda.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b border-gray-200">
+                      <th className="py-2 pr-3">Fornecedor</th>
+                      <th className="py-2 pr-3">Nº compras</th>
+                      <th className="py-2 pr-3">Última compra</th>
+                      <th className="py-2 pr-3">Custo médio/{materia.unidade_medida}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {custosPorFornecedor.map((c) => (
+                      <tr key={c.parte_id} className="border-b border-gray-100">
+                        <td className="py-2 pr-3 font-medium text-gray-800">{c.fornecedor_nome}</td>
+                        <td className="py-2 pr-3 text-gray-600">{c.numero_compras}</td>
+                        <td className="py-2 pr-3 text-gray-600">{new Date(c.ultima_compra + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
                         <td className="py-2 pr-3 text-gray-600">{formatBRL(c.custo_medio_por_unidade_medida)}</td>
                       </tr>
                     ))}

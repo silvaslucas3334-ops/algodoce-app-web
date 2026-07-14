@@ -29,6 +29,13 @@ function LancarNotaForm() {
   const extratoUnidade = params.get('unidade') as UnidadeFinanceiro | null
   const extratoDocumento = params.get('documento')
 
+  // Vindo do fechamento de uma cotação: diferente do extrato, aqui NÃO é um
+  // pagamento já feito — é uma decisão. Os campos vêm pré-preenchidos mas
+  // editáveis, e "já foi paga" não é forçado (a NF real chega depois).
+  const cotacaoId = params.get('cotacaoId')
+  const [cotacaoTitulo, setCotacaoTitulo] = useState('')
+  const [cotacaoUnidade, setCotacaoUnidade] = useState<UnidadeFinanceiro | null>(null)
+
   // Cozinha não é uma entidade própria — seus custos entram como rateio (0001).
   const unidadeTravada: UnidadeFinanceiro | null =
     usuario?.role === 'cozinha' ? 'rateio' : usuario?.role === 'loja' ? usuario?.loja_id : null
@@ -56,7 +63,66 @@ function LancarNotaForm() {
 
   useEffect(() => {
     if (unidadeTravada) setUnidade(unidadeTravada)
-  }, [unidadeTravada])
+    else if (cotacaoUnidade) setUnidade(cotacaoUnidade)
+  }, [unidadeTravada, cotacaoUnidade])
+
+  // Busca a cotação fechada + itens + preços do fornecedor vencedor, e
+  // pré-popula o array de itens (que só existe em memória até salvar — a
+  // cotação já está persistida, então dá pra buscar de novo por id em vez
+  // de serializar um array inteiro na querystring).
+  useEffect(() => {
+    if (!cotacaoId) return
+    async function carregarCotacao() {
+      const { data: cot, error: erroCot } = await supabase
+        .from('financeiro_cotacoes')
+        .select('titulo, unidade, fornecedor_vencedor_id')
+        .eq('id', cotacaoId)
+        .single()
+      if (erroCot || !cot?.fornecedor_vencedor_id) {
+        setErro('Cotação não encontrada ou ainda não fechada com um fornecedor vencedor.')
+        return
+      }
+      setCotacaoTitulo(cot.titulo)
+      setCotacaoUnidade(cot.unidade)
+      setFornecedorId(cot.fornecedor_vencedor_id)
+
+      const { data: cotacaoFornecedor } = await supabase
+        .from('financeiro_cotacao_fornecedores')
+        .select('id')
+        .eq('cotacao_id', cotacaoId)
+        .eq('parte_id', cot.fornecedor_vencedor_id)
+        .single()
+      if (!cotacaoFornecedor) return
+
+      const [{ data: itensCotacao }, { data: precos }] = await Promise.all([
+        supabase
+          .from('financeiro_cotacao_itens')
+          .select('*, materia_prima:financeiro_materias_primas(nome, conta_id, unidade_compra, fator_conversao, conta:financeiro_contas(codigo, nome))')
+          .eq('cotacao_id', cotacaoId),
+        supabase.from('financeiro_cotacao_precos').select('*').eq('cotacao_fornecedor_id', cotacaoFornecedor.id),
+      ])
+
+      const itensPreenchidos: ItemNota[] = (itensCotacao || [])
+        .map((item: any) => {
+          const preco = (precos || []).find((p: any) => p.cotacao_item_id === item.id)
+          if (!preco || !preco.disponivel) return null
+          return {
+            materia_prima_id: item.materia_prima_id,
+            materia_prima_nome: item.materia_prima?.nome || '',
+            quantidade: item.quantidade,
+            unidade_nota: item.unidade_cotacao,
+            fator_conversao: item.materia_prima?.fator_conversao || 1,
+            valor_unitario: preco.valor_unitario || 0,
+            valor_total: preco.valor_total || 0,
+            conta_id: item.materia_prima?.conta_id || null,
+            conta_label: item.materia_prima?.conta ? `${item.materia_prima.conta.codigo} — ${item.materia_prima.conta.nome}` : null,
+          }
+        })
+        .filter((i: ItemNota | null): i is ItemNota => i !== null)
+      setItens(itensPreenchidos)
+    }
+    carregarCotacao()
+  }, [cotacaoId])
 
   useEffect(() => {
     supabase
@@ -207,7 +273,11 @@ function LancarNotaForm() {
             <div>
               <h1 className="text-xl font-bold text-gray-800">Lançar Nota de Insumos</h1>
               <p className="text-xs text-gray-500">
-                {extratoTransacaoId ? 'Criando a partir de uma transação do extrato' : 'A nota gera automaticamente a despesa correspondente'}
+                {extratoTransacaoId
+                  ? 'Criando a partir de uma transação do extrato'
+                  : cotacaoId && cotacaoTitulo
+                    ? `Itens e preços vindos da cotação "${cotacaoTitulo}" — confira e ajuste se necessário`
+                    : 'A nota gera automaticamente a despesa correspondente'}
               </p>
             </div>
           </div>
