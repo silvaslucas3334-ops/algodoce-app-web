@@ -40,6 +40,18 @@ export const FORMA_PAGAMENTO_LABEL: Record<string, string> = {
   dinheiro: 'Dinheiro',
 }
 
+// Canal de RECEITA (Fluxo de Caixa) — 'pix'/'dinheiro' também existem em
+// FORMA_PAGAMENTO_LABEL acima, mas com outro significado (forma de pagar
+// uma DESPESA, não canal de uma entrada). Não confundir os dois vocabulários.
+export const CATEGORIA_RECEITA_LABEL: Record<string, string> = {
+  venda_cartao: 'Venda no Cartão',
+  pix: 'PIX',
+  dinheiro: 'Dinheiro',
+  repasse_ifood: 'Repasse iFood',
+  repasse_aiqfome: 'Repasse Aiqfome',
+  outros: 'Outros',
+}
+
 export const CONDICAO_PAGAMENTO_LABEL: Record<string, string> = {
   a_vista: 'À vista',
   a_prazo: 'A prazo',

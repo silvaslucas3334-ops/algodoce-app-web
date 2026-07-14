@@ -5,11 +5,21 @@ import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import ExtratoConciliacaoModal from '@/components/ExtratoConciliacaoModal'
+import CategorizarReceitaModal from '@/components/CategorizarReceitaModal'
 import { importarTransacoesOFX } from '@/lib/financeiro-reconciliacao'
 import { formatBRL } from '@/lib/ofx'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Upload, Loader, Link2 } from 'lucide-react'
+import { ArrowLeft, Upload, Loader, Link2, Tag } from 'lucide-react'
 import { FinanceiroExtratoTransacao, StatusConciliacao } from '@/lib/types'
+import { UNIDADE_LABEL } from '@/lib/constants'
+
+// Cada loja tem sua própria conta bancária — conta_bancaria vira literalmente
+// 'loja1'/'loja2' na importação, sem precisar classificar transação por
+// transação (a unidade já vem definida pelo arquivo inteiro).
+const CONTAS = [
+  { id: 'loja1' as const, label: UNIDADE_LABEL.loja1 },
+  { id: 'loja2' as const, label: UNIDADE_LABEL.loja2 },
+]
 
 const STATUS_LABEL: Record<StatusConciliacao, string> = {
   pendente: 'Pendente',
@@ -29,21 +39,26 @@ export default function ExtratoPage() {
   const [loading, setLoading] = useState(true)
   const [importando, setImportando] = useState(false)
   const [filtroStatus, setFiltroStatus] = useState<StatusConciliacao>('pendente')
+  const [filtroConta, setFiltroConta] = useState<'todas' | 'loja1' | 'loja2'>('todas')
+  const [contaImport, setContaImport] = useState<'loja1' | 'loja2'>('loja1')
   const [msgImportacao, setMsgImportacao] = useState('')
   const [erro, setErro] = useState('')
   const [modalTransacao, setModalTransacao] = useState<FinanceiroExtratoTransacao | null>(null)
+  const [modalReceita, setModalReceita] = useState<FinanceiroExtratoTransacao | null>(null)
 
   useEffect(() => {
     carregar()
-  }, [filtroStatus])
+  }, [filtroStatus, filtroConta])
 
   async function carregar() {
     setLoading(true)
-    const { data, error } = await supabase
+    let query = supabase
       .from('financeiro_extrato_transacoes')
       .select('*')
       .eq('status_conciliacao', filtroStatus)
       .order('data', { ascending: false })
+    if (filtroConta !== 'todas') query = query.eq('conta_bancaria', filtroConta)
+    const { data, error } = await query
     if (error) console.error('Erro ao carregar extrato:', error)
     setTransacoes(data || [])
     setLoading(false)
@@ -59,7 +74,7 @@ export default function ExtratoPage() {
       setImportando(true)
       try {
         const texto = ev.target?.result as string
-        const resultado = await importarTransacoesOFX(texto, 'principal', usuario.id)
+        const resultado = await importarTransacoesOFX(texto, contaImport, usuario.id)
         setMsgImportacao(`${resultado.novas} transação(ões) nova(s) importada(s), ${resultado.duplicadas} já existiam.`)
         await carregar()
       } catch (err: any) {
@@ -87,6 +102,22 @@ export default function ExtratoPage() {
 
         <div className="max-w-4xl mx-auto px-4 py-6">
           <div className="bg-white rounded-xl p-4 border border-gray-200 mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Loja deste extrato</label>
+            <div className="flex gap-2 mb-3">
+              {CONTAS.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setContaImport(c.id)}
+                  disabled={importando}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold border-2 disabled:opacity-50 ${
+                    contaImport === c.id ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
             <label className="border-2 border-dashed border-gray-300 rounded-lg p-6 flex flex-col items-center gap-2 text-gray-600 hover:border-pink-400 cursor-pointer">
               {importando ? <Loader size={24} className="animate-spin" /> : <Upload size={24} />}
               <span className="text-sm">{importando ? 'Importando...' : 'Selecionar arquivo .ofx'}</span>
@@ -94,6 +125,20 @@ export default function ExtratoPage() {
             </label>
             {msgImportacao && <p className="text-sm text-green-700 mt-3">{msgImportacao}</p>}
             {erro && <p className="text-sm text-red-700 mt-3">{erro}</p>}
+          </div>
+
+          <div className="flex gap-2 mb-2 flex-wrap">
+            {(['todas', ...CONTAS.map((c) => c.id)] as const).map((id) => (
+              <button
+                key={id}
+                onClick={() => setFiltroConta(id)}
+                className={`px-3 py-1 rounded-full text-sm border ${
+                  filtroConta === id ? 'bg-gray-800 text-white border-transparent font-semibold' : 'bg-white border-gray-200 text-gray-500'
+                }`}
+              >
+                {id === 'todas' ? 'Todas as lojas' : CONTAS.find((c) => c.id === id)!.label}
+              </button>
+            ))}
           </div>
 
           <div className="flex gap-2 mb-4">
@@ -135,6 +180,14 @@ export default function ExtratoPage() {
                         <Link2 size={14} /> Conciliar
                       </button>
                     )}
+                    {t.status_conciliacao === 'pendente' && t.valor > 0 && (
+                      <button
+                        onClick={() => setModalReceita(t)}
+                        className="px-3 py-1.5 bg-green-700 text-white rounded-lg text-xs font-semibold hover:bg-green-800 flex items-center gap-1"
+                      >
+                        <Tag size={14} /> Categorizar
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -146,6 +199,16 @@ export default function ExtratoPage() {
           <ExtratoConciliacaoModal
             transacao={modalTransacao}
             onClose={() => setModalTransacao(null)}
+            onResolvido={carregar}
+          />
+        )}
+
+        {modalReceita && usuario && (
+          <CategorizarReceitaModal
+            transacao={modalReceita}
+            unidade={modalReceita.conta_bancaria as 'loja1' | 'loja2'}
+            usuarioId={usuario.id}
+            onClose={() => setModalReceita(null)}
             onResolvido={carregar}
           />
         )}

@@ -623,4 +623,49 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION financeiro_pdv_excluir_periodo TO authenticated;
 
+-- ============================================================
+-- 12. Fluxo de Caixa — financeiro_receitas
+--    Módulo aditivo (fase "Fluxo de Caixa"). Ver detalhes/racional completo
+--    em lib/migrations/criar-financeiro-receitas.sql — conteúdo idêntico,
+--    replicado aqui pra esse arquivo continuar sendo a fonte única de
+--    instalação limpa.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS financeiro_receitas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  unidade TEXT NOT NULL CHECK (unidade IN ('loja1', 'loja2')),
+  categoria TEXT NOT NULL CHECK (categoria IN ('venda_cartao', 'pix', 'dinheiro', 'repasse_ifood', 'repasse_aiqfome', 'outros')),
+  data DATE NOT NULL,
+  valor NUMERIC NOT NULL CHECK (valor > 0),
+  observacao TEXT,
+  extrato_transacao_id UUID REFERENCES financeiro_extrato_transacoes(id),
+  criado_por UUID NOT NULL REFERENCES usuarios(id),
+  criado_em TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT fr_extrato_dinheiro_check CHECK (
+    (categoria = 'dinheiro' AND extrato_transacao_id IS NULL) OR
+    (categoria <> 'dinheiro' AND extrato_transacao_id IS NOT NULL)
+  )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fr_extrato_transacao_unico
+  ON financeiro_receitas(extrato_transacao_id) WHERE extrato_transacao_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_fr_unidade_data ON financeiro_receitas(unidade, data);
+
+ALTER TABLE financeiro_receitas ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS financeiro_receitas_select ON financeiro_receitas;
+CREATE POLICY financeiro_receitas_select ON financeiro_receitas FOR SELECT TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+
+DROP POLICY IF EXISTS financeiro_receitas_insert ON financeiro_receitas;
+CREATE POLICY financeiro_receitas_insert ON financeiro_receitas FOR INSERT TO authenticated
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin' AND criado_por = auth.uid());
+
+DROP POLICY IF EXISTS financeiro_receitas_update ON financeiro_receitas;
+CREATE POLICY financeiro_receitas_update ON financeiro_receitas FOR UPDATE TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+
+DROP POLICY IF EXISTS financeiro_receitas_delete_blocked ON financeiro_receitas;
+CREATE POLICY financeiro_receitas_delete_blocked ON financeiro_receitas FOR DELETE USING (false);
+
 SELECT tablename, rowsecurity FROM pg_tables WHERE tablename LIKE 'financeiro_pdv_%';

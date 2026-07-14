@@ -3,7 +3,7 @@ import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Receipt, ShoppingCart, Users, Package, BookOpen, Landmark, FileSpreadsheet } from 'lucide-react'
+import { ArrowLeft, Receipt, ShoppingCart, Users, Package, BookOpen, Landmark, FileSpreadsheet, Wallet } from 'lucide-react'
 
 export default function FinanceiroHubPage() {
   const { usuario } = useAuth()
@@ -17,6 +17,7 @@ export default function FinanceiroHubPage() {
     { href: '/financeiro/contas', label: 'Plano de Contas', desc: 'Consulta de centro de custo e conta', icon: BookOpen, roles: ['admin'] },
     { href: '/financeiro/extrato', label: 'Extrato Bancário', desc: 'Importar OFX e conciliar pagamentos', icon: Landmark, roles: ['admin'] },
     { href: '/financeiro/pdv', label: 'Import do PDV', desc: 'Importar vendas do PDV e gerar relatório de faturamento', icon: FileSpreadsheet, roles: ['admin'] },
+    { href: '/financeiro/fluxo-caixa', label: 'Fluxo de Caixa', desc: 'Categorizar entradas do extrato e ver o saldo do mês por loja', icon: Wallet, roles: ['admin'] },
   ]
 
   const cardsVisiveis = cards.filter((c) => c.roles.includes(usuario?.role))

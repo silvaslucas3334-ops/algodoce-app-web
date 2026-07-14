@@ -295,6 +295,23 @@ export interface FinanceiroExtratoTransacao {
   importado_em: string
 }
 
+// Fluxo de Caixa — categoriza as entradas (créditos) do extrato bancário.
+// Vocabulário de canal de receita, diferente de FormaPagamento (vocabulário
+// de despesa) — 'pix'/'dinheiro' existem nos dois com significado distinto.
+export type CategoriaReceita = 'venda_cartao' | 'pix' | 'dinheiro' | 'repasse_ifood' | 'repasse_aiqfome' | 'outros'
+
+export interface FinanceiroReceita {
+  id: string
+  unidade: 'loja1' | 'loja2'
+  categoria: CategoriaReceita
+  data: string
+  valor: number
+  observacao?: string
+  extrato_transacao_id?: string // ausente só para categoria='dinheiro'
+  criado_por: string
+  criado_em: string
+}
+
 export interface FinanceiroCustoMedioMensal {
   materia_prima_id: string
   mes_referencia: string
