@@ -1,10 +1,11 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { sugerirCorrespondencias, confirmarConciliacao, ignorarTransacao } from '@/lib/financeiro-reconciliacao'
 import { formatBRL } from '@/lib/ofx'
 import { CandidatoConciliacao, FinanceiroExtratoTransacao } from '@/lib/types'
 import { TIPO_LANCAMENTO_LABEL } from '@/lib/constants'
-import { X, Loader, CheckCircle } from 'lucide-react'
+import { X, Loader, CheckCircle, Receipt, ShoppingCart } from 'lucide-react'
 
 interface Props {
   transacao: FinanceiroExtratoTransacao
@@ -19,6 +20,7 @@ const CONFIANCA_LABEL: Record<string, { label: string; color: string }> = {
 }
 
 export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvido }: Props) {
+  const router = useRouter()
   const [candidatos, setCandidatos] = useState<CandidatoConciliacao[]>([])
   const [loading, setLoading] = useState(true)
   const [processando, setProcessando] = useState(false)
@@ -55,6 +57,17 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
       setErro('Erro ao ignorar: ' + err.message)
       setProcessando(false)
     }
+  }
+
+  function irParaNovoLancamento(destino: 'despesas' | 'compras') {
+    const params = new URLSearchParams({
+      extratoTransacaoId: transacao.id,
+      valor: String(Math.abs(transacao.valor)),
+      data: transacao.data,
+      unidade: transacao.conta_bancaria,
+    })
+    if (transacao.documento_extraido) params.set('documento', transacao.documento_extraido)
+    router.push(`/financeiro/${destino}/nova?${params.toString()}`)
   }
 
   return (
@@ -115,6 +128,24 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
             })}
           </div>
         )}
+
+        <p className="text-xs text-gray-400 text-center mb-2">ou lance um novo registro:</p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <button
+            onClick={() => irParaNovoLancamento('despesas')}
+            disabled={processando}
+            className="border-2 border-blue-200 text-blue-700 rounded-lg py-2.5 text-sm font-semibold hover:bg-blue-50 disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            <Receipt size={15} /> Nova Despesa
+          </button>
+          <button
+            onClick={() => irParaNovoLancamento('compras')}
+            disabled={processando}
+            className="border-2 border-blue-200 text-blue-700 rounded-lg py-2.5 text-sm font-semibold hover:bg-blue-50 disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            <ShoppingCart size={15} /> Nota de Insumos
+          </button>
+        </div>
 
         <button
           onClick={ignorar}

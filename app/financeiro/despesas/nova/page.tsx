@@ -1,20 +1,30 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { FinanceiroParte, FinanceiroConta, UnidadeFinanceiro, FormaPagamento, CondicaoPagamento } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { calcularVencimento, formatarDocumento, hojeISO, somarMeses } from '@/lib/financeiro-utils'
+import { vincularTransacaoCriada } from '@/lib/financeiro-reconciliacao'
 
-export default function NovaDespesaPage() {
+function NovaDespesaForm() {
   const { usuario } = useAuth()
   const router = useRouter()
+  const params = useSearchParams()
   const [partes, setPartes] = useState<FinanceiroParte[]>([])
   const [contas, setContas] = useState<FinanceiroConta[]>([])
+
+  // Vindo da conciliação do extrato: valor e pagamento já são ditados pela
+  // transação bancária, não podem divergir do que já saiu do banco.
+  const extratoTransacaoId = params.get('extratoTransacaoId')
+  const extratoValor = params.get('valor')
+  const extratoData = params.get('data')
+  const extratoUnidade = params.get('unidade') as UnidadeFinanceiro | null
+  const extratoDocumento = params.get('documento')
 
   // Cozinha não é uma entidade própria — seus custos entram como rateio (0001).
   const unidadeTravada: UnidadeFinanceiro | null =
@@ -22,15 +32,15 @@ export default function NovaDespesaPage() {
 
   const [parteId, setParteId] = useState('')
   const [descricao, setDescricao] = useState('')
-  const [valor, setValor] = useState('')
-  const [dataLancamento, setDataLancamento] = useState(hojeISO())
-  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || 'loja1')
+  const [valor, setValor] = useState(extratoValor || '')
+  const [dataLancamento, setDataLancamento] = useState(extratoData || hojeISO())
+  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || extratoUnidade || 'loja1')
   const [contaId, setContaId] = useState('')
   const [numeroDocumento, setNumeroDocumento] = useState('')
 
   // Pagamento (pré-preenchido pelo cadastro do beneficiário, editável)
-  const [jaPago, setJaPago] = useState(false)
-  const [dataPagamento, setDataPagamento] = useState(hojeISO())
+  const [jaPago, setJaPago] = useState(!!extratoTransacaoId)
+  const [dataPagamento, setDataPagamento] = useState(extratoData || hojeISO())
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento | ''>('')
   const [condicao, setCondicao] = useState<CondicaoPagamento>('a_vista')
   const [dataVencimento, setDataVencimento] = useState(hojeISO())
@@ -61,6 +71,14 @@ export default function NovaDespesaPage() {
       .then(({ data }) => setContas(data || []))
   }, [])
 
+  // Pré-seleciona o beneficiário se o CNPJ/CPF do extrato bater com algum
+  // cadastro já carregado — melhor esforço, não bloqueia se não achar.
+  useEffect(() => {
+    if (!extratoDocumento || parteId || partes.length === 0) return
+    const achada = partes.find((p) => p.documento === extratoDocumento)
+    if (achada) setParteId(achada.id)
+  }, [extratoDocumento, partes])
+
   const parte = partes.find((p) => p.id === parteId)
 
   // Ao escolher o beneficiário, herda forma/condição do cadastro e calcula
@@ -79,7 +97,7 @@ export default function NovaDespesaPage() {
   const valorNum = Number(valor)
   // Recorrência é exclusiva do admin (RLS de financeiro_recorrencias) e
   // incompatível com parcelamento (uma despesa fixa se repete inteira).
-  const podeRecorrencia = usuario?.role === 'admin' && parcelas === 1
+  const podeRecorrencia = usuario?.role === 'admin' && parcelas === 1 && !extratoTransacaoId
   const podeSalvar = parteId && descricao.trim() && valorNum > 0 && contaId && dataLancamento && (!jaPago ? dataVencimento : dataPagamento)
 
   async function salvar() {
@@ -140,10 +158,27 @@ export default function NovaDespesaPage() {
         unidade,
         conta_id: contaId,
         criado_por: usuario.id,
+        extrato_transacao_id: extratoTransacaoId || null,
       }))
 
-      const { error } = await supabase.from('financeiro_lancamentos').insert(linhas)
+      const { data: criados, error } = await supabase.from('financeiro_lancamentos').insert(linhas).select('id')
       if (error) throw error
+
+      if (extratoTransacaoId && criados && criados[0]) {
+        try {
+          await vincularTransacaoCriada(extratoTransacaoId, criados[0].id, parteId)
+        } catch (erroVinculo: any) {
+          setErro(
+            'Lançamento criado, mas falhou ao marcar a transação do extrato como conciliada: ' +
+              (erroVinculo?.message || 'desconhecido') +
+              '. Concilie manualmente na tela de Extrato.'
+          )
+          setSalvando(false)
+          return
+        }
+        router.push('/financeiro/extrato')
+        return
+      }
 
       router.push('/financeiro/despesas')
     } catch (err: any) {
@@ -163,7 +198,9 @@ export default function NovaDespesaPage() {
             </button>
             <div>
               <h1 className="text-xl font-bold text-gray-800">Nova Despesa</h1>
-              <p className="text-xs text-gray-500">Para compras de insumo com nota, use "Lançar Nota"</p>
+              <p className="text-xs text-gray-500">
+                {extratoTransacaoId ? 'Criando a partir de uma transação do extrato' : 'Para compras de insumo com nota, use "Lançar Nota"'}
+              </p>
             </div>
           </div>
         </div>
@@ -210,7 +247,13 @@ export default function NovaDespesaPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Valor (R$)</label>
-                <input type="number" step="0.01" min={0} value={valor} onChange={(e) => setValor(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
+                {extratoTransacaoId ? (
+                  <div className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-700 font-medium">
+                    {formatBRL(valorNum)}
+                  </div>
+                ) : (
+                  <input type="number" step="0.01" min={0} value={valor} onChange={(e) => setValor(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Data da despesa</label>
@@ -255,29 +298,35 @@ export default function NovaDespesaPage() {
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
             <h2 className="font-semibold text-gray-800">Pagamento</h2>
 
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setJaPago(false)}
-                className={`flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-semibold ${
-                  !jaPago ? 'border-amber-500 bg-amber-500 text-white' : 'border-gray-200 bg-white text-gray-700'
-                }`}
-              >
-                A pagar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setJaPago(true)
-                  setParcelas(1)
-                }}
-                className={`flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-semibold ${
-                  jaPago ? 'border-green-600 bg-green-600 text-white' : 'border-gray-200 bg-white text-gray-700'
-                }`}
-              >
-                Já foi paga
-              </button>
-            </div>
+            {extratoTransacaoId ? (
+              <div className="px-4 py-2.5 rounded-lg border-2 border-green-600 bg-green-600 text-white text-sm font-semibold text-center">
+                Já foi paga (transação do extrato)
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setJaPago(false)}
+                  className={`flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-semibold ${
+                    !jaPago ? 'border-amber-500 bg-amber-500 text-white' : 'border-gray-200 bg-white text-gray-700'
+                  }`}
+                >
+                  A pagar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJaPago(true)
+                    setParcelas(1)
+                  }}
+                  className={`flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-semibold ${
+                    jaPago ? 'border-green-600 bg-green-600 text-white' : 'border-gray-200 bg-white text-gray-700'
+                  }`}
+                >
+                  Já foi paga
+                </button>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -296,7 +345,13 @@ export default function NovaDespesaPage() {
               {jaPago ? (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Pago em</label>
-                  <input type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
+                  {extratoTransacaoId ? (
+                    <div className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-700 font-medium">
+                      {new Date(dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR')}
+                    </div>
+                  ) : (
+                    <input type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
+                  )}
                 </div>
               ) : (
                 <div>
@@ -362,5 +417,13 @@ export default function NovaDespesaPage() {
         </div>
       </div>
     </ProtectedRoute>
+  )
+}
+
+export default function NovaDespesaPage() {
+  return (
+    <Suspense>
+      <NovaDespesaForm />
+    </Suspense>
   )
 }

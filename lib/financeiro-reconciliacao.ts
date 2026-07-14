@@ -154,6 +154,24 @@ export async function confirmarConciliacao(
   if (erroLancamento) throw new Error(erroLancamento.message)
 }
 
+/**
+ * Vincula uma transação do extrato a um lançamento recém-criado (não a um
+ * já existente — para isso é confirmarConciliacao). O INSERT do lançamento
+ * já grava extrato_transacao_id direto, então aqui só falta marcar a
+ * transação como conciliada e apontar de volta pro lançamento.
+ */
+export async function vincularTransacaoCriada(
+  transacaoId: string,
+  lancamentoId: string,
+  parteId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .update({ status_conciliacao: 'conciliado', lancamento_id: lancamentoId, parte_id: parteId })
+    .eq('id', transacaoId)
+  if (error) throw new Error(error.message)
+}
+
 export async function ignorarTransacao(transacaoId: string): Promise<void> {
   const { error } = await supabase
     .from('financeiro_extrato_transacoes')

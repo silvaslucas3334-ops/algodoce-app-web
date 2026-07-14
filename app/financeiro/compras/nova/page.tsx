@@ -1,21 +1,33 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
 import { FinanceiroParte, FinanceiroMateriaPrima, UnidadeFinanceiro, FormaPagamento, CondicaoPagamento } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { calcularVencimento, formatarDocumento, hojeISO, somarMeses } from '@/lib/financeiro-utils'
+import { vincularTransacaoCriada } from '@/lib/financeiro-reconciliacao'
 
-export default function LancarNotaPage() {
+const TOLERANCIA_CENTAVOS = 0.02
+
+function LancarNotaForm() {
   const { usuario } = useAuth()
   const router = useRouter()
+  const params = useSearchParams()
   const [materias, setMaterias] = useState<FinanceiroMateriaPrima[]>([])
   const [fornecedores, setFornecedores] = useState<FinanceiroParte[]>([])
+
+  // Vindo da conciliação do extrato: a nota precisa bater com o valor da
+  // transação bancária para poder ser conciliada automaticamente.
+  const extratoTransacaoId = params.get('extratoTransacaoId')
+  const extratoValor = params.get('valor') ? Number(params.get('valor')) : null
+  const extratoData = params.get('data')
+  const extratoUnidade = params.get('unidade') as UnidadeFinanceiro | null
+  const extratoDocumento = params.get('documento')
 
   // Cozinha não é uma entidade própria — seus custos entram como rateio (0001).
   const unidadeTravada: UnidadeFinanceiro | null =
@@ -24,16 +36,16 @@ export default function LancarNotaPage() {
   // Dados da nota
   const [fornecedorId, setFornecedorId] = useState('')
   const [numeroNota, setNumeroNota] = useState('')
-  const [dataCompra, setDataCompra] = useState(hojeISO())
-  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || 'loja1')
+  const [dataCompra, setDataCompra] = useState(extratoData || hojeISO())
+  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || extratoUnidade || 'loja1')
 
   // Itens
   const [itens, setItens] = useState<ItemNota[]>([])
   const [modalAberto, setModalAberto] = useState(false)
 
   // Pagamento (pré-preenchido pelo cadastro do fornecedor, editável)
-  const [jaPago, setJaPago] = useState(false)
-  const [dataPagamento, setDataPagamento] = useState(hojeISO())
+  const [jaPago, setJaPago] = useState(!!extratoTransacaoId)
+  const [dataPagamento, setDataPagamento] = useState(extratoData || hojeISO())
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento | ''>('')
   const [condicao, setCondicao] = useState<CondicaoPagamento>('a_vista')
   const [dataVencimento, setDataVencimento] = useState(hojeISO())
@@ -62,6 +74,14 @@ export default function LancarNotaPage() {
       .then(({ data }) => setFornecedores(data || []))
   }, [])
 
+  // Pré-seleciona o fornecedor se o CNPJ/CPF do extrato bater com algum
+  // cadastro já carregado — melhor esforço, não bloqueia se não achar.
+  useEffect(() => {
+    if (!extratoDocumento || fornecedorId || fornecedores.length === 0) return
+    const achado = fornecedores.find((f) => f.documento === extratoDocumento)
+    if (achado) setFornecedorId(achado.id)
+  }, [extratoDocumento, fornecedores])
+
   const fornecedor = fornecedores.find((f) => f.id === fornecedorId)
 
   // Ao escolher o fornecedor, herda forma/condição do cadastro e calcula o
@@ -79,7 +99,10 @@ export default function LancarNotaPage() {
   }, [dataCompra, condicao])
 
   const totalNota = itens.reduce((acc, i) => acc + i.valor_total, 0)
-  const podeSalvar = fornecedorId && dataCompra && itens.length > 0 && totalNota > 0 && (!jaPago ? dataVencimento : dataPagamento)
+  const diferencaExtrato = extratoValor != null ? totalNota - extratoValor : null
+  const bateComExtrato = diferencaExtrato == null || Math.abs(diferencaExtrato) <= TOLERANCIA_CENTAVOS
+  const podeSalvar =
+    fornecedorId && dataCompra && itens.length > 0 && totalNota > 0 && (!jaPago ? dataVencimento : dataPagamento) && bateComExtrato
 
   function removerItem(indice: number) {
     setItens((prev) => prev.filter((_, i) => i !== indice))
@@ -87,7 +110,11 @@ export default function LancarNotaPage() {
 
   async function salvar() {
     if (!podeSalvar || !usuario || !fornecedor) {
-      setErro('Preencha fornecedor, data e adicione pelo menos um item.')
+      setErro(
+        !bateComExtrato
+          ? 'O total da nota precisa bater com o valor da transação do extrato.'
+          : 'Preencha fornecedor, data e adicione pelo menos um item.'
+      )
       return
     }
     setSalvando(true)
@@ -121,6 +148,7 @@ export default function LancarNotaPage() {
         unidade,
         conta_id: null, // na nota, a conta é por item
         criado_por: usuario.id,
+        extrato_transacao_id: extratoTransacaoId || null,
       }))
 
       const { data: criados, error } = await supabase.from('financeiro_lancamentos').insert(linhas).select('id, parcela_num')
@@ -144,6 +172,22 @@ export default function LancarNotaPage() {
       const { error: erroItens } = await supabase.from('financeiro_lancamento_itens').insert(linhasItens)
       if (erroItens) throw erroItens
 
+      if (extratoTransacaoId) {
+        try {
+          await vincularTransacaoCriada(extratoTransacaoId, primeiro.id, fornecedorId)
+        } catch (erroVinculo: any) {
+          setErro(
+            'Nota lançada, mas falhou ao marcar a transação do extrato como conciliada: ' +
+              (erroVinculo?.message || 'desconhecido') +
+              '. Concilie manualmente na tela de Extrato.'
+          )
+          setSalvando(false)
+          return
+        }
+        router.push('/financeiro/extrato')
+        return
+      }
+
       router.push('/financeiro/despesas')
     } catch (err: any) {
       console.error('Erro ao lançar nota:', err)
@@ -162,7 +206,9 @@ export default function LancarNotaPage() {
             </button>
             <div>
               <h1 className="text-xl font-bold text-gray-800">Lançar Nota de Insumos</h1>
-              <p className="text-xs text-gray-500">A nota gera automaticamente a despesa correspondente</p>
+              <p className="text-xs text-gray-500">
+                {extratoTransacaoId ? 'Criando a partir de uma transação do extrato' : 'A nota gera automaticamente a despesa correspondente'}
+              </p>
             </div>
           </div>
         </div>
@@ -263,6 +309,14 @@ export default function LancarNotaPage() {
                   <span className="font-semibold text-gray-700">Total da nota ({itens.length} {itens.length === 1 ? 'item' : 'itens'})</span>
                   <span className="font-bold text-gray-900">{formatBRL(totalNota)}</span>
                 </div>
+                {extratoValor != null && (
+                  <div className={`flex justify-between items-center px-3 py-2 rounded-lg text-xs ${bateComExtrato ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                    <span>Transação do extrato: {formatBRL(extratoValor)}</span>
+                    <span className="font-semibold">
+                      {bateComExtrato ? 'Bate com o total' : `Diferença: ${formatBRL(Math.abs(diferencaExtrato || 0))}`}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -271,26 +325,32 @@ export default function LancarNotaPage() {
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
             <h2 className="font-semibold text-gray-800">Pagamento</h2>
 
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setJaPago(false)}
-                className={`flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-semibold ${
-                  !jaPago ? 'border-amber-500 bg-amber-500 text-white' : 'border-gray-200 bg-white text-gray-700'
-                }`}
-              >
-                A pagar
-              </button>
-              <button
-                type="button"
-                onClick={() => setJaPago(true)}
-                className={`flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-semibold ${
-                  jaPago ? 'border-green-600 bg-green-600 text-white' : 'border-gray-200 bg-white text-gray-700'
-                }`}
-              >
-                Já foi paga
-              </button>
-            </div>
+            {extratoTransacaoId ? (
+              <div className="px-4 py-2.5 rounded-lg border-2 border-green-600 bg-green-600 text-white text-sm font-semibold text-center">
+                Já foi paga (transação do extrato)
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setJaPago(false)}
+                  className={`flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-semibold ${
+                    !jaPago ? 'border-amber-500 bg-amber-500 text-white' : 'border-gray-200 bg-white text-gray-700'
+                  }`}
+                >
+                  A pagar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setJaPago(true)}
+                  className={`flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-semibold ${
+                    jaPago ? 'border-green-600 bg-green-600 text-white' : 'border-gray-200 bg-white text-gray-700'
+                  }`}
+                >
+                  Já foi paga
+                </button>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -309,7 +369,13 @@ export default function LancarNotaPage() {
               {jaPago ? (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Pago em</label>
-                  <input type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
+                  {extratoTransacaoId ? (
+                    <div className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-700 font-medium">
+                      {new Date(dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR')}
+                    </div>
+                  ) : (
+                    <input type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
+                  )}
                 </div>
               ) : (
                 <div>
@@ -349,15 +415,23 @@ export default function LancarNotaPage() {
             {salvando ? 'Salvando...' : `Lançar nota${itens.length > 0 ? ` (${itens.length} ${itens.length === 1 ? 'item' : 'itens'} · ${formatBRL(totalNota)})` : ''}`}
           </button>
         </div>
-
-        {modalAberto && (
-          <SelecionarMateriaPrimaModal
-            materias={materias}
-            onAdd={(item) => setItens((prev) => [...prev, item])}
-            onClose={() => setModalAberto(false)}
-          />
-        )}
       </div>
+
+      {modalAberto && (
+        <SelecionarMateriaPrimaModal
+          materias={materias}
+          onAdd={(item) => setItens((prev) => [...prev, item])}
+          onClose={() => setModalAberto(false)}
+        />
+      )}
     </ProtectedRoute>
+  )
+}
+
+export default function LancarNotaPage() {
+  return (
+    <Suspense>
+      <LancarNotaForm />
+    </Suspense>
   )
 }
