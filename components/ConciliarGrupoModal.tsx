@@ -92,6 +92,7 @@ export default function ConciliarGrupoModal({ transacoes, onClose, onResolvido }
             {candidatos.map((c, i) => {
               const conf = CONFIANCA_LABEL[c.confianca] || CONFIANCA_LABEL.baixa
               const l = c.lancamento
+              const diferenca = soma - l.valor_total
               return (
                 <div key={i} className="border border-gray-200 rounded-lg p-3">
                   <div className="flex items-start justify-between mb-2">
@@ -108,6 +109,13 @@ export default function ConciliarGrupoModal({ transacoes, onClose, onResolvido }
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${conf.color}`}>{conf.label}</span>
                   </div>
+                  {Math.abs(diferenca) > 0.02 && (
+                    <p className={`text-xs mb-2 px-2 py-1 rounded ${diferenca > 0 ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                      {diferenca > 0
+                        ? `Soma ${formatBRL(diferenca)} maior que a despesa — confira se é juros/multa de atraso antes de confirmar.`
+                        : `Soma ${formatBRL(Math.abs(diferenca))} menor que a despesa — confira antes de confirmar.`}
+                    </p>
+                  )}
                   <button
                     onClick={() => confirmar(c)}
                     disabled={processando}

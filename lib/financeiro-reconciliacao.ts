@@ -129,24 +129,32 @@ export async function sugerirCorrespondencias(
   return ordenarPorConfianca(candidatos)
 }
 
+// Débitos atrasados costumam vir com juros/multa/correção monetária por
+// cima do valor original da parcela — não é só arredondamento de centavo.
+// R$50 cobre os casos reais observados (ex: parcela de R$699 debitada a
+// R$704 por 1 dia de atraso); a UI mostra a diferença de cada candidato
+// pra o usuário confirmar que faz sentido antes de conciliar, já que uma
+// janela desse tamanho pode por coincidência achar uma despesa não relacionada.
+const TOLERANCIA_JUROS = 50
+
 /**
  * Variante de sugerirCorrespondencias para quando o banco fragmenta o débito
- * de uma parcela (ex: contrato de empréstimo) em várias transações parciais
- * porque a conta não tinha saldo pra debitar tudo de uma vez. Busca por
- * SOMA (com tolerância de centavos), não por valor exato — e nunca por
- * CNPJ/CPF, já que essas descrições de amortização não trazem documento.
+ * de uma parcela (ex: contrato de empréstimo, boleto atrasado) em várias
+ * transações parciais porque a conta não tinha saldo pra debitar tudo de
+ * uma vez. Busca por SOMA (com tolerância de juros/correção, não só
+ * centavos), não por valor exato — e nunca por CNPJ/CPF, já que essas
+ * descrições de amortização não trazem documento.
  */
 export async function sugerirCorrespondenciasPorSoma(
   somaAbs: number,
   dataReferencia: string
 ): Promise<CandidatoConciliacao[]> {
-  const TOLERANCIA = 0.02
   const { data: lancamentos, error } = await supabase
     .from('financeiro_lancamentos')
     .select('*, parte:financeiro_partes!parte_id(*), conta:financeiro_contas(codigo, nome)')
     .eq('status', 'aberto')
-    .gte('valor_total', somaAbs - TOLERANCIA)
-    .lte('valor_total', somaAbs + TOLERANCIA)
+    .gte('valor_total', somaAbs - TOLERANCIA_JUROS)
+    .lte('valor_total', somaAbs + TOLERANCIA_JUROS)
 
   if (error) throw new Error(error.message)
 
@@ -155,7 +163,15 @@ export async function sugerirCorrespondenciasPorSoma(
     confianca: classificarConfianca(dataReferencia, null, l),
   }))
 
-  return ordenarPorConfianca(candidatos)
+  // Dentro de cada nível de confiança, prioriza o candidato cujo valor mais
+  // se aproxima da soma — com a janela ampliada, isso evita que o primeiro
+  // da lista seja um valor coincidentemente parecido mas menos plausível.
+  const ordem = { alta: 0, media: 1, baixa: 2 }
+  return candidatos.sort((a, b) => {
+    const diffOrdem = ordem[a.confianca] - ordem[b.confianca]
+    if (diffOrdem !== 0) return diffOrdem
+    return Math.abs(a.lancamento.valor_total - somaAbs) - Math.abs(b.lancamento.valor_total - somaAbs)
+  })
 }
 
 /**
