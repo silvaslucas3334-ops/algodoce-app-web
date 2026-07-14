@@ -6,10 +6,11 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import ExtratoConciliacaoModal from '@/components/ExtratoConciliacaoModal'
 import CategorizarReceitaModal from '@/components/CategorizarReceitaModal'
+import CategorizarReceitasLoteModal from '@/components/CategorizarReceitasLoteModal'
 import { importarTransacoesOFX } from '@/lib/financeiro-reconciliacao'
 import { formatBRL } from '@/lib/ofx'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Upload, Loader, Link2, Tag } from 'lucide-react'
+import { ArrowLeft, Upload, Loader, Link2, Tag, Layers } from 'lucide-react'
 import { FinanceiroExtratoTransacao, StatusConciliacao } from '@/lib/types'
 import { UNIDADE_LABEL } from '@/lib/constants'
 
@@ -45,9 +46,12 @@ export default function ExtratoPage() {
   const [erro, setErro] = useState('')
   const [modalTransacao, setModalTransacao] = useState<FinanceiroExtratoTransacao | null>(null)
   const [modalReceita, setModalReceita] = useState<FinanceiroExtratoTransacao | null>(null)
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [modalLote, setModalLote] = useState(false)
 
   useEffect(() => {
     carregar()
+    setSelecionados(new Set())
   }, [filtroStatus, filtroConta])
 
   async function carregar() {
@@ -86,6 +90,26 @@ export default function ExtratoPage() {
       }
     }
     reader.readAsText(file)
+  }
+
+  // Só entradas pendentes entram na seleção em lote — o mesmo escopo do
+  // botão "Categorizar" individual (saídas usam o fluxo de conciliação).
+  const creditosPendentesElegiveis = transacoes.filter((t) => t.status_conciliacao === 'pendente' && t.valor > 0)
+  const transacoesSelecionadas = transacoes.filter((t) => selecionados.has(t.id))
+
+  function toggleSelecionado(id: string) {
+    setSelecionados((prev) => {
+      const novo = new Set(prev)
+      if (novo.has(id)) novo.delete(id)
+      else novo.add(id)
+      return novo
+    })
+  }
+
+  function alternarSelecionarTodos() {
+    setSelecionados((prev) =>
+      prev.size === creditosPendentesElegiveis.length ? new Set() : new Set(creditosPendentesElegiveis.map((t) => t.id))
+    )
   }
 
   return (
@@ -155,22 +179,66 @@ export default function ExtratoPage() {
             ))}
           </div>
 
+          {!loading && creditosPendentesElegiveis.length > 0 && (
+            <div className="flex items-center justify-between mb-3 px-1">
+              <button onClick={alternarSelecionarTodos} className="text-xs font-medium text-pink-700 hover:text-pink-800">
+                {selecionados.size === creditosPendentesElegiveis.length
+                  ? 'Limpar seleção'
+                  : `Selecionar todas as entradas pendentes (${creditosPendentesElegiveis.length})`}
+              </button>
+              {selecionados.size > 0 && (
+                <span className="text-xs text-gray-500">{selecionados.size} selecionada{selecionados.size > 1 ? 's' : ''}</span>
+              )}
+            </div>
+          )}
+
+          {selecionados.size > 0 && (
+            <div className="bg-pink-50 border border-pink-200 rounded-xl p-3 mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm text-pink-800 font-medium">
+                {selecionados.size} entrada{selecionados.size > 1 ? 's' : ''} selecionada{selecionados.size > 1 ? 's' : ''}
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setSelecionados(new Set())} className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800">
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => setModalLote(true)}
+                  className="px-3 py-1.5 bg-pink-700 text-white rounded-lg text-xs font-semibold hover:bg-pink-800 flex items-center gap-1.5"
+                >
+                  <Layers size={14} /> Classificar em lote
+                </button>
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div className="text-center py-12 text-gray-400">Carregando...</div>
           ) : transacoes.length === 0 ? (
             <EmptyState title={`Nenhuma transação ${STATUS_LABEL[filtroStatus].toLowerCase()}`} description="Importe um extrato .ofx para começar" />
           ) : (
             <div className="space-y-2">
-              {transacoes.map((t) => (
-                <div key={t.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-800">{t.descricao_original}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR')}
-                      {t.documento_extraido && <span className="ml-2 font-mono">{t.documento_extraido}</span>}
-                    </p>
+              {transacoes.map((t) => {
+                const elegivelLote = t.status_conciliacao === 'pendente' && t.valor > 0
+                return (
+                <div key={t.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {elegivelLote && (
+                      <input
+                        type="checkbox"
+                        checked={selecionados.has(t.id)}
+                        onChange={() => toggleSelecionado(t.id)}
+                        className="w-4 h-4 flex-shrink-0 accent-pink-700"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-800 truncate">{t.descricao_original}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {new Date(t.data + 'T00:00:00').toLocaleDateString('pt-BR')}
+                        {t.documento_extraido && <span className="ml-2 font-mono">{t.documento_extraido}</span>}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-shrink-0">
                     <p className={`font-semibold ${t.valor < 0 ? 'text-red-600' : 'text-green-600'}`}>{formatBRL(t.valor)}</p>
                     {t.status_conciliacao === 'pendente' && t.valor < 0 && (
                       <button
@@ -190,7 +258,8 @@ export default function ExtratoPage() {
                     )}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -210,6 +279,18 @@ export default function ExtratoPage() {
             usuarioId={usuario.id}
             onClose={() => setModalReceita(null)}
             onResolvido={carregar}
+          />
+        )}
+
+        {modalLote && usuario && (
+          <CategorizarReceitasLoteModal
+            transacoes={transacoesSelecionadas}
+            usuarioId={usuario.id}
+            onClose={() => setModalLote(false)}
+            onResolvido={() => {
+              carregar()
+              setSelecionados(new Set())
+            }}
           />
         )}
       </div>

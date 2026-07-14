@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { CategoriaReceita } from './types'
+import { CategoriaReceita, FinanceiroExtratoTransacao } from './types'
 import { CATEGORIA_RECEITA_LABEL } from './constants'
 
 /**
@@ -35,6 +35,34 @@ export async function categorizarReceita(
     .update({ status_conciliacao: 'conciliado' })
     .eq('id', transacaoId)
   if (erroTransacao) throw new Error(erroTransacao.message)
+}
+
+/**
+ * Categoriza várias transações de uma vez com a MESMA categoria (ex: um
+ * dia inteiro de vendas no PIX). Sequencial, não Promise.all — evita
+ * disparar dezenas de INSERT+UPDATE simultâneos, e cada falha individual
+ * não derruba o restante do lote (relatada em `falhas`, o usuário resolve
+ * as que sobrarem pelo fluxo de categorização individual).
+ */
+export async function categorizarReceitasEmLote(
+  transacoes: FinanceiroExtratoTransacao[],
+  categoria: Exclude<CategoriaReceita, 'dinheiro'>,
+  usuarioId: string,
+  onProgress?: (concluidas: number, total: number) => void
+): Promise<{ sucesso: number; falhas: { transacao: FinanceiroExtratoTransacao; erro: string }[] }> {
+  const falhas: { transacao: FinanceiroExtratoTransacao; erro: string }[] = []
+  let sucesso = 0
+  for (let i = 0; i < transacoes.length; i++) {
+    const t = transacoes[i]
+    try {
+      await categorizarReceita(t.id, t.conta_bancaria as 'loja1' | 'loja2', categoria, t.valor, t.data, null, usuarioId)
+      sucesso++
+    } catch (err: any) {
+      falhas.push({ transacao: t, erro: err?.message || 'desconhecido' })
+    }
+    onProgress?.(i + 1, transacoes.length)
+  }
+  return { sucesso, falhas }
 }
 
 /**
