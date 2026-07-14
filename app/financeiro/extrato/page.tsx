@@ -7,6 +7,7 @@ import EmptyState from '@/components/EmptyState'
 import ExtratoConciliacaoModal from '@/components/ExtratoConciliacaoModal'
 import CategorizarReceitaModal from '@/components/CategorizarReceitaModal'
 import CategorizarReceitasLoteModal from '@/components/CategorizarReceitasLoteModal'
+import ConciliarGrupoModal from '@/components/ConciliarGrupoModal'
 import { importarTransacoesOFX } from '@/lib/financeiro-reconciliacao'
 import { formatBRL } from '@/lib/ofx'
 import { useRouter } from 'next/navigation'
@@ -48,6 +49,7 @@ export default function ExtratoPage() {
   const [modalReceita, setModalReceita] = useState<FinanceiroExtratoTransacao | null>(null)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [modalLote, setModalLote] = useState(false)
+  const [modalGrupo, setModalGrupo] = useState(false)
 
   useEffect(() => {
     carregar()
@@ -92,10 +94,14 @@ export default function ExtratoPage() {
     reader.readAsText(file)
   }
 
-  // Só entradas pendentes entram na seleção em lote — o mesmo escopo do
-  // botão "Categorizar" individual (saídas usam o fluxo de conciliação).
+  // "Selecionar todas" continua escopado só a créditos — pra conciliação em
+  // grupo de débitos o usuário precisa escolher a dedo as parcelas daquele
+  // contrato específico entre possivelmente vários débitos pendentes não
+  // relacionados, então "selecionar tudo" não ajudaria nesse caso.
   const creditosPendentesElegiveis = transacoes.filter((t) => t.status_conciliacao === 'pendente' && t.valor > 0)
   const transacoesSelecionadas = transacoes.filter((t) => selecionados.has(t.id))
+  const selecaoTodasCreditos = transacoesSelecionadas.length > 0 && transacoesSelecionadas.every((t) => t.valor > 0)
+  const selecaoTodasDebitos = transacoesSelecionadas.length > 0 && transacoesSelecionadas.every((t) => t.valor < 0)
 
   function toggleSelecionado(id: string) {
     setSelecionados((prev) => {
@@ -195,18 +201,31 @@ export default function ExtratoPage() {
           {selecionados.size > 0 && (
             <div className="bg-pink-50 border border-pink-200 rounded-xl p-3 mb-3 flex items-center justify-between gap-3">
               <p className="text-sm text-pink-800 font-medium">
-                {selecionados.size} entrada{selecionados.size > 1 ? 's' : ''} selecionada{selecionados.size > 1 ? 's' : ''}
+                {selecionados.size} selecionada{selecionados.size > 1 ? 's' : ''}
               </p>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
                 <button onClick={() => setSelecionados(new Set())} className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800">
                   Cancelar
                 </button>
-                <button
-                  onClick={() => setModalLote(true)}
-                  className="px-3 py-1.5 bg-pink-700 text-white rounded-lg text-xs font-semibold hover:bg-pink-800 flex items-center gap-1.5"
-                >
-                  <Layers size={14} /> Classificar em lote
-                </button>
+                {selecaoTodasCreditos && (
+                  <button
+                    onClick={() => setModalLote(true)}
+                    className="px-3 py-1.5 bg-pink-700 text-white rounded-lg text-xs font-semibold hover:bg-pink-800 flex items-center gap-1.5"
+                  >
+                    <Layers size={14} /> Classificar em lote
+                  </button>
+                )}
+                {selecaoTodasDebitos && (
+                  <button
+                    onClick={() => setModalGrupo(true)}
+                    className="px-3 py-1.5 bg-pink-700 text-white rounded-lg text-xs font-semibold hover:bg-pink-800 flex items-center gap-1.5"
+                  >
+                    <Layers size={14} /> Conciliar em grupo
+                  </button>
+                )}
+                {!selecaoTodasCreditos && !selecaoTodasDebitos && (
+                  <span className="text-xs text-amber-700">Selecione só entradas ou só saídas</span>
+                )}
               </div>
             </div>
           )}
@@ -218,7 +237,7 @@ export default function ExtratoPage() {
           ) : (
             <div className="space-y-2">
               {transacoes.map((t) => {
-                const elegivelLote = t.status_conciliacao === 'pendente' && t.valor > 0
+                const elegivelLote = t.status_conciliacao === 'pendente'
                 return (
                 <div key={t.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
@@ -287,6 +306,17 @@ export default function ExtratoPage() {
             transacoes={transacoesSelecionadas}
             usuarioId={usuario.id}
             onClose={() => setModalLote(false)}
+            onResolvido={() => {
+              carregar()
+              setSelecionados(new Set())
+            }}
+          />
+        )}
+
+        {modalGrupo && (
+          <ConciliarGrupoModal
+            transacoes={transacoesSelecionadas}
+            onClose={() => setModalGrupo(false)}
             onResolvido={() => {
               carregar()
               setSelecionados(new Set())

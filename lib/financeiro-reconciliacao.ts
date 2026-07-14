@@ -83,6 +83,20 @@ function diasEntre(dataA: string, dataB: string): number {
   return Math.abs(Math.round((a.getTime() - b.getTime()) / 86400000))
 }
 
+function classificarConfianca(
+  transacaoData: string,
+  documentoExtraido: string | null,
+  lancamento: FinanceiroLancamento
+): 'alta' | 'media' | 'baixa' {
+  if (documentoExtraido && lancamento.parte?.documento === documentoExtraido) return 'alta'
+  return diasEntre(transacaoData, lancamento.data_vencimento) <= 5 ? 'media' : 'baixa'
+}
+
+function ordenarPorConfianca(candidatos: CandidatoConciliacao[]): CandidatoConciliacao[] {
+  const ordem = { alta: 0, media: 1, baixa: 2 }
+  return candidatos.sort((a, b) => ordem[a.confianca] - ordem[b.confianca])
+}
+
 /**
  * Sugere lançamentos em aberto que podem corresponder a uma transação de
  * saída do extrato. Como a nota multi-item vira UM lançamento (valor = soma
@@ -109,16 +123,39 @@ export async function sugerirCorrespondencias(
 
   const candidatos: CandidatoConciliacao[] = (lancamentos || []).map((l: FinanceiroLancamento) => ({
     lancamento: l,
-    confianca:
-      documentoExtraido && l.parte?.documento === documentoExtraido
-        ? 'alta'
-        : diasEntre(transacaoData, l.data_vencimento) <= 5
-          ? 'media'
-          : 'baixa',
+    confianca: classificarConfianca(transacaoData, documentoExtraido, l),
   }))
 
-  const ordem = { alta: 0, media: 1, baixa: 2 }
-  return candidatos.sort((a, b) => ordem[a.confianca] - ordem[b.confianca])
+  return ordenarPorConfianca(candidatos)
+}
+
+/**
+ * Variante de sugerirCorrespondencias para quando o banco fragmenta o débito
+ * de uma parcela (ex: contrato de empréstimo) em várias transações parciais
+ * porque a conta não tinha saldo pra debitar tudo de uma vez. Busca por
+ * SOMA (com tolerância de centavos), não por valor exato — e nunca por
+ * CNPJ/CPF, já que essas descrições de amortização não trazem documento.
+ */
+export async function sugerirCorrespondenciasPorSoma(
+  somaAbs: number,
+  dataReferencia: string
+): Promise<CandidatoConciliacao[]> {
+  const TOLERANCIA = 0.02
+  const { data: lancamentos, error } = await supabase
+    .from('financeiro_lancamentos')
+    .select('*, parte:financeiro_partes!parte_id(*), conta:financeiro_contas(codigo, nome)')
+    .eq('status', 'aberto')
+    .gte('valor_total', somaAbs - TOLERANCIA)
+    .lte('valor_total', somaAbs + TOLERANCIA)
+
+  if (error) throw new Error(error.message)
+
+  const candidatos: CandidatoConciliacao[] = (lancamentos || []).map((l: FinanceiroLancamento) => ({
+    lancamento: l,
+    confianca: classificarConfianca(dataReferencia, null, l),
+  }))
+
+  return ordenarPorConfianca(candidatos)
 }
 
 /**
@@ -152,6 +189,55 @@ export async function confirmarConciliacao(
     })
     .eq('id', candidato.lancamento.id)
   if (erroLancamento) throw new Error(erroLancamento.message)
+}
+
+/**
+ * Confirma a conciliação em grupo: várias transações parciais do extrato
+ * casadas contra UM lançamento cuja soma bate (ver sugerirCorrespondenciasPorSoma).
+ * Diferente de confirmarConciliacao (1:1, onde reprocessar dá o mesmo
+ * resultado), aqui um UPDATE cego é arriscado: duas abas poderiam casar
+ * subconjuntos diferentes de transações com o mesmo lançamento aberto antes
+ * de qualquer commit, corrompendo silenciosamente a invariante "soma das
+ * transações vinculadas = valor_total". Por isso cada UPDATE filtra pelo
+ * estado esperado (pendente/aberto) e confere quantas linhas foram
+ * realmente afetadas antes de prosseguir.
+ *
+ * extrato_transacao_id do lançamento é deliberadamente deixado como está
+ * (não setado aqui): é um campo escalar, não representa N transações. A
+ * relação inversa (financeiro_extrato_transacoes.lancamento_id, que várias
+ * linhas podem compartilhar) é a fonte da verdade de quais transações
+ * pagaram este lançamento.
+ */
+export async function confirmarConciliacaoGrupo(
+  transacaoIds: string[],
+  candidato: CandidatoConciliacao,
+  dataPagamento: string
+): Promise<void> {
+  const { data: atualizadas, error: erroTransacoes } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .update({
+      status_conciliacao: 'conciliado',
+      lancamento_id: candidato.lancamento.id,
+      parte_id: candidato.lancamento.parte_id,
+    })
+    .in('id', transacaoIds)
+    .eq('status_conciliacao', 'pendente')
+    .select('id')
+  if (erroTransacoes) throw new Error(erroTransacoes.message)
+  if (!atualizadas || atualizadas.length !== transacaoIds.length) {
+    throw new Error('Uma ou mais transações já foram conciliadas em outra sessão — atualize a tela e tente de novo.')
+  }
+
+  const { data: lancAtualizado, error: erroLancamento } = await supabase
+    .from('financeiro_lancamentos')
+    .update({ status: 'pago', data_pagamento: dataPagamento, updated_at: new Date().toISOString() })
+    .eq('id', candidato.lancamento.id)
+    .eq('status', 'aberto')
+    .select('id')
+  if (erroLancamento) throw new Error(erroLancamento.message)
+  if (!lancAtualizado || lancAtualizado.length === 0) {
+    throw new Error('Este lançamento já foi marcado como pago em outra sessão.')
+  }
 }
 
 /**
