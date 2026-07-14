@@ -102,6 +102,11 @@ export default function ExtratoPage() {
   const transacoesSelecionadas = transacoes.filter((t) => selecionados.has(t.id))
   const selecaoTodasCreditos = transacoesSelecionadas.length > 0 && transacoesSelecionadas.every((t) => t.valor > 0)
   const selecaoTodasDebitos = transacoesSelecionadas.length > 0 && transacoesSelecionadas.every((t) => t.valor < 0)
+  // Compara por identidade (não só por tamanho) — senão, selecionar 1 débito
+  // quando também há 1 crédito pendente faz o rótulo/toggle "achar" por
+  // coincidência de contagem que os créditos já estão todos selecionados.
+  const todosCreditosSelecionados =
+    creditosPendentesElegiveis.length > 0 && creditosPendentesElegiveis.every((t) => selecionados.has(t.id))
 
   function toggleSelecionado(id: string) {
     setSelecionados((prev) => {
@@ -113,9 +118,7 @@ export default function ExtratoPage() {
   }
 
   function alternarSelecionarTodos() {
-    setSelecionados((prev) =>
-      prev.size === creditosPendentesElegiveis.length ? new Set() : new Set(creditosPendentesElegiveis.map((t) => t.id))
-    )
+    setSelecionados(todosCreditosSelecionados ? new Set() : new Set(creditosPendentesElegiveis.map((t) => t.id)))
   }
 
   return (
@@ -188,7 +191,7 @@ export default function ExtratoPage() {
           {!loading && creditosPendentesElegiveis.length > 0 && (
             <div className="flex items-center justify-between mb-3 px-1">
               <button onClick={alternarSelecionarTodos} className="text-xs font-medium text-pink-700 hover:text-pink-800">
-                {selecionados.size === creditosPendentesElegiveis.length
+                {todosCreditosSelecionados
                   ? 'Limpar seleção'
                   : `Selecionar todas as entradas pendentes (${creditosPendentesElegiveis.length})`}
               </button>
