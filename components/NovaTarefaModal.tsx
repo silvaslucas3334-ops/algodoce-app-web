@@ -19,6 +19,12 @@ interface NovaTarefaModalProps {
 const HOJE = () =>
   new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
 
+const AMANHA = () => {
+  const d = new Date(`${HOJE()}T12:00:00`) // meio-dia evita rollover perto da meia-noite
+  d.setDate(d.getDate() + 1)
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+}
+
 const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 
 export default function NovaTarefaModal({
@@ -36,10 +42,15 @@ export default function NovaTarefaModal({
     titulo: '',
     descricao: '',
     responsavel_id: '',
-    data_vencimento: HOJE(),
+    data_vencimento: '',
     hora_limite: '',
     foto_obrigatoria: setor.tipo === 'operacional',
   })
+
+  // Vencimento não vem pré-preenchido — obriga escolha explícita, mesmo
+  // motivo do responsável não vir pré-selecionado.
+  const [modoData, setModoData] = useState<'hoje' | 'amanha' | 'outro' | ''>('')
+  const [definirHora, setDefinirHora] = useState(false)
 
   // Envolvidos além do responsável — só p/ tarefa avulsa (não recorrente)
   const [envolvidoIds, setEnvolvidoIds] = useState<string[]>([])
@@ -163,6 +174,10 @@ export default function NovaTarefaModal({
     }
     if (!form.responsavel_id) {
       setErro('Selecione um responsável')
+      return
+    }
+    if (!recorrente && !form.data_vencimento) {
+      setErro('Selecione a data de vencimento')
       return
     }
     if (recorrente && frequencia === 'semanal' && diasSemana.length === 0) {
@@ -450,34 +465,83 @@ export default function NovaTarefaModal({
 
             {/* Datas: única (tarefa avulsa) OU início/fim (recorrente) */}
             {!recorrente ? (
-              <div className="grid grid-cols-2 gap-3">
+              <>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Vencimento *
                   </label>
-                  <input
-                    type="date"
-                    value={form.data_vencimento}
-                    onChange={(e) =>
-                      setForm({ ...form, data_vencimento: e.target.value })
-                    }
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
+                  <div className="flex gap-2">
+                    {[
+                      { id: 'hoje' as const, label: 'Hoje' },
+                      { id: 'amanha' as const, label: 'Amanhã' },
+                      { id: 'outro' as const, label: 'Outro período' },
+                    ].map((opcao) => (
+                      <button
+                        key={opcao.id}
+                        type="button"
+                        onClick={() => {
+                          setModoData(opcao.id)
+                          if (opcao.id === 'hoje') setForm({ ...form, data_vencimento: HOJE() })
+                          else if (opcao.id === 'amanha') setForm({ ...form, data_vencimento: AMANHA() })
+                          else setForm({ ...form, data_vencimento: '' })
+                        }}
+                        className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                          modoData === opcao.id
+                            ? 'bg-pink-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        {opcao.label}
+                      </button>
+                    ))}
+                  </div>
+                  {modoData === 'outro' && (
+                    <input
+                      type="date"
+                      value={form.data_vencimento}
+                      onChange={(e) => setForm({ ...form, data_vencimento: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-2"
+                    />
+                  )}
                 </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Hora limite
                   </label>
-                  <input
-                    type="time"
-                    value={form.hora_limite}
-                    onChange={(e) =>
-                      setForm({ ...form, hora_limite: e.target.value })
-                    }
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDefinirHora(false)
+                        setForm({ ...form, hora_limite: '' })
+                      }}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                        !definirHora ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      Sem horário
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDefinirHora(true)}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                        definirHora ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      Definir horário
+                    </button>
+                  </div>
+                  {definirHora && (
+                    <input
+                      type="time"
+                      value={form.hora_limite}
+                      onChange={(e) => setForm({ ...form, hora_limite: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-2"
+                    />
+                  )}
                 </div>
-              </div>
+              </>
             ) : (
               <div className="grid grid-cols-2 gap-3">
                 <div>
