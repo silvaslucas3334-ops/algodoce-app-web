@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
 import { parseOFX, TransacaoOFX } from './ofx'
 import { normalizarTitulo } from './tarefas-utils'
-import { FinanceiroLancamento, CandidatoConciliacao } from './types'
+import { FinanceiroLancamento, CandidatoConciliacao, UnidadeFinanceiro } from './types'
 
 const RE_CNPJ = /\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/
 const RE_CPF = /\d{3}\.?\d{3}\.?\d{3}-?\d{2}/
@@ -257,6 +257,24 @@ export async function confirmarConciliacaoGrupo(
 }
 
 /**
+ * Marca uma transação de extrato como conciliada e aponta pro lançamento
+ * que a pagou. Guarda por status_conciliacao='pendente' + conferência de
+ * linha afetada — mesmo padrão defensivo de confirmarConciliacaoGrupo,
+ * compartilhado por todo fluxo que vincula transação a lançamento (evita
+ * duplo-processamento em duplo-clique ou duas abas).
+ */
+async function vincularTransacaoInterno(transacaoId: string, lancamentoId: string, parteId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .update({ status_conciliacao: 'conciliado', lancamento_id: lancamentoId, parte_id: parteId })
+    .eq('id', transacaoId)
+    .eq('status_conciliacao', 'pendente')
+    .select('id')
+  if (error) throw new Error(error.message)
+  if (!data || data.length === 0) throw new Error('Transação já foi conciliada em outra sessão.')
+}
+
+/**
  * Vincula uma transação do extrato a um lançamento recém-criado (não a um
  * já existente — para isso é confirmarConciliacao). O INSERT do lançamento
  * já grava extrato_transacao_id direto, então aqui só falta marcar a
@@ -267,11 +285,65 @@ export async function vincularTransacaoCriada(
   lancamentoId: string,
   parteId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('financeiro_extrato_transacoes')
-    .update({ status_conciliacao: 'conciliado', lancamento_id: lancamentoId, parte_id: parteId })
-    .eq('id', transacaoId)
-  if (error) throw new Error(error.message)
+  await vincularTransacaoInterno(transacaoId, lancamentoId, parteId)
+}
+
+export interface DespesaLoteInput {
+  transacaoId: string
+  valor: number
+  data: string
+  unidade: UnidadeFinanceiro
+}
+
+/**
+ * Cria uma despesa nova por transação selecionada (não uma soma casada
+ * contra UMA despesa existente — para isso é confirmarConciliacaoGrupo).
+ * Cada linha é independente, sem invariante compartilhada entre elas, então
+ * segue o padrão de categorizarReceitasEmLote (loop sequencial, falha de
+ * um item não aborta o resto) em vez de uma RPC atômica.
+ */
+export async function criarDespesasEmLote(
+  despesas: DespesaLoteInput[],
+  parteId: string,
+  contaId: string,
+  descricaoBase: string,
+  usuarioId: string,
+  onProgress?: (concluidas: number, total: number) => void
+): Promise<{ sucesso: number; falhas: { transacaoId: string; erro: string }[] }> {
+  const falhas: { transacaoId: string; erro: string }[] = []
+  let sucesso = 0
+  for (let i = 0; i < despesas.length; i++) {
+    const d = despesas[i]
+    try {
+      const dataFormatada = new Date(d.data + 'T00:00:00').toLocaleDateString('pt-BR')
+      const { data: criado, error } = await supabase
+        .from('financeiro_lancamentos')
+        .insert({
+          tipo: 'despesa',
+          parte_id: parteId,
+          descricao: `${descricaoBase} — ${dataFormatada}`,
+          valor_total: d.valor,
+          data_lancamento: d.data,
+          data_vencimento: d.data,
+          data_pagamento: d.data,
+          status: 'pago',
+          condicao_pagamento: 'a_vista',
+          unidade: d.unidade,
+          conta_id: contaId,
+          criado_por: usuarioId,
+          extrato_transacao_id: d.transacaoId,
+        })
+        .select('id')
+        .single()
+      if (error) throw new Error(error.message)
+      await vincularTransacaoInterno(d.transacaoId, criado.id, parteId)
+      sucesso++
+    } catch (err: any) {
+      falhas.push({ transacaoId: d.transacaoId, erro: err?.message || 'desconhecido' })
+    }
+    onProgress?.(i + 1, despesas.length)
+  }
+  return { sucesso, falhas }
 }
 
 export async function ignorarTransacao(transacaoId: string): Promise<void> {

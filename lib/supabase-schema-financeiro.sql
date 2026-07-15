@@ -190,6 +190,12 @@ CREATE INDEX IF NOT EXISTS idx_fl_vencimento ON financeiro_lancamentos(data_venc
 CREATE INDEX IF NOT EXISTS idx_fl_parte ON financeiro_lancamentos(parte_id);
 CREATE INDEX IF NOT EXISTS idx_fl_unidade ON financeiro_lancamentos(unidade);
 CREATE INDEX IF NOT EXISTS idx_fl_grupo_parcelamento ON financeiro_lancamentos(grupo_parcelamento) WHERE grupo_parcelamento IS NOT NULL;
+-- Evita duas despesas apontando pra mesma transação de extrato (ex: INSERT
+-- do lançamento sucede mas o vínculo seguinte falha, e uma retentativa
+-- criaria duplicata). Mesmo padrão de idx_fr_extrato_transacao_unico em
+-- financeiro_receitas. Ver lib/migrations/add-indice-unico-extrato-lancamento.sql.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fl_extrato_transacao_unico
+  ON financeiro_lancamentos(extrato_transacao_id) WHERE extrato_transacao_id IS NOT NULL;
 
 -- ============================================================
 -- 6b. financeiro_lancamento_itens — itens da nota (alimenta o CMV)

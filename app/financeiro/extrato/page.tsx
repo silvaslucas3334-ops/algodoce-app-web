@@ -8,10 +8,11 @@ import ExtratoConciliacaoModal from '@/components/ExtratoConciliacaoModal'
 import CategorizarReceitaModal from '@/components/CategorizarReceitaModal'
 import CategorizarReceitasLoteModal from '@/components/CategorizarReceitasLoteModal'
 import ConciliarGrupoModal from '@/components/ConciliarGrupoModal'
+import CriarDespesasLoteModal from '@/components/CriarDespesasLoteModal'
 import { importarTransacoesOFX } from '@/lib/financeiro-reconciliacao'
 import { formatBRL } from '@/lib/ofx'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Upload, Loader, Link2, Tag, Layers } from 'lucide-react'
+import { ArrowLeft, Upload, Loader, Link2, Tag, Layers, Receipt } from 'lucide-react'
 import { FinanceiroExtratoTransacao, StatusConciliacao } from '@/lib/types'
 import { UNIDADE_LABEL } from '@/lib/constants'
 
@@ -50,6 +51,7 @@ export default function ExtratoPage() {
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [modalLote, setModalLote] = useState(false)
   const [modalGrupo, setModalGrupo] = useState(false)
+  const [modalDespesasLote, setModalDespesasLote] = useState(false)
 
   useEffect(() => {
     carregar()
@@ -219,12 +221,20 @@ export default function ExtratoPage() {
                   </button>
                 )}
                 {selecaoTodasDebitos && (
-                  <button
-                    onClick={() => setModalGrupo(true)}
-                    className="px-3 py-1.5 bg-pink-700 text-white rounded-lg text-xs font-semibold hover:bg-pink-800 flex items-center gap-1.5"
-                  >
-                    <Layers size={14} /> Conciliar em grupo
-                  </button>
+                  <>
+                    <button
+                      onClick={() => setModalGrupo(true)}
+                      className="px-3 py-1.5 bg-pink-700 text-white rounded-lg text-xs font-semibold hover:bg-pink-800 flex items-center gap-1.5"
+                    >
+                      <Layers size={14} /> Conciliar em grupo
+                    </button>
+                    <button
+                      onClick={() => setModalDespesasLote(true)}
+                      className="px-3 py-1.5 border-2 border-pink-700 text-pink-700 rounded-lg text-xs font-semibold hover:bg-pink-50 flex items-center gap-1.5"
+                    >
+                      <Receipt size={14} /> Criar despesas em lote
+                    </button>
+                  </>
                 )}
                 {!selecaoTodasCreditos && !selecaoTodasDebitos && (
                   <span className="text-xs text-amber-700">Selecione só entradas ou só saídas</span>
@@ -320,6 +330,18 @@ export default function ExtratoPage() {
           <ConciliarGrupoModal
             transacoes={transacoesSelecionadas}
             onClose={() => setModalGrupo(false)}
+            onResolvido={() => {
+              carregar()
+              setSelecionados(new Set())
+            }}
+          />
+        )}
+
+        {modalDespesasLote && usuario && (
+          <CriarDespesasLoteModal
+            transacoes={transacoesSelecionadas}
+            usuarioId={usuario.id}
+            onClose={() => setModalDespesasLote(false)}
             onResolvido={() => {
               carregar()
               setSelecionados(new Set())
