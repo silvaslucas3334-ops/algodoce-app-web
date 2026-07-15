@@ -90,6 +90,20 @@ export async function criarReceitaManualDinheiro(
 
 export type VisaoFluxoCaixa = 'loja1' | 'loja2' | 'consolidado'
 
+export interface FluxoCaixaDespesaDetalhe {
+  parteId: string
+  parteNome: string
+  grupoDre: string
+  valor: number
+}
+
+export interface FluxoCaixaReceitaDetalhe {
+  categoria: CategoriaReceita
+  data: string
+  valor: number
+  observacao: string | null
+}
+
 export interface FluxoCaixaMensal {
   unidade: VisaoFluxoCaixa
   entradasPorCategoria: { categoria: CategoriaReceita; label: string; valor: number }[]
@@ -97,12 +111,15 @@ export interface FluxoCaixaMensal {
   saidasPorGrupoDre: { grupoDre: string; valor: number }[]
   totalSaidas: number
   saldo: number
+  despesasDetalhadas: FluxoCaixaDespesaDetalhe[]
+  receitasDetalhadas: FluxoCaixaReceitaDetalhe[]
 }
 
 /**
- * Fluxo de caixa do mês: entradas (financeiro_receitas) x saídas
+ * Fluxo de caixa do período: entradas (financeiro_receitas) x saídas
  * (financeiro_lancamentos pagas, por data_pagamento — é caixa, não
- * competência).
+ * competência). dataInicio/dataFim são strings AAAA-MM-DD — quem chama
+ * decide a granularidade (dia, mês, intervalo livre), a lib só agrega.
  *
  * Visão por unidade (loja1/loja2) exclui despesas 'rateio' de propósito —
  * responde "quanto essa loja gastou/ganhou sozinha", uma pergunta de
@@ -110,27 +127,28 @@ export interface FluxoCaixaMensal {
  * loja1+loja2+rateio: em regime de caixa, rateio é indiferente — o
  * dinheiro sai de alguma conta de qualquer forma, então pra saber o
  * caixa real da empresa como um todo ele PRECISA entrar na soma.
+ *
+ * despesasDetalhadas/receitasDetalhadas expõem as linhas cruas por trás
+ * dos agregados (pro drill-down por linha na tela) — vêm dos MESMOS
+ * arrays já buscados aqui, não de uma query separada, então nunca
+ * divergem dos totais mostrados.
  */
-export async function buscarFluxoCaixaMensal(
+export async function buscarFluxoCaixa(
   unidade: VisaoFluxoCaixa,
-  ano: number,
-  mes: number
+  dataInicio: string,
+  dataFim: string
 ): Promise<FluxoCaixaMensal> {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const dataMin = `${ano}-${pad(mes)}-01`
-  const dataMax = `${ano}-${pad(mes)}-${pad(new Date(ano, mes, 0).getDate())}`
-
   let receitasQuery = supabase
     .from('financeiro_receitas')
-    .select('categoria, valor')
-    .gte('data', dataMin)
-    .lte('data', dataMax)
+    .select('categoria, data, valor, observacao')
+    .gte('data', dataInicio)
+    .lte('data', dataFim)
   let despesasQuery = supabase
     .from('financeiro_lancamentos')
-    .select('valor_total, conta:financeiro_contas(grupo_dre)')
+    .select('valor_total, parte_id, parte:financeiro_partes!parte_id(nome), conta:financeiro_contas(grupo_dre)')
     .eq('status', 'pago')
-    .gte('data_pagamento', dataMin)
-    .lte('data_pagamento', dataMax)
+    .gte('data_pagamento', dataInicio)
+    .lte('data_pagamento', dataFim)
   if (unidade !== 'consolidado') {
     // financeiro_receitas nunca tem unidade='rateio' (receita é sempre de
     // uma loja específica), então só as saídas precisam desse filtro.
@@ -168,6 +186,19 @@ export async function buscarFluxoCaixaMensal(
     .sort((a, b) => b.valor - a.valor)
   const totalSaidas = saidasPorGrupoDre.reduce((s, g) => s + g.valor, 0)
 
+  const despesasDetalhadas: FluxoCaixaDespesaDetalhe[] = (despesas || []).map((d: any) => ({
+    parteId: d.parte_id,
+    parteNome: d.parte?.nome || 'Sem beneficiário',
+    grupoDre: d.conta?.grupo_dre || 'Sem classificação',
+    valor: d.valor_total,
+  }))
+  const receitasDetalhadas: FluxoCaixaReceitaDetalhe[] = (receitas || []).map((r: any) => ({
+    categoria: r.categoria,
+    data: r.data,
+    valor: r.valor,
+    observacao: r.observacao,
+  }))
+
   return {
     unidade,
     entradasPorCategoria,
@@ -175,5 +206,7 @@ export async function buscarFluxoCaixaMensal(
     saidasPorGrupoDre,
     totalSaidas,
     saldo: totalEntradas - totalSaidas,
+    despesasDetalhadas,
+    receitasDetalhadas,
   }
 }

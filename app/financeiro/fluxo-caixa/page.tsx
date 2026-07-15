@@ -1,25 +1,33 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import NovaReceitaDinheiroModal from '@/components/NovaReceitaDinheiroModal'
-import { buscarFluxoCaixaMensal, FluxoCaixaMensal, VisaoFluxoCaixa } from '@/lib/financeiro-receitas'
+import FluxoCaixaDetalheModal from '@/components/FluxoCaixaDetalheModal'
+import { buscarFluxoCaixa, FluxoCaixaMensal, VisaoFluxoCaixa } from '@/lib/financeiro-receitas'
 import { formatBRL } from '@/lib/ofx'
+import { hojeISO, somarDias } from '@/lib/financeiro-utils'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Plus, AlertCircle } from 'lucide-react'
+import { CategoriaReceita } from '@/lib/types'
 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ]
 
-// Label local — 'consolidado' é uma visão de UI, não um valor real de
-// `unidade` em nenhuma tabela (por isso não entra em UNIDADE_LABEL).
 const VISAO_LABEL: Record<VisaoFluxoCaixa, string> = {
   loja1: UNIDADE_LABEL.loja1,
   loja2: UNIDADE_LABEL.loja2,
   consolidado: 'Consolidado',
+}
+
+type ModoPeriodo = 'dia' | 'mes' | 'intervalo'
+const MODO_LABEL: Record<ModoPeriodo, string> = { dia: 'Dia', mes: 'Mês', intervalo: 'Período' }
+
+function formatarDataBR(iso: string): string {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR')
 }
 
 export default function FluxoCaixaPage() {
@@ -28,22 +36,62 @@ export default function FluxoCaixaPage() {
 
   const hoje = new Date()
   const [unidade, setUnidade] = useState<VisaoFluxoCaixa>('loja1')
+  const [modoPeriodo, setModoPeriodo] = useState<ModoPeriodo>('mes')
+
+  // Modo 'dia'
+  const [dataUnica, setDataUnica] = useState(hojeISO())
+  // Modo 'mes' (comportamento original, preservado)
   const [ano, setAno] = useState(hoje.getFullYear())
   const [mes, setMes] = useState(hoje.getMonth() + 1) // 1-based
+  // Modo 'intervalo'
+  const [dataInicioIntervalo, setDataInicioIntervalo] = useState(hojeISO())
+  const [dataFimIntervalo, setDataFimIntervalo] = useState(hojeISO())
+
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [dados, setDados] = useState<FluxoCaixaMensal | null>(null)
   const [mostrarNovaReceita, setMostrarNovaReceita] = useState(false)
+  const [modalDetalhe, setModalDetalhe] = useState<{ tipo: 'saida' | 'entrada'; titulo: string; chave: string } | null>(null)
+
+  const pad = (n: number) => String(n).padStart(2, '0')
+
+  const periodo = useMemo(() => {
+    if (modoPeriodo === 'dia') {
+      return { inicio: dataUnica, fim: dataUnica, titulo: formatarDataBR(dataUnica) }
+    }
+    if (modoPeriodo === 'intervalo') {
+      return {
+        inicio: dataInicioIntervalo,
+        fim: dataFimIntervalo,
+        titulo: dataInicioIntervalo && dataFimIntervalo ? `${formatarDataBR(dataInicioIntervalo)} — ${formatarDataBR(dataFimIntervalo)}` : '',
+      }
+    }
+    const inicio = `${ano}-${pad(mes)}-01`
+    const fim = `${ano}-${pad(mes)}-${pad(new Date(ano, mes, 0).getDate())}`
+    return { inicio, fim, titulo: `${MESES[mes - 1]} de ${ano}` }
+  }, [modoPeriodo, dataUnica, ano, mes, dataInicioIntervalo, dataFimIntervalo])
+
+  // Intervalo inválido (vazio ou invertido) nunca dispara busca — senão a
+  // query roda "vazia" silenciosamente (gte/lte invertidos não erram, só
+  // não acham nada) e parece um relatório zerado sem explicação.
+  const intervaloValido =
+    modoPeriodo !== 'intervalo' || (!!dataInicioIntervalo && !!dataFimIntervalo && dataInicioIntervalo <= dataFimIntervalo)
+  const diasNoIntervalo =
+    modoPeriodo === 'intervalo' && intervaloValido
+      ? Math.round((new Date(dataFimIntervalo + 'T00:00:00').getTime() - new Date(dataInicioIntervalo + 'T00:00:00').getTime()) / 86400000)
+      : 0
+  const intervaloLongo = diasNoIntervalo > 366
 
   useEffect(() => {
+    if (!intervaloValido) return
     carregar()
-  }, [unidade, ano, mes])
+  }, [unidade, periodo.inicio, periodo.fim])
 
   async function carregar() {
     setLoading(true)
     setErro('')
     try {
-      const resultado = await buscarFluxoCaixaMensal(unidade, ano, mes)
+      const resultado = await buscarFluxoCaixa(unidade, periodo.inicio, periodo.fim)
       setDados(resultado)
     } catch (err: any) {
       console.error('Erro ao carregar fluxo de caixa:', err)
@@ -53,6 +101,8 @@ export default function FluxoCaixaPage() {
     }
   }
 
+  function diaAnterior() { setDataUnica(somarDias(dataUnica, -1)) }
+  function proximoDia() { setDataUnica(somarDias(dataUnica, 1)) }
   function mesAnterior() {
     if (mes === 1) { setMes(12); setAno(ano - 1) } else { setMes(mes - 1) }
   }
@@ -95,21 +145,83 @@ export default function FluxoCaixaPage() {
             ))}
           </div>
 
-          <div className="flex items-center justify-center gap-4 mb-6">
-            <button onClick={mesAnterior} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
-              <ChevronLeft size={20} className="text-gray-600" />
-            </button>
-            <p className="text-lg font-semibold text-gray-800 min-w-[180px] text-center">
-              {MESES[mes - 1]} de {ano}
-            </p>
-            <button onClick={proximoMes} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
-              <ChevronRight size={20} className="text-gray-600" />
-            </button>
+          <div className="flex gap-2 mb-4">
+            {(['dia', 'mes', 'intervalo'] as ModoPeriodo[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setModoPeriodo(m)}
+                className={`px-3 py-1.5 rounded-full text-sm border ${
+                  modoPeriodo === m ? 'bg-gray-800 text-white border-transparent font-semibold' : 'bg-white border-gray-200 text-gray-500'
+                }`}
+              >
+                {MODO_LABEL[m]}
+              </button>
+            ))}
           </div>
+
+          {modoPeriodo === 'mes' && (
+            <div className="flex items-center justify-center gap-4 mb-6">
+              <button onClick={mesAnterior} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                <ChevronLeft size={20} className="text-gray-600" />
+              </button>
+              <p className="text-lg font-semibold text-gray-800 min-w-[180px] text-center">{periodo.titulo}</p>
+              <button onClick={proximoMes} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                <ChevronRight size={20} className="text-gray-600" />
+              </button>
+            </div>
+          )}
+
+          {modoPeriodo === 'dia' && (
+            <div className="flex items-center justify-center gap-3 mb-6">
+              <button onClick={diaAnterior} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                <ChevronLeft size={20} className="text-gray-600" />
+              </button>
+              <input
+                type="date"
+                value={dataUnica}
+                onChange={(e) => setDataUnica(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <button onClick={proximoDia} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                <ChevronRight size={20} className="text-gray-600" />
+              </button>
+            </div>
+          )}
+
+          {modoPeriodo === 'intervalo' && (
+            <div className="mb-6">
+              <div className="grid grid-cols-2 gap-3 mb-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">De</label>
+                  <input
+                    type="date"
+                    value={dataInicioIntervalo}
+                    onChange={(e) => setDataInicioIntervalo(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Até</label>
+                  <input
+                    type="date"
+                    value={dataFimIntervalo}
+                    onChange={(e) => setDataFimIntervalo(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              {!intervaloValido && (
+                <p className="text-xs text-red-600">A data final precisa ser igual ou depois da data inicial.</p>
+              )}
+              {intervaloValido && intervaloLongo && (
+                <p className="text-xs text-amber-600">Período longo ({diasNoIntervalo} dias) — a busca pode demorar um pouco.</p>
+              )}
+            </div>
+          )}
 
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">{erro}</div>}
 
-          {loading ? (
+          {!intervaloValido ? null : loading ? (
             <div className="flex items-center justify-center py-12 gap-2 text-gray-400">
               <Loader size={20} className="animate-spin" /> Carregando...
             </div>
@@ -156,12 +268,16 @@ export default function FluxoCaixaPage() {
                 </p>
                 <div className="divide-y divide-gray-100">
                   {dados.entradasPorCategoria.map((c) => (
-                    <div key={c.categoria} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                    <button
+                      key={c.categoria}
+                      onClick={() => setModalDetalhe({ tipo: 'entrada', titulo: c.label, chave: c.categoria })}
+                      className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+                    >
                       <span className="text-gray-600">{c.label}</span>
                       <span className={c.valor > 0 ? 'font-semibold text-gray-800' : 'text-gray-400'}>
                         {formatBRL(c.valor)}
                       </span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -175,10 +291,14 @@ export default function FluxoCaixaPage() {
                 ) : (
                   <div className="divide-y divide-gray-100">
                     {dados.saidasPorGrupoDre.map((g) => (
-                      <div key={g.grupoDre} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                      <button
+                        key={g.grupoDre}
+                        onClick={() => setModalDetalhe({ tipo: 'saida', titulo: g.grupoDre, chave: g.grupoDre })}
+                        className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+                      >
                         <span className="text-gray-600">{g.grupoDre}</span>
                         <span className="font-semibold text-gray-800">{formatBRL(g.valor)}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -193,6 +313,24 @@ export default function FluxoCaixaPage() {
             usuarioId={usuario.id}
             onClose={() => setMostrarNovaReceita(false)}
             onCriada={carregar}
+          />
+        )}
+
+        {modalDetalhe && dados && (
+          <FluxoCaixaDetalheModal
+            tipo={modalDetalhe.tipo}
+            titulo={modalDetalhe.titulo}
+            despesas={
+              modalDetalhe.tipo === 'saida'
+                ? dados.despesasDetalhadas.filter((d) => d.grupoDre === modalDetalhe.chave)
+                : undefined
+            }
+            receitas={
+              modalDetalhe.tipo === 'entrada'
+                ? dados.receitasDetalhadas.filter((r) => r.categoria === (modalDetalhe.chave as CategoriaReceita))
+                : undefined
+            }
+            onClose={() => setModalDetalhe(null)}
           />
         )}
       </div>
