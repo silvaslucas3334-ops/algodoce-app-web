@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import NovaReceitaDinheiroModal from '@/components/NovaReceitaDinheiroModal'
-import { buscarFluxoCaixaMensal, FluxoCaixaMensal } from '@/lib/financeiro-receitas'
+import { buscarFluxoCaixaMensal, FluxoCaixaMensal, VisaoFluxoCaixa } from '@/lib/financeiro-receitas'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { useRouter } from 'next/navigation'
@@ -14,12 +14,20 @@ const MESES = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ]
 
+// Label local — 'consolidado' é uma visão de UI, não um valor real de
+// `unidade` em nenhuma tabela (por isso não entra em UNIDADE_LABEL).
+const VISAO_LABEL: Record<VisaoFluxoCaixa, string> = {
+  loja1: UNIDADE_LABEL.loja1,
+  loja2: UNIDADE_LABEL.loja2,
+  consolidado: 'Consolidado',
+}
+
 export default function FluxoCaixaPage() {
   const { usuario } = useAuth()
   const router = useRouter()
 
   const hoje = new Date()
-  const [unidade, setUnidade] = useState<'loja1' | 'loja2'>('loja1')
+  const [unidade, setUnidade] = useState<VisaoFluxoCaixa>('loja1')
   const [ano, setAno] = useState(hoje.getFullYear())
   const [mes, setMes] = useState(hoje.getMonth() + 1) // 1-based
   const [loading, setLoading] = useState(true)
@@ -74,7 +82,7 @@ export default function FluxoCaixaPage() {
 
         <div className="max-w-3xl mx-auto px-4 py-6">
           <div className="flex gap-2 mb-4">
-            {(['loja1', 'loja2'] as const).map((u) => (
+            {(['loja1', 'loja2', 'consolidado'] as const).map((u) => (
               <button
                 key={u}
                 onClick={() => setUnidade(u)}
@@ -82,7 +90,7 @@ export default function FluxoCaixaPage() {
                   unidade === u ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'
                 }`}
               >
-                {UNIDADE_LABEL[u]}
+                {VISAO_LABEL[u]}
               </button>
             ))}
           </div>
@@ -124,13 +132,23 @@ export default function FluxoCaixaPage() {
                 </div>
               </div>
 
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6 flex items-start gap-2 text-xs text-amber-800">
-                <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-                <span>
-                  Este saldo não inclui despesas de rateio/cozinha (custos compartilhados entre lojas) —
-                  só o que está lançado diretamente nesta unidade.
-                </span>
-              </div>
+              {unidade === 'consolidado' ? (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-6 flex items-start gap-2 text-xs text-blue-800">
+                  <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                  <span>
+                    Visão da empresa toda: soma Paraisópolis + Itajubá + despesas de rateio/cozinha. Em regime de
+                    caixa o rateio não fica de fora — o dinheiro sai de alguma conta de qualquer forma.
+                  </span>
+                </div>
+              ) : (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6 flex items-start gap-2 text-xs text-amber-800">
+                  <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                  <span>
+                    Este saldo não inclui despesas de rateio/cozinha (custos compartilhados entre lojas) — só o
+                    que está lançado diretamente nesta unidade. Veja "Consolidado" pra incluir tudo.
+                  </span>
+                </div>
+              )}
 
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-4">
                 <p className="text-sm font-semibold text-gray-700 px-4 py-3 border-b border-gray-100">
@@ -171,7 +189,7 @@ export default function FluxoCaixaPage() {
 
         {mostrarNovaReceita && usuario && (
           <NovaReceitaDinheiroModal
-            unidadeInicial={unidade}
+            unidadeInicial={unidade === 'consolidado' ? 'loja1' : unidade}
             usuarioId={usuario.id}
             onClose={() => setMostrarNovaReceita(false)}
             onCriada={carregar}

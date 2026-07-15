@@ -88,8 +88,10 @@ export async function criarReceitaManualDinheiro(
   if (error) throw new Error(error.message)
 }
 
+export type VisaoFluxoCaixa = 'loja1' | 'loja2' | 'consolidado'
+
 export interface FluxoCaixaMensal {
-  unidade: 'loja1' | 'loja2'
+  unidade: VisaoFluxoCaixa
   entradasPorCategoria: { categoria: CategoriaReceita; label: string; valor: number }[]
   totalEntradas: number
   saidasPorGrupoDre: { grupoDre: string; valor: number }[]
@@ -100,12 +102,17 @@ export interface FluxoCaixaMensal {
 /**
  * Fluxo de caixa do mês: entradas (financeiro_receitas) x saídas
  * (financeiro_lancamentos pagas, por data_pagamento — é caixa, não
- * competência). unidade exata (loja1/loja2) exclui despesas 'rateio' de
- * propósito — essa fase não aplica a regra de rateio por faturamento
- * (fica pra fase DRE); a tela precisa avisar isso ao usuário.
+ * competência).
+ *
+ * Visão por unidade (loja1/loja2) exclui despesas 'rateio' de propósito —
+ * responde "quanto essa loja gastou/ganhou sozinha", uma pergunta de
+ * competência (a quem pertence o custo). Visão 'consolidado' soma
+ * loja1+loja2+rateio: em regime de caixa, rateio é indiferente — o
+ * dinheiro sai de alguma conta de qualquer forma, então pra saber o
+ * caixa real da empresa como um todo ele PRECISA entrar na soma.
  */
 export async function buscarFluxoCaixaMensal(
-  unidade: 'loja1' | 'loja2',
+  unidade: VisaoFluxoCaixa,
   ano: number,
   mes: number
 ): Promise<FluxoCaixaMensal> {
@@ -113,20 +120,27 @@ export async function buscarFluxoCaixaMensal(
   const dataMin = `${ano}-${pad(mes)}-01`
   const dataMax = `${ano}-${pad(mes)}-${pad(new Date(ano, mes, 0).getDate())}`
 
+  let receitasQuery = supabase
+    .from('financeiro_receitas')
+    .select('categoria, valor')
+    .gte('data', dataMin)
+    .lte('data', dataMax)
+  let despesasQuery = supabase
+    .from('financeiro_lancamentos')
+    .select('valor_total, conta:financeiro_contas(grupo_dre)')
+    .eq('status', 'pago')
+    .gte('data_pagamento', dataMin)
+    .lte('data_pagamento', dataMax)
+  if (unidade !== 'consolidado') {
+    // financeiro_receitas nunca tem unidade='rateio' (receita é sempre de
+    // uma loja específica), então só as saídas precisam desse filtro.
+    receitasQuery = receitasQuery.eq('unidade', unidade)
+    despesasQuery = despesasQuery.eq('unidade', unidade)
+  }
+
   const [{ data: receitas, error: erroReceitas }, { data: despesas, error: erroDespesas }] = await Promise.all([
-    supabase
-      .from('financeiro_receitas')
-      .select('categoria, valor')
-      .eq('unidade', unidade)
-      .gte('data', dataMin)
-      .lte('data', dataMax),
-    supabase
-      .from('financeiro_lancamentos')
-      .select('valor_total, conta:financeiro_contas(grupo_dre)')
-      .eq('unidade', unidade)
-      .eq('status', 'pago')
-      .gte('data_pagamento', dataMin)
-      .lte('data_pagamento', dataMax),
+    receitasQuery,
+    despesasQuery,
   ])
   if (erroReceitas) throw new Error(erroReceitas.message)
   if (erroDespesas) throw new Error(erroDespesas.message)
