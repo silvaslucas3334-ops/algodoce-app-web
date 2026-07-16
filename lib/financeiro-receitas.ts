@@ -17,13 +17,15 @@ export async function categorizarReceita(
   valor: number,
   data: string,
   observacao: string | null,
-  usuarioId: string
+  usuarioId: string,
+  valorBruto?: number
 ): Promise<void> {
   const { error: erroReceita } = await supabase.from('financeiro_receitas').insert({
     unidade,
     categoria,
     data,
     valor,
+    valor_bruto: valorBruto ?? null,
     observacao,
     extrato_transacao_id: transacaoId,
     criado_por: usuarioId,

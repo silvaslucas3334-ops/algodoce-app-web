@@ -147,6 +147,9 @@ CREATE TABLE IF NOT EXISTS financeiro_recorrencias (
   forma_pagamento TEXT CHECK (forma_pagamento IN ('boleto', 'pix', 'cartao_debito', 'dinheiro')),
   unidade TEXT NOT NULL CHECK (unidade IN ('loja1', 'loja2', 'rateio')), -- cozinha entra como rateio (0001), não é entidade própria
   conta_id UUID NOT NULL REFERENCES financeiro_contas(id),
+  -- Quantos meses a competência fica ATRÁS do mês em que o lançamento é
+  -- gerado (salário/aluguel pagos depois de usados = 1). Ver DRE.
+  competencia_deslocamento_meses INT NOT NULL DEFAULT 0 CHECK (competencia_deslocamento_meses BETWEEN 0 AND 2),
   ativa BOOLEAN NOT NULL DEFAULT true,
   proxima_data DATE NOT NULL,
   criado_por UUID NOT NULL REFERENCES usuarios(id),
@@ -169,6 +172,10 @@ CREATE TABLE IF NOT EXISTS financeiro_lancamentos (
   data_lancamento DATE NOT NULL,
   data_vencimento DATE NOT NULL,
   data_pagamento DATE,
+  -- A que mês esse lançamento pertence economicamente (regime de
+  -- competência, usado pelo DRE) — distinto de data_lancamento/data_pagamento
+  -- (regime de caixa, usado pelo Fluxo de Caixa). Ver lib/financeiro-dre.ts.
+  data_competencia DATE NOT NULL DEFAULT CURRENT_DATE,
   status TEXT NOT NULL DEFAULT 'aberto' CHECK (status IN ('aberto', 'pago', 'cancelado')),
   forma_pagamento TEXT CHECK (forma_pagamento IN ('boleto', 'pix', 'cartao_debito', 'dinheiro')),
   condicao_pagamento TEXT CHECK (condicao_pagamento IN ('a_vista', 'a_prazo')),
@@ -429,11 +436,12 @@ BEGIN
     SELECT * FROM financeiro_recorrencias WHERE ativa AND proxima_data <= hoje_sp
   LOOP
     INSERT INTO financeiro_lancamentos (
-      tipo, parte_id, descricao, valor_total, data_lancamento, data_vencimento,
+      tipo, parte_id, descricao, valor_total, data_lancamento, data_vencimento, data_competencia,
       status, forma_pagamento, condicao_pagamento, unidade, conta_id,
       recorrencia_id, criado_por
     ) VALUES (
       'despesa', rec.parte_id, rec.descricao, rec.valor, rec.proxima_data, rec.proxima_data,
+      (date_trunc('month', rec.proxima_data) - (rec.competencia_deslocamento_meses || ' months')::interval)::date,
       'aberto', rec.forma_pagamento, 'a_vista', rec.unidade, rec.conta_id,
       rec.id, rec.criado_por
     );
@@ -642,6 +650,11 @@ CREATE TABLE IF NOT EXISTS financeiro_receitas (
   categoria TEXT NOT NULL CHECK (categoria IN ('venda_cartao', 'pix', 'dinheiro', 'repasse_ifood', 'repasse_aiqfome', 'outros')),
   data DATE NOT NULL,
   valor NUMERIC NOT NULL CHECK (valor > 0),
+  -- Opcional. NUNCA substitui `valor` (que continua sendo sempre o
+  -- líquido que bateu no extrato) — só o DRE lê valor_bruto, pra calcular
+  -- a taxa de cartão/app (venda_cartao, repasse_ifood, repasse_aiqfome)
+  -- como diferença, sem nunca virar lançamento em financeiro_lancamentos.
+  valor_bruto NUMERIC CHECK (valor_bruto IS NULL OR valor_bruto >= valor),
   observacao TEXT,
   extrato_transacao_id UUID REFERENCES financeiro_extrato_transacoes(id),
   criado_por UUID NOT NULL REFERENCES usuarios(id),

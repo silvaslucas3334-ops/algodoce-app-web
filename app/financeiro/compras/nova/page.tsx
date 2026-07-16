@@ -203,6 +203,7 @@ function LancarNotaForm() {
         valor_total: i === nParcelas - 1 ? valorUltima : valorParcela,
         numero_documento: numeroNota.trim() || null,
         data_lancamento: dataCompra,
+        data_competencia: dataCompra,
         data_vencimento: i === 0 ? dataVencimento : somarMeses(dataVencimento, i),
         data_pagamento: jaPago ? dataPagamento : null,
         status: jaPago ? 'pago' : 'aberto',

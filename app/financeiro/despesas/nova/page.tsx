@@ -46,6 +46,7 @@ function NovaDespesaForm() {
   const [dataVencimento, setDataVencimento] = useState(hojeISO())
   const [parcelas, setParcelas] = useState(1)
   const [recorrente, setRecorrente] = useState(false)
+  const [competenciaDeslocamentoMeses, setCompetenciaDeslocamentoMeses] = useState(0)
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -124,6 +125,7 @@ function NovaDespesaForm() {
             unidade,
             conta_id: contaId,
             ativa: true,
+            competencia_deslocamento_meses: competenciaDeslocamentoMeses,
             // O lançamento deste mês é criado abaixo; a recorrência começa no mês seguinte.
             proxima_data: `${mesV === 12 ? anoV + 1 : anoV}-${String((mesV % 12) + 1).padStart(2, '0')}-${String(diaVencimento).padStart(2, '0')}`,
             criado_por: usuario.id,
@@ -146,6 +148,7 @@ function NovaDespesaForm() {
         valor_total: i === nParcelas - 1 ? valorUltima : valorParcela,
         numero_documento: numeroDocumento.trim() || null,
         data_lancamento: dataLancamento,
+        data_competencia: dataLancamento,
         data_vencimento: i === 0 ? dataVencimento : somarMeses(dataVencimento, i),
         data_pagamento: jaPago ? dataPagamento : null,
         status: jaPago ? 'pago' : 'aberto',
@@ -408,6 +411,35 @@ function NovaDespesaForm() {
                   </span>
                 </span>
               </label>
+            )}
+
+            {podeRecorrencia && recorrente && (
+              <div className="pl-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Competência</label>
+                <div className="flex gap-2">
+                  {[
+                    { valor: 0, label: 'Mesmo mês' },
+                    { valor: 1, label: 'Mês anterior' },
+                    { valor: 2, label: '2 meses antes' },
+                  ].map((op) => (
+                    <button
+                      key={op.valor}
+                      type="button"
+                      onClick={() => setCompetenciaDeslocamentoMeses(op.valor)}
+                      className={`flex-1 px-3 py-2 rounded-lg border-2 text-xs font-semibold ${
+                        competenciaDeslocamentoMeses === op.valor
+                          ? 'border-purple-500 bg-purple-500 text-white'
+                          : 'border-gray-200 bg-white text-gray-700'
+                      }`}
+                    >
+                      {op.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  Ex: salário/aluguel de julho pago em agosto = "Mês anterior". Afeta só o DRE, não o fluxo de caixa.
+                </p>
+              </div>
             )}
           </div>
 

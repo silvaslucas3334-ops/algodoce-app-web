@@ -226,9 +226,10 @@ export interface FinanceiroLancamento {
   descricao: string
   valor_total: number
   numero_documento?: string
-  data_lancamento: string // data da compra/competência
+  data_lancamento: string
   data_vencimento: string
   data_pagamento?: string
+  data_competencia: string // regime de competência (DRE) — distinto de data_lancamento/data_pagamento (regime de caixa)
   status: StatusFinanceiro
   forma_pagamento?: FormaPagamento
   condicao_pagamento?: CondicaoPagamento
@@ -273,6 +274,7 @@ export interface FinanceiroRecorrencia {
   unidade: UnidadeFinanceiro
   conta_id: string
   conta?: FinanceiroConta
+  competencia_deslocamento_meses: number // 0..2 — meses que a competência fica atrás do mês gerado (salário/aluguel pagos depois de usados = 1)
   ativa: boolean
   proxima_data: string
   criado_por: string
@@ -305,7 +307,8 @@ export interface FinanceiroReceita {
   unidade: 'loja1' | 'loja2'
   categoria: CategoriaReceita
   data: string
-  valor: number
+  valor: number // sempre o líquido que bateu no extrato
+  valor_bruto?: number // opcional — só o DRE usa, pra calcular a taxa de cartão/app como diferença
   observacao?: string
   extrato_transacao_id?: string // ausente só para categoria='dinheiro'
   criado_por: string

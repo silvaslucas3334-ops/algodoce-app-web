@@ -25,17 +25,35 @@ const CATEGORIAS: Exclude<CategoriaReceita, 'dinheiro'>[] = [
   'outros',
 ]
 
+// Categorias em que o valor que cai no banco é líquido de uma taxa
+// (cartão/plataforma) — só nelas faz sentido pedir o valor bruto, pro DRE
+// calcular a taxa como diferença.
+const CATEGORIAS_COM_TAXA: Exclude<CategoriaReceita, 'dinheiro'>[] = ['venda_cartao', 'repasse_ifood', 'repasse_aiqfome']
+
 export default function CategorizarReceitaModal({ transacao, unidade, usuarioId, onClose, onResolvido }: Props) {
   const [categoria, setCategoria] = useState<Exclude<CategoriaReceita, 'dinheiro'> | ''>('')
+  const [valorBruto, setValorBruto] = useState('')
   const [processando, setProcessando] = useState(false)
   const [erro, setErro] = useState('')
 
+  const valorBrutoNum = valorBruto ? Number(valorBruto) : null
+  const valorBrutoValido = valorBrutoNum == null || valorBrutoNum >= transacao.valor
+
   async function confirmar() {
-    if (!categoria) return
+    if (!categoria || !valorBrutoValido) return
     setProcessando(true)
     setErro('')
     try {
-      await categorizarReceita(transacao.id, unidade, categoria, transacao.valor, transacao.data, null, usuarioId)
+      await categorizarReceita(
+        transacao.id,
+        unidade,
+        categoria,
+        transacao.valor,
+        transacao.data,
+        null,
+        usuarioId,
+        valorBrutoNum ?? undefined
+      )
       onResolvido()
       onClose()
     } catch (err: any) {
@@ -102,9 +120,30 @@ export default function CategorizarReceitaModal({ transacao, unidade, usuarioId,
           })}
         </div>
 
+        {categoria && CATEGORIAS_COM_TAXA.includes(categoria) && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Valor bruto da venda (opcional)</label>
+            <input
+              type="number"
+              step="0.01"
+              min={transacao.valor}
+              value={valorBruto}
+              onChange={(e) => setValorBruto(e.target.value)}
+              placeholder={formatBRL(transacao.valor)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              {valorBruto
+                ? `Taxa retida: ${formatBRL(Math.max(0, (valorBrutoNum || 0) - transacao.valor))}`
+                : 'Se preenchido, o DRE calcula a taxa de cartão/plataforma como a diferença. Deixe em branco se não souber.'}
+            </p>
+            {!valorBrutoValido && <p className="text-xs text-red-600 mt-1">O valor bruto não pode ser menor que o valor recebido ({formatBRL(transacao.valor)}).</p>}
+          </div>
+        )}
+
         <button
           onClick={confirmar}
-          disabled={processando || !categoria}
+          disabled={processando || !categoria || !valorBrutoValido}
           className="w-full bg-green-600 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2 mb-3"
         >
           {processando ? <Loader size={16} className="animate-spin" /> : <CheckCircle size={16} />} Confirmar
