@@ -75,7 +75,7 @@ ON CONFLICT (codigo) DO NOTHING;
 
 INSERT INTO financeiro_contas (codigo, nome, centro_custo_id, grupo_dre, aplicavel_a) VALUES
   ('1001', 'MATÉRIA-PRIMA',              (SELECT id FROM financeiro_centros_custo WHERE codigo='1000'), 'CMV', 'compras_insumos'),
-  ('1002', 'EMBALAGEM',                  (SELECT id FROM financeiro_centros_custo WHERE codigo='1000'), 'CMV', 'compras_insumos'),
+  ('1002', 'EMBALAGEM',                  (SELECT id FROM financeiro_centros_custo WHERE codigo='1000'), 'Embalagens', 'compras_insumos'),
   ('1003', 'MÃO DE OBRA',                (SELECT id FROM financeiro_centros_custo WHERE codigo='1000'), 'Custos com Pessoal', 'despesas_gerais'),
   ('1004', 'IMPOSTOS DE COMPRA',         (SELECT id FROM financeiro_centros_custo WHERE codigo='1000'), 'Impostos', 'compras_insumos'),
   ('1005', 'ENCARGOS TRABALHISTAS',      (SELECT id FROM financeiro_centros_custo WHERE codigo='1000'), 'Custos com Pessoal', 'despesas_gerais'),
