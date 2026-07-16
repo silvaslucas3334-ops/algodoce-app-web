@@ -98,10 +98,13 @@ ON CONFLICT (codigo) DO NOTHING;
 -- ============================================================
 -- 3. financeiro_materias_primas (cadastro controlado, sem texto livre)
 -- ============================================================
+CREATE SEQUENCE IF NOT EXISTS financeiro_mp_codigo_seq;
+
 CREATE TABLE IF NOT EXISTS financeiro_materias_primas (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  codigo TEXT UNIQUE NOT NULL DEFAULT ('MP-' || LPAD(nextval('financeiro_mp_codigo_seq')::text, 4, '0')),
   nome TEXT NOT NULL UNIQUE, -- elimina "Limão Taiti" vs "Limão kg" vs "Limão"
-  unidade_medida TEXT NOT NULL,  -- unidade da ficha técnica futura, ex: 'g', 'ml', 'un'
+  unidade_medida TEXT NOT NULL,  -- unidade da ficha técnica (financeiro_pre_preparo_itens/financeiro_produto_final_itens), ex: 'g', 'ml', 'un'
   unidade_compra TEXT NOT NULL,  -- unidade usual de compra, ex: 'kg', 'caixa', 'un'
   fator_conversao NUMERIC NOT NULL CHECK (fator_conversao > 0), -- unidade_medida por 1 unidade_compra (1kg=1000g -> 1000)
   conta_id UUID REFERENCES financeiro_contas(id), -- classificação contábil padrão do item; itens da nota herdam
@@ -110,6 +113,8 @@ CREATE TABLE IF NOT EXISTS financeiro_materias_primas (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER SEQUENCE financeiro_mp_codigo_seq OWNED BY financeiro_materias_primas.codigo;
+GRANT USAGE ON SEQUENCE financeiro_mp_codigo_seq TO authenticated;
 
 -- ============================================================
 -- 4. financeiro_extrato_transacoes (checkpoint OFX + conciliação)
@@ -852,3 +857,144 @@ DROP POLICY IF EXISTS financeiro_cotacao_precos_delete_blocked ON financeiro_cot
 CREATE POLICY financeiro_cotacao_precos_delete_blocked ON financeiro_cotacao_precos FOR DELETE USING (false);
 
 SELECT tablename, rowsecurity FROM pg_tables WHERE tablename LIKE 'financeiro_cotacao%';
+
+-- ============================================================
+-- 14. CMV / Ficha Técnica — matéria-prima → pré-preparo → produto final
+--
+-- Sem aninhamento (pré-preparo só usa matéria-prima — garantido pela
+-- estrutura: financeiro_pre_preparo_itens nem tem coluna pra apontar pra
+-- outro pré-preparo). Produto final combina matéria-prima e/ou
+-- pré-preparo livremente, com rendimento_porcoes pra venda porcionada.
+--
+-- RLS admin-only até pra SELECT — dado de margem/custo, mesmo
+-- tratamento de financeiro_cotacoes. As tabelas _itens não têm policy de
+-- INSERT/UPDATE/DELETE — ficha técnica precisa ser editável (trocar
+-- ingrediente, remover linha) mas DELETE é bloqueado em toda tabela
+-- deste schema por design, então a escrita passa por uma função
+-- SECURITY DEFINER que substitui o conjunto inteiro de linhas de uma vez
+-- (mesmo padrão de financeiro_pdv_substituir_periodo).
+-- ============================================================
+
+CREATE SEQUENCE IF NOT EXISTS financeiro_pp_codigo_seq;
+GRANT USAGE ON SEQUENCE financeiro_pp_codigo_seq TO authenticated;
+
+CREATE TABLE IF NOT EXISTS financeiro_pre_preparos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  codigo TEXT UNIQUE NOT NULL DEFAULT ('PP-' || LPAD(nextval('financeiro_pp_codigo_seq')::text, 4, '0')),
+  nome TEXT NOT NULL UNIQUE,
+  unidade_medida TEXT NOT NULL, -- unidade do rendimento e do consumo quando usado num produto final, ex: 'g'
+  rendimento_quantidade NUMERIC NOT NULL CHECK (rendimento_quantidade > 0), -- quanto a receita rende, em unidade_medida
+  descricao TEXT,
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  criado_por UUID NOT NULL REFERENCES usuarios(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER SEQUENCE financeiro_pp_codigo_seq OWNED BY financeiro_pre_preparos.codigo;
+
+CREATE TABLE IF NOT EXISTS financeiro_pre_preparo_itens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  pre_preparo_id UUID NOT NULL REFERENCES financeiro_pre_preparos(id) ON DELETE CASCADE,
+  materia_prima_id UUID NOT NULL REFERENCES financeiro_materias_primas(id) ON DELETE RESTRICT,
+  quantidade NUMERIC NOT NULL CHECK (quantidade > 0), -- na unidade_medida da matéria-prima
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (pre_preparo_id, materia_prima_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fppi_pre_preparo ON financeiro_pre_preparo_itens(pre_preparo_id);
+CREATE INDEX IF NOT EXISTS idx_fppi_materia_prima ON financeiro_pre_preparo_itens(materia_prima_id);
+
+CREATE TABLE IF NOT EXISTS financeiro_produtos_finais (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome TEXT NOT NULL UNIQUE,
+  codigo_pdv_loja1 TEXT, -- código do cadastro de produtos do PDV (Paraisópolis) — manual por enquanto
+  codigo_pdv_loja2 TEXT, -- idem, Itajubá — cada loja numera seu PDV de forma independente
+  rendimento_porcoes INT NOT NULL DEFAULT 1 CHECK (rendimento_porcoes > 0),
+  descricao TEXT,
+  ativo BOOLEAN NOT NULL DEFAULT true,
+  criado_por UUID NOT NULL REFERENCES usuarios(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fpf_codigo_pdv_loja1 ON financeiro_produtos_finais(codigo_pdv_loja1) WHERE codigo_pdv_loja1 IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fpf_codigo_pdv_loja2 ON financeiro_produtos_finais(codigo_pdv_loja2) WHERE codigo_pdv_loja2 IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS financeiro_produto_final_itens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  produto_final_id UUID NOT NULL REFERENCES financeiro_produtos_finais(id) ON DELETE CASCADE,
+  materia_prima_id UUID REFERENCES financeiro_materias_primas(id) ON DELETE RESTRICT,
+  pre_preparo_id UUID REFERENCES financeiro_pre_preparos(id) ON DELETE RESTRICT,
+  quantidade NUMERIC NOT NULL CHECK (quantidade > 0),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CHECK (num_nonnulls(materia_prima_id, pre_preparo_id) = 1)
+);
+CREATE INDEX IF NOT EXISTS idx_fpfi_produto_final ON financeiro_produto_final_itens(produto_final_id);
+CREATE INDEX IF NOT EXISTS idx_fpfi_materia_prima ON financeiro_produto_final_itens(materia_prima_id);
+CREATE INDEX IF NOT EXISTS idx_fpfi_pre_preparo ON financeiro_produto_final_itens(pre_preparo_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fpfi_unico_mp ON financeiro_produto_final_itens(produto_final_id, materia_prima_id) WHERE materia_prima_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fpfi_unico_pp ON financeiro_produto_final_itens(produto_final_id, pre_preparo_id) WHERE pre_preparo_id IS NOT NULL;
+
+ALTER TABLE financeiro_pre_preparos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE financeiro_pre_preparo_itens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE financeiro_produtos_finais ENABLE ROW LEVEL SECURITY;
+ALTER TABLE financeiro_produto_final_itens ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS financeiro_pre_preparos_select ON financeiro_pre_preparos;
+CREATE POLICY financeiro_pre_preparos_select ON financeiro_pre_preparos FOR SELECT TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+DROP POLICY IF EXISTS financeiro_pre_preparos_insert ON financeiro_pre_preparos;
+CREATE POLICY financeiro_pre_preparos_insert ON financeiro_pre_preparos FOR INSERT TO authenticated
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin' AND criado_por = auth.uid());
+DROP POLICY IF EXISTS financeiro_pre_preparos_update ON financeiro_pre_preparos;
+CREATE POLICY financeiro_pre_preparos_update ON financeiro_pre_preparos FOR UPDATE TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+DROP POLICY IF EXISTS financeiro_pre_preparos_delete_blocked ON financeiro_pre_preparos;
+CREATE POLICY financeiro_pre_preparos_delete_blocked ON financeiro_pre_preparos FOR DELETE USING (false);
+
+DROP POLICY IF EXISTS financeiro_produtos_finais_select ON financeiro_produtos_finais;
+CREATE POLICY financeiro_produtos_finais_select ON financeiro_produtos_finais FOR SELECT TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+DROP POLICY IF EXISTS financeiro_produtos_finais_insert ON financeiro_produtos_finais;
+CREATE POLICY financeiro_produtos_finais_insert ON financeiro_produtos_finais FOR INSERT TO authenticated
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin' AND criado_por = auth.uid());
+DROP POLICY IF EXISTS financeiro_produtos_finais_update ON financeiro_produtos_finais;
+CREATE POLICY financeiro_produtos_finais_update ON financeiro_produtos_finais FOR UPDATE TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+DROP POLICY IF EXISTS financeiro_produtos_finais_delete_blocked ON financeiro_produtos_finais;
+CREATE POLICY financeiro_produtos_finais_delete_blocked ON financeiro_produtos_finais FOR DELETE USING (false);
+
+DROP POLICY IF EXISTS financeiro_pre_preparo_itens_select ON financeiro_pre_preparo_itens;
+CREATE POLICY financeiro_pre_preparo_itens_select ON financeiro_pre_preparo_itens FOR SELECT TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+DROP POLICY IF EXISTS financeiro_produto_final_itens_select ON financeiro_produto_final_itens;
+CREATE POLICY financeiro_produto_final_itens_select ON financeiro_produto_final_itens FOR SELECT TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+
+CREATE OR REPLACE FUNCTION financeiro_pre_preparo_salvar_itens(p_pre_preparo_id UUID, p_itens JSONB) RETURNS void AS $$
+BEGIN
+  IF (SELECT role FROM usuarios WHERE id = auth.uid()) IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'apenas admin pode editar receitas';
+  END IF;
+  DELETE FROM financeiro_pre_preparo_itens WHERE pre_preparo_id = p_pre_preparo_id;
+  INSERT INTO financeiro_pre_preparo_itens (pre_preparo_id, materia_prima_id, quantidade)
+  SELECT p_pre_preparo_id, (i->>'materia_prima_id')::UUID, (i->>'quantidade')::NUMERIC
+  FROM jsonb_array_elements(p_itens) AS i;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION financeiro_pre_preparo_salvar_itens TO authenticated;
+
+CREATE OR REPLACE FUNCTION financeiro_produto_final_salvar_itens(p_produto_final_id UUID, p_itens JSONB) RETURNS void AS $$
+BEGIN
+  IF (SELECT role FROM usuarios WHERE id = auth.uid()) IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'apenas admin pode editar receitas';
+  END IF;
+  DELETE FROM financeiro_produto_final_itens WHERE produto_final_id = p_produto_final_id;
+  INSERT INTO financeiro_produto_final_itens (produto_final_id, materia_prima_id, pre_preparo_id, quantidade)
+  SELECT p_produto_final_id, (i->>'materia_prima_id')::UUID, (i->>'pre_preparo_id')::UUID, (i->>'quantidade')::NUMERIC
+  FROM jsonb_array_elements(p_itens) AS i;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+GRANT EXECUTE ON FUNCTION financeiro_produto_final_salvar_itens TO authenticated;
+
+SELECT tablename, rowsecurity FROM pg_tables WHERE tablename LIKE 'financeiro_pre_preparo%' OR tablename LIKE 'financeiro_produto_final%';

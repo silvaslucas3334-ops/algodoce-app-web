@@ -203,6 +203,7 @@ export interface FinanceiroConta {
 
 export interface FinanceiroMateriaPrima {
   id: string
+  codigo: string // auto-gerado (MP-0001...), não editável
   nome: string
   unidade_medida: string
   unidade_compra: string
@@ -213,6 +214,58 @@ export interface FinanceiroMateriaPrima {
   ativo: boolean
   created_at: string
   updated_at: string
+}
+
+// CMV / Ficha Técnica — hierarquia matéria-prima → pré-preparo → produto
+// final. Sem aninhamento: pré-preparo só usa matéria-prima (garantido
+// pela estrutura, FinanceiroPrePreparoItem não referencia outro
+// pré-preparo). Produto final combina matéria-prima e/ou pré-preparo.
+export interface FinanceiroPrePreparo {
+  id: string
+  codigo: string // auto-gerado (PP-0001...), não editável
+  nome: string
+  unidade_medida: string // unidade do rendimento e do consumo quando usado num produto final
+  rendimento_quantidade: number // quanto a receita rende, em unidade_medida
+  descricao?: string
+  ativo: boolean
+  criado_por: string
+  created_at: string
+  updated_at: string
+  itens?: FinanceiroPrePreparoItem[]
+}
+
+export interface FinanceiroPrePreparoItem {
+  id: string
+  pre_preparo_id: string
+  materia_prima_id: string
+  materia_prima?: FinanceiroMateriaPrima
+  quantidade: number // na unidade_medida da matéria-prima
+  created_at: string
+}
+
+export interface FinanceiroProdutoFinal {
+  id: string
+  nome: string
+  codigo_pdv_loja1?: string // código do cadastro de produtos do PDV (Paraisópolis) — manual, prepara terreno pra integração futura
+  codigo_pdv_loja2?: string // idem, Itajubá
+  rendimento_porcoes: number // 1 = vendido inteiro; N = custo total dividido por N porções
+  descricao?: string
+  ativo: boolean
+  criado_por: string
+  created_at: string
+  updated_at: string
+  itens?: FinanceiroProdutoFinalItem[]
+}
+
+export interface FinanceiroProdutoFinalItem {
+  id: string
+  produto_final_id: string
+  materia_prima_id?: string // exatamente um entre materia_prima_id/pre_preparo_id
+  materia_prima?: FinanceiroMateriaPrima
+  pre_preparo_id?: string
+  pre_preparo?: FinanceiroPrePreparo
+  quantidade: number
+  created_at: string
 }
 
 // Tabela ÚNICA de lançamentos financeiros: despesa manual OU nota de compra

@@ -17,6 +17,7 @@ export default function DetalheMateriaPrimaPage() {
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [custosMensais, setCustosMensais] = useState<FinanceiroCustoMedioMensal[]>([])
   const [custosPorFornecedor, setCustosPorFornecedor] = useState<FinanceiroCustoPorFornecedor[]>([])
+  const [unidadeTravada, setUnidadeTravada] = useState(false)
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -37,7 +38,7 @@ export default function DetalheMateriaPrimaPage() {
 
   async function carregar() {
     setLoading(true)
-    const [{ data: mp }, { data: comprasData }, { data: custosData }, { data: custosFornecedorData }] = await Promise.all([
+    const [{ data: mp }, { data: comprasData }, { data: custosData }, { data: custosFornecedorData }, { count: usoEmPrePreparo }, { count: usoEmProdutoFinal }] = await Promise.all([
       supabase.from('financeiro_materias_primas').select('*').eq('id', materiaId).single(),
       supabase
         .from('financeiro_lancamento_itens')
@@ -55,11 +56,14 @@ export default function DetalheMateriaPrimaPage() {
         .select('*')
         .eq('materia_prima_id', materiaId)
         .order('custo_medio_por_unidade_medida', { ascending: true }),
+      supabase.from('financeiro_pre_preparo_itens').select('id', { count: 'exact', head: true }).eq('materia_prima_id', materiaId),
+      supabase.from('financeiro_produto_final_itens').select('id', { count: 'exact', head: true }).eq('materia_prima_id', materiaId),
     ])
     setMateria(mp)
     setCompras((comprasData || []).filter((c: any) => c.lancamento?.status !== 'cancelado'))
     setCustosMensais(custosData || [])
     setCustosPorFornecedor(custosFornecedorData || [])
+    setUnidadeTravada((usoEmPrePreparo || 0) > 0 || (usoEmProdutoFinal || 0) > 0)
     setLoading(false)
   }
 
@@ -115,7 +119,7 @@ export default function DetalheMateriaPrimaPage() {
             <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
               <ArrowLeft size={22} />
             </button>
-            <h1 className="text-xl font-bold text-gray-800">{materia.nome}</h1>
+            <h1 className="text-xl font-bold text-gray-800">{materia.codigo} · {materia.nome}</h1>
           </div>
         </div>
 
@@ -136,14 +140,25 @@ export default function DetalheMateriaPrimaPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Unidade da ficha técnica</label>
-                <input
-                  type="text"
-                  value={materia.unidade_medida}
-                  onChange={(e) => setMateria({ ...materia, unidade_medida: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-                />
+                {unidadeTravada ? (
+                  <div className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-500">
+                    {materia.unidade_medida}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={materia.unidade_medida}
+                    onChange={(e) => setMateria({ ...materia, unidade_medida: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                  />
+                )}
               </div>
             </div>
+            {unidadeTravada && (
+              <p className="text-xs text-amber-600 -mt-2">
+                Usada em pré-preparo(s) e/ou produto(s) final — trocar agora reinterpretaria as quantidades já cadastradas nas receitas.
+              </p>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Fator de conversão</label>
               <input

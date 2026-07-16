@@ -105,7 +105,7 @@ export default function NovaMateriaPrimaPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
                   placeholder="g, ml, un..."
                 />
-                <p className="text-xs text-gray-400 mt-1">Usada na receita (fase futura)</p>
+                <p className="text-xs text-gray-400 mt-1">Usada nas receitas de pré-preparo e produto final</p>
               </div>
             </div>
 

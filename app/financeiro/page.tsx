@@ -3,7 +3,7 @@ import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Receipt, ShoppingCart, Users, Package, BookOpen, Landmark, FileSpreadsheet, Wallet, ClipboardList, TrendingUp } from 'lucide-react'
+import { ArrowLeft, Receipt, ShoppingCart, Users, Package, BookOpen, Landmark, FileSpreadsheet, Wallet, ClipboardList, TrendingUp, Cake } from 'lucide-react'
 
 export default function FinanceiroHubPage() {
   const { usuario } = useAuth()
@@ -19,6 +19,7 @@ export default function FinanceiroHubPage() {
     { href: '/financeiro/pdv', label: 'Import do PDV', desc: 'Importar vendas do PDV e gerar relatório de faturamento', icon: FileSpreadsheet, roles: ['admin'] },
     { href: '/financeiro/fluxo-caixa', label: 'Fluxo de Caixa', desc: 'Categorizar entradas do extrato e ver o saldo do mês por loja', icon: Wallet, roles: ['admin'] },
     { href: '/financeiro/dre', label: 'DRE', desc: 'Resultado do mês por competência, com rateio e custo de insumos', icon: TrendingUp, roles: ['admin'] },
+    { href: '/financeiro/ficha-tecnica', label: 'Ficha Técnica / CMV', desc: 'Pré-preparados e produtos finais, com custo hierarquizado por receita', icon: Cake, roles: ['admin'] },
     { href: '/financeiro/cotacoes', label: 'Cotações', desc: 'Comparar preços de fornecedores antes de comprar', icon: ClipboardList, roles: ['admin'] },
   ]
 

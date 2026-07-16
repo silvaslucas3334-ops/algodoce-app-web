@@ -87,7 +87,7 @@ export default function MateriasPrimasPage() {
                   <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-gray-200 cursor-pointer transition-all">
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className="font-semibold text-gray-800">{m.nome}</p>
+                        <p className="font-semibold text-gray-800">{m.codigo} · {m.nome}</p>
                         <p className="text-xs text-gray-500 mt-0.5">
                           Compra em {m.unidade_compra} · usa em {m.unidade_medida} (1 {m.unidade_compra} = {m.fator_conversao} {m.unidade_medida})
                         </p>
