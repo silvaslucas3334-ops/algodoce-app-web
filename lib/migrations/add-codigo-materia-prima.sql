@@ -27,8 +27,15 @@ SET codigo = 'MP-' || LPAD(numerados.rn::text, 4, '0')
 FROM numerados WHERE mp.id = numerados.id;
 
 -- Garante que a sequence continua depois do backfill (senão o próximo
--- INSERT tentaria gerar um código que o backfill já usou).
-SELECT setval('financeiro_mp_codigo_seq', (SELECT count(*) FROM financeiro_materias_primas));
+-- INSERT tentaria gerar um código que o backfill já usou). setval(...,0)
+-- é erro em Postgres (mínimo da sequence é 1) — se a tabela estiver
+-- vazia, deixa a sequence no estado inicial (is_called=false) em vez de
+-- forçar um valor inválido.
+SELECT setval(
+  'financeiro_mp_codigo_seq',
+  GREATEST((SELECT count(*) FROM financeiro_materias_primas), 1),
+  (SELECT count(*) FROM financeiro_materias_primas) > 0
+);
 
 ALTER TABLE financeiro_materias_primas ALTER COLUMN codigo SET NOT NULL;
 GRANT USAGE ON SEQUENCE financeiro_mp_codigo_seq TO authenticated;
