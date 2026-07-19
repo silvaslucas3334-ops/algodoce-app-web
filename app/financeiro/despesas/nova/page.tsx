@@ -174,12 +174,12 @@ function NovaDespesaForm() {
           setErro(
             'Lançamento criado, mas falhou ao marcar a transação do extrato como conciliada: ' +
               (erroVinculo?.message || 'desconhecido') +
-              '. Concilie manualmente na tela de Extrato.'
+              '. Concilie manualmente na aba Conciliar Extrato, dentro do Fluxo de Caixa.'
           )
           setSalvando(false)
           return
         }
-        router.push('/financeiro/extrato')
+        router.push('/financeiro/fluxo-caixa?tab=extrato')
         return
       }
 

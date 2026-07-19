@@ -368,6 +368,34 @@ export interface FinanceiroReceita {
   criado_em: string
 }
 
+// Orçamento do mês — meta de venda + saldo inicial (só loja1/loja2) e
+// previsão manual de despesas, base da visão mensal do Fluxo de Caixa.
+export interface FinanceiroOrcamento {
+  id: string
+  ano: number
+  mes: number
+  unidade: UnidadeFinanceiro
+  valor_meta_venda?: number // null/undefined pra rateio, ou loja ainda sem meta cadastrada
+  saldo_inicial?: number // null/undefined = "não informado", nunca 0 por omissão
+  criado_por: string
+  created_at: string
+  updated_at: string
+  itens?: FinanceiroOrcamentoItem[]
+}
+
+export interface FinanceiroOrcamentoItem {
+  id: string
+  orcamento_id: string
+  tipo: TipoLancamento // 'despesa' → eixo conta_id (fixo); 'compra_insumos' → eixo parte_id (variável)
+  parte_id?: string
+  parte?: FinanceiroParte
+  conta_id?: string
+  conta?: FinanceiroConta
+  valor_previsto: number
+  observacao?: string
+  created_at: string
+}
+
 export interface FinanceiroCustoMedioMensal {
   materia_prima_id: string
   mes_referencia: string
