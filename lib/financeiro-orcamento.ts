@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
-import { FinanceiroOrcamento, FinanceiroRecorrencia, TipoLancamento, UnidadeFinanceiro } from './types'
+import { FinanceiroOrcamento, FinanceiroRecorrencia, TipoLancamento, UnidadeOrcamento } from './types'
 
-export async function buscarOrcamento(ano: number, mes: number, unidade: UnidadeFinanceiro): Promise<FinanceiroOrcamento | null> {
+export async function buscarOrcamento(ano: number, mes: number, unidade: UnidadeOrcamento): Promise<FinanceiroOrcamento | null> {
   const { data, error } = await supabase
     .from('financeiro_orcamentos')
     .select('*, itens:financeiro_orcamento_itens(*, parte:financeiro_partes(nome), conta:financeiro_contas(codigo, nome, grupo_dre))')
@@ -20,7 +20,7 @@ export async function buscarOrcamento(ano: number, mes: number, unidade: Unidade
 export async function salvarOrcamento(
   ano: number,
   mes: number,
-  unidade: UnidadeFinanceiro,
+  unidade: UnidadeOrcamento,
   dados: { valor_meta_venda: number | null; saldo_inicial: number | null },
   usuarioId: string
 ): Promise<string> {
@@ -66,14 +66,15 @@ export async function salvarItensOrcamento(orcamentoId: string, itens: ItemOrcam
 }
 
 /**
- * Recorrências ativas da unidade — seção "já garantido pela recorrência"
- * do orçamento, só leitura (não duplica como item manual).
+ * Recorrências ativas da empresa inteira (loja1+loja2+rateio) — seção "já
+ * garantido pela recorrência" do orçamento, só leitura (não duplica como
+ * item manual). Despesas orçadas são consolidadas, sem distinção de
+ * unidade, então a lista também é.
  */
-export async function buscarRecorrenciasAtivas(unidade: UnidadeFinanceiro): Promise<FinanceiroRecorrencia[]> {
+export async function buscarRecorrenciasAtivas(): Promise<FinanceiroRecorrencia[]> {
   const { data, error } = await supabase
     .from('financeiro_recorrencias')
     .select('*, parte:financeiro_partes(nome), conta:financeiro_contas(codigo, nome)')
-    .eq('unidade', unidade)
     .eq('ativa', true)
     .order('dia_vencimento')
   if (error) throw new Error(error.message)

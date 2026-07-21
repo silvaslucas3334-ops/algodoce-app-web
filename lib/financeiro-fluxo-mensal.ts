@@ -413,11 +413,10 @@ export async function buscarFluxoMensal(
   })
 
   // --- Comparação orçado x realizado (projeção do mês inteiro) -----------------
-  const orcamentosDespesa =
-    unidade === 'consolidado'
-      ? await Promise.all((['loja1', 'loja2', 'rateio'] as const).map((u) => buscarOrcamento(ano, mes, u)))
-      : [await buscarOrcamento(ano, mes, unidade)]
-  const todosItens = orcamentosDespesa.flatMap((o) => o?.itens || [])
+  // Despesas orçadas são sempre consolidadas — um balde só ('geral'), sem
+  // distinção de loja/rateio (a empresa tratada como uma unidade só).
+  const orcamentoGeral = await buscarOrcamento(ano, mes, 'geral')
+  const todosItens = orcamentoGeral?.itens || []
 
   function compararOrcado(itensPrevisto: typeof todosItens, tipo: TipoLancamento, grupos: FluxoMensalLinhaGrupo[], chave: 'parte_id' | 'conta_id'): FluxoMensalOrcadoRealizado[] {
     const previstoPorId = new Map<string, number>()

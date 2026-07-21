@@ -3,14 +3,13 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
-import { UnidadeFinanceiro, FinanceiroParte, FinanceiroConta } from '@/lib/types'
+import { FinanceiroParte, FinanceiroConta } from '@/lib/types'
 import { buscarOrcamento, salvarOrcamento, salvarItensOrcamento, buscarRecorrenciasAtivas, ItemOrcamentoPayload } from '@/lib/financeiro-orcamento'
 import { X, Plus, Trash2 } from 'lucide-react'
 
 interface Props {
   ano: number
   mes: number
-  unidadeInicial: UnidadeFinanceiro
   usuarioId: string
   onClose: () => void
   onSalvo: () => void
@@ -23,11 +22,9 @@ interface ItemForm {
   valor_previsto: number
 }
 
-export default function OrcamentoEditorModal({ ano, mes, unidadeInicial, usuarioId, onClose, onSalvo }: Props) {
-  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeInicial)
-  const [orcamentoId, setOrcamentoId] = useState<string | null>(null)
-  const [metaVenda, setMetaVenda] = useState('')
-  const [saldoInicial, setSaldoInicial] = useState('')
+export default function OrcamentoEditorModal({ ano, mes, usuarioId, onClose, onSalvo }: Props) {
+  const [metaVenda, setMetaVenda] = useState<{ loja1: string; loja2: string }>({ loja1: '', loja2: '' })
+  const [saldoInicial, setSaldoInicial] = useState<{ loja1: string; loja2: string }>({ loja1: '', loja2: '' })
   const [itens, setItens] = useState<ItemForm[]>([])
   const [recorrencias, setRecorrencias] = useState<{ nome: string; valor: number; diaVencimento: number }[]>([])
 
@@ -44,22 +41,29 @@ export default function OrcamentoEditorModal({ ano, mes, unidadeInicial, usuario
   useEffect(() => {
     supabase.from('financeiro_partes').select('*').eq('papel_fornecedor', true).eq('ativo', true).order('nome').then(({ data }) => setFornecedores(data || []))
     supabase.from('financeiro_contas').select('*').eq('ativo', true).order('codigo').then(({ data }) => setContas(data || []))
-  }, [])
-
-  useEffect(() => {
     carregar()
-  }, [unidade])
+  }, [])
 
   async function carregar() {
     setLoading(true)
     setErro('')
     try {
-      const [orcamento, recs] = await Promise.all([buscarOrcamento(ano, mes, unidade), buscarRecorrenciasAtivas(unidade)])
-      setOrcamentoId(orcamento?.id || null)
-      setMetaVenda(orcamento?.valor_meta_venda != null ? String(orcamento.valor_meta_venda) : '')
-      setSaldoInicial(orcamento?.saldo_inicial != null ? String(orcamento.saldo_inicial) : '')
+      const [orcLoja1, orcLoja2, orcGeral, recs] = await Promise.all([
+        buscarOrcamento(ano, mes, 'loja1'),
+        buscarOrcamento(ano, mes, 'loja2'),
+        buscarOrcamento(ano, mes, 'geral'),
+        buscarRecorrenciasAtivas(),
+      ])
+      setMetaVenda({
+        loja1: orcLoja1?.valor_meta_venda != null ? String(orcLoja1.valor_meta_venda) : '',
+        loja2: orcLoja2?.valor_meta_venda != null ? String(orcLoja2.valor_meta_venda) : '',
+      })
+      setSaldoInicial({
+        loja1: orcLoja1?.saldo_inicial != null ? String(orcLoja1.saldo_inicial) : '',
+        loja2: orcLoja2?.saldo_inicial != null ? String(orcLoja2.saldo_inicial) : '',
+      })
       setItens(
-        (orcamento?.itens || []).map((i) => ({
+        (orcGeral?.itens || []).map((i) => ({
           tipo: i.tipo as 'despesa' | 'compra_insumos',
           id: (i.tipo === 'despesa' ? i.conta_id : i.parte_id) || '',
           nome: i.tipo === 'despesa' ? i.conta?.nome || '—' : i.parte?.nome || '—',
@@ -88,23 +92,25 @@ export default function OrcamentoEditorModal({ ano, mes, unidadeInicial, usuario
   }
 
   const totalRecorrencias = recorrencias.reduce((s, r) => s + r.valor, 0)
-  const totalItensFixo = itens.filter((i) => i.tipo === 'despesa').reduce((s, i) => s + i.valor_previsto, 0)
-  const totalItensVariavel = itens.filter((i) => i.tipo === 'compra_insumos').reduce((s, i) => s + i.valor_previsto, 0)
+  const totalItens = itens.reduce((s, i) => s + i.valor_previsto, 0)
+  const metaTotal =
+    metaVenda.loja1 || metaVenda.loja2 ? (Number(metaVenda.loja1) || 0) + (Number(metaVenda.loja2) || 0) : null
 
   async function salvar() {
     setSalvando(true)
     setErro('')
     try {
-      const id = await salvarOrcamento(
-        ano,
-        mes,
-        unidade,
-        {
-          valor_meta_venda: unidade === 'rateio' ? null : metaVenda ? Number(metaVenda) : null,
-          saldo_inicial: unidade === 'rateio' ? null : saldoInicial ? Number(saldoInicial) : null,
-        },
+      await salvarOrcamento(
+        ano, mes, 'loja1',
+        { valor_meta_venda: metaVenda.loja1 ? Number(metaVenda.loja1) : null, saldo_inicial: saldoInicial.loja1 ? Number(saldoInicial.loja1) : null },
         usuarioId
       )
+      await salvarOrcamento(
+        ano, mes, 'loja2',
+        { valor_meta_venda: metaVenda.loja2 ? Number(metaVenda.loja2) : null, saldo_inicial: saldoInicial.loja2 ? Number(saldoInicial.loja2) : null },
+        usuarioId
+      )
+      const geralId = await salvarOrcamento(ano, mes, 'geral', { valor_meta_venda: null, saldo_inicial: null }, usuarioId)
       const payload: ItemOrcamentoPayload[] = itens.map((i) => ({
         tipo: i.tipo,
         parte_id: i.tipo === 'compra_insumos' ? i.id : null,
@@ -112,7 +118,7 @@ export default function OrcamentoEditorModal({ ano, mes, unidadeInicial, usuario
         valor_previsto: i.valor_previsto,
         observacao: null,
       }))
-      await salvarItensOrcamento(id, payload)
+      await salvarItensOrcamento(geralId, payload)
       onSalvo()
       onClose()
     } catch (err: any) {
@@ -129,44 +135,34 @@ export default function OrcamentoEditorModal({ ano, mes, unidadeInicial, usuario
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
         </div>
 
-        <div className="flex gap-2 mb-4">
-          {(['loja1', 'loja2', 'rateio'] as UnidadeFinanceiro[]).map((u) => (
-            <button
-              key={u}
-              onClick={() => setUnidade(u)}
-              className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold border-2 ${
-                unidade === u ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'
-              }`}
-            >
-              {UNIDADE_LABEL[u]}
-            </button>
-          ))}
-        </div>
-
         {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">{erro}</div>}
 
         {loading ? (
           <p className="text-sm text-gray-400 text-center py-6">Carregando...</p>
         ) : (
           <div className="space-y-5">
-            {unidade !== 'rateio' && (
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-2">
+                Meta de venda por loja{metaTotal != null && <span className="text-gray-500 font-normal"> — total {formatBRL(metaTotal)}</span>}
+              </p>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Meta de venda (R$)</label>
-                  <input
-                    type="number" step="0.01" min={0} value={metaVenda} onChange={(e) => setMetaVenda(e.target.value)}
-                    placeholder="Opcional" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Saldo inicial (R$)</label>
-                  <input
-                    type="number" step="0.01" value={saldoInicial} onChange={(e) => setSaldoInicial(e.target.value)}
-                    placeholder="Opcional" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-                  />
-                </div>
+                {(['loja1', 'loja2'] as const).map((loja) => (
+                  <div key={loja} className="space-y-2">
+                    <p className="text-xs font-semibold text-gray-500">{UNIDADE_LABEL[loja]}</p>
+                    <input
+                      type="number" step="0.01" min={0} value={metaVenda[loja]}
+                      onChange={(e) => setMetaVenda((prev) => ({ ...prev, [loja]: e.target.value }))}
+                      placeholder="Meta de venda (R$)" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                    />
+                    <input
+                      type="number" step="0.01" value={saldoInicial[loja]}
+                      onChange={(e) => setSaldoInicial((prev) => ({ ...prev, [loja]: e.target.value }))}
+                      placeholder="Saldo inicial (R$)" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                    />
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
 
             {recorrencias.length > 0 && (
               <div>
@@ -185,16 +181,13 @@ export default function OrcamentoEditorModal({ ano, mes, unidadeInicial, usuario
 
             <div>
               <p className="text-sm font-medium text-gray-700 mb-2">
-                Previsão manual — Fixo {formatBRL(totalItensFixo)} · Variável {formatBRL(totalItensVariavel)}
+                Despesas orçadas do mês (consolidado) — {formatBRL(totalItens)}
               </p>
               {itens.length > 0 && (
                 <div className="space-y-1 mb-3">
                   {itens.map((item, i) => (
                     <div key={i} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg text-sm">
-                      <span className="text-gray-700">
-                        {item.nome}
-                        <span className="ml-1.5 text-[10px] font-semibold text-gray-500">{item.tipo === 'despesa' ? 'fixo' : 'variável'}</span>
-                      </span>
+                      <span className="text-gray-700">{item.nome}</span>
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-gray-800">{formatBRL(item.valor_previsto)}</span>
                         <button onClick={() => removerItem(i)} className="text-red-600 hover:text-red-700"><Trash2 size={14} /></button>
@@ -211,14 +204,14 @@ export default function OrcamentoEditorModal({ ano, mes, unidadeInicial, usuario
                     onClick={() => { setNovoModo('despesa'); setNovoId('') }}
                     className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-semibold border-2 ${novoModo === 'despesa' ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'}`}
                   >
-                    Despesa fixa (conta)
+                    Despesa (conta)
                   </button>
                   <button
                     type="button"
                     onClick={() => { setNovoModo('compra_insumos'); setNovoId('') }}
                     className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-semibold border-2 ${novoModo === 'compra_insumos' ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'}`}
                   >
-                    Fornecedor (variável)
+                    Fornecedor
                   </button>
                 </div>
                 <select value={novoId} onChange={(e) => setNovoId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">

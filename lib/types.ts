@@ -158,6 +158,12 @@ export interface TarefaRecorrencia {
 // 0001=Rateio. A cozinha não é uma 4ª entidade — seus custos entram como
 // rateio (0001), já que não são atribuídos a uma loja específica.
 export type UnidadeFinanceiro = 'loja1' | 'loja2' | 'rateio'
+// Unidade do orçamento: meta de venda + saldo inicial são por loja (só
+// quem vende e tem conta bancária própria); 'geral' é o balde único das
+// despesas orçadas do mês — a empresa inteira tratada como uma unidade só,
+// sem distinção de loja/rateio (não há marcador de fixo/variável nem de
+// entidade nos itens do orçamento).
+export type UnidadeOrcamento = 'loja1' | 'loja2' | 'geral'
 export type StatusFinanceiro = 'aberto' | 'pago' | 'cancelado'
 export type StatusConciliacao = 'pendente' | 'conciliado' | 'ignorado'
 export type FormaPagamento = 'boleto' | 'pix' | 'cartao_debito' | 'dinheiro'
@@ -374,8 +380,8 @@ export interface FinanceiroOrcamento {
   id: string
   ano: number
   mes: number
-  unidade: UnidadeFinanceiro
-  valor_meta_venda?: number // null/undefined pra rateio, ou loja ainda sem meta cadastrada
+  unidade: UnidadeOrcamento
+  valor_meta_venda?: number // null/undefined pra 'geral', ou loja ainda sem meta cadastrada
   saldo_inicial?: number // null/undefined = "não informado", nunca 0 por omissão
   criado_por: string
   created_at: string

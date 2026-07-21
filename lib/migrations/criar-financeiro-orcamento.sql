@@ -3,9 +3,10 @@
 -- previsão manual de despesas), base da visão mensal em calendário do
 -- Fluxo de Caixa.
 --
--- Um registro por (ano, mes, unidade). Meta de venda e saldo inicial só
--- fazem sentido pra loja1/loja2 (rateio não vende nem tem conta bancária
--- própria) — CHECK trava isso.
+-- Um registro por (ano, mes, unidade). Meta de venda e saldo inicial são
+-- por loja (loja1/loja2 — só quem vende e tem conta bancária própria);
+-- 'geral' é o balde único das despesas orçadas do mês inteiro, tratando a
+-- empresa como uma unidade só (CHECK trava meta/saldo fora das lojas).
 --
 -- Linhas manuais do orçamento de despesas (financeiro_orcamento_itens)
 -- não têm policy de INSERT/UPDATE/DELETE — é um rascunho editável o mês
@@ -19,22 +20,22 @@ CREATE TABLE IF NOT EXISTS financeiro_orcamentos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ano INT NOT NULL,
   mes INT NOT NULL CHECK (mes BETWEEN 1 AND 12),
-  unidade TEXT NOT NULL CHECK (unidade IN ('loja1','loja2','rateio')),
+  unidade TEXT NOT NULL CHECK (unidade IN ('loja1','loja2','geral')),
   valor_meta_venda NUMERIC CHECK (valor_meta_venda IS NULL OR valor_meta_venda > 0),
   saldo_inicial NUMERIC, -- saldo bancário no início do mês; null = "não informado", nunca 0 por omissão
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (ano, mes, unidade),
-  CONSTRAINT fo_meta_e_saldo_so_loja CHECK (unidade <> 'rateio' OR (valor_meta_venda IS NULL AND saldo_inicial IS NULL))
+  CONSTRAINT fo_meta_e_saldo_so_loja CHECK (unidade <> 'geral' OR (valor_meta_venda IS NULL AND saldo_inicial IS NULL))
 );
 
 CREATE TABLE IF NOT EXISTS financeiro_orcamento_itens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   orcamento_id UUID NOT NULL REFERENCES financeiro_orcamentos(id) ON DELETE CASCADE,
   tipo TEXT NOT NULL CHECK (tipo IN ('despesa','compra_insumos')),
-  parte_id UUID REFERENCES financeiro_partes(id), -- fornecedor, custo variável
-  conta_id UUID REFERENCES financeiro_contas(id), -- categoria, custo fixo
+  parte_id UUID REFERENCES financeiro_partes(id), -- compra_insumos: por fornecedor
+  conta_id UUID REFERENCES financeiro_contas(id), -- despesa: por conta/categoria
   valor_previsto NUMERIC NOT NULL CHECK (valor_previsto > 0),
   observacao TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),

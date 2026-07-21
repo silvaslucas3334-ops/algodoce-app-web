@@ -200,7 +200,6 @@ function FluxoCaixaContent() {
           <OrcamentoEditorModal
             ano={ano}
             mes={mes}
-            unidadeInicial="loja1"
             usuarioId={usuario.id}
             onClose={() => setModalOrcamento(false)}
             onSalvo={carregar}
