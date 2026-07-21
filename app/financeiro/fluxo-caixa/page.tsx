@@ -7,24 +7,16 @@ import FluxoMensalTabela from '@/components/FluxoMensalTabela'
 import FluxoMensalDrilldownModal, { LinhaDrilldown } from '@/components/FluxoMensalDrilldownModal'
 import OrcamentoEditorModal from '@/components/OrcamentoEditorModal'
 import NovaReceitaDinheiroModal from '@/components/NovaReceitaDinheiroModal'
-import { buscarFluxoMensal, buscarAtrasados, FluxoMensalResultado, FluxoMensalAtrasados, VisaoFluxoMensal } from '@/lib/financeiro-fluxo-mensal'
+import { buscarFluxoMensal, buscarAtrasados, FluxoMensalResultado, FluxoMensalAtrasados } from '@/lib/financeiro-fluxo-mensal'
 import { Cenario } from '@/lib/financeiro-forecast'
 import { formatBRL } from '@/lib/ofx'
-import { UNIDADE_LABEL } from '@/lib/constants'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader, AlertCircle, Settings, Plus } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark } from 'lucide-react'
 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ]
-
-const VISAO_LABEL: Record<VisaoFluxoMensal, string> = {
-  loja1: UNIDADE_LABEL.loja1,
-  loja2: UNIDADE_LABEL.loja2,
-  rateio: UNIDADE_LABEL.rateio,
-  consolidado: 'Consolidado',
-}
 
 const CENARIO_LABEL: Record<Cenario, string> = { pessimista: 'Pessimista', moderado: 'Moderado', otimista: 'Otimista' }
 
@@ -37,7 +29,6 @@ function FluxoCaixaContent() {
   const hoje = new Date()
 
   const [aba, setAba] = useState<Aba>(params.get('tab') === 'extrato' ? 'extrato' : 'mensal')
-  const [unidade, setUnidade] = useState<VisaoFluxoMensal>('consolidado')
   const [ano, setAno] = useState(hoje.getFullYear())
   const [mes, setMes] = useState(hoje.getMonth() + 1)
   const [cenario, setCenario] = useState<Cenario>('moderado')
@@ -52,15 +43,15 @@ function FluxoCaixaContent() {
 
   useEffect(() => {
     if (aba === 'mensal') carregar()
-  }, [aba, unidade, ano, mes, cenario])
+  }, [aba, ano, mes, cenario])
 
   async function carregar() {
     setLoading(true)
     setErro('')
     try {
       const [resultado, atrasadosResultado] = await Promise.all([
-        buscarFluxoMensal(unidade, ano, mes, cenario),
-        buscarAtrasados(unidade),
+        buscarFluxoMensal('consolidado', ano, mes, cenario),
+        buscarAtrasados('consolidado'),
       ])
       setDados(resultado)
       setAtrasados(atrasadosResultado)
@@ -79,7 +70,6 @@ function FluxoCaixaContent() {
     if (mes === 12) { setMes(1); setAno(ano + 1) } else { setMes(mes + 1) }
   }
 
-  const totalSaidas = dados ? dados.totalSaidasFixo + dados.totalSaidasVariavel : 0
   const saldoFinal = dados ? dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1] || 0 : 0
 
   return (
@@ -93,7 +83,7 @@ function FluxoCaixaContent() {
               </button>
               <h1 className="text-xl font-bold text-gray-800">Fluxo de Caixa</h1>
             </div>
-            {aba === 'mensal' && (
+            {aba === 'mensal' ? (
               <div className="flex gap-2">
                 <button
                   onClick={() => setModalNovaReceita(true)}
@@ -107,21 +97,21 @@ function FluxoCaixaContent() {
                 >
                   <Settings size={16} /> Orçamento
                 </button>
+                <button
+                  onClick={() => setAba('extrato')}
+                  className="bg-white border-2 border-gray-200 text-gray-700 rounded-lg px-3 py-2 font-semibold flex items-center gap-1.5 hover:border-gray-300 text-sm"
+                >
+                  <Landmark size={16} /> Conciliar Extrato
+                </button>
               </div>
-            )}
-          </div>
-          <div className="max-w-5xl mx-auto px-4 flex gap-1">
-            {(['mensal', 'extrato'] as Aba[]).map((a) => (
+            ) : (
               <button
-                key={a}
-                onClick={() => setAba(a)}
-                className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px ${
-                  aba === a ? 'border-pink-600 text-pink-700' : 'border-transparent text-gray-500'
-                }`}
+                onClick={() => setAba('mensal')}
+                className="bg-white border-2 border-gray-200 text-gray-700 rounded-lg px-3 py-2 font-semibold flex items-center gap-1.5 hover:border-gray-300 text-sm"
               >
-                {a === 'mensal' ? 'Visão Mensal' : 'Conciliar Extrato'}
+                <ArrowLeft size={16} /> Voltar à Visão Mensal
               </button>
-            ))}
+            )}
           </div>
         </div>
 
@@ -130,20 +120,6 @@ function FluxoCaixaContent() {
             <ConciliarExtratoTab />
           ) : (
             <>
-              <div className="flex gap-2 mb-4 flex-wrap">
-                {(['loja1', 'loja2', 'rateio', 'consolidado'] as VisaoFluxoMensal[]).map((u) => (
-                  <button
-                    key={u}
-                    onClick={() => setUnidade(u)}
-                    className={`px-4 py-2 rounded-lg text-sm font-semibold border-2 ${
-                      unidade === u ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'
-                    }`}
-                  >
-                    {VISAO_LABEL[u]}
-                  </button>
-                ))}
-              </div>
-
               <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
                 <div className="flex items-center gap-3">
                   <button onClick={mesAnterior} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
@@ -184,7 +160,7 @@ function FluxoCaixaContent() {
                     </div>
                     <div className="bg-white rounded-xl p-4 border border-gray-100">
                       <p className="text-xs text-gray-500 uppercase font-semibold">Saídas</p>
-                      <p className="text-lg font-bold text-red-600 mt-1">{formatBRL(totalSaidas)}</p>
+                      <p className="text-lg font-bold text-red-600 mt-1">{formatBRL(dados.totalSaidas)}</p>
                     </div>
                     <div className="bg-white rounded-xl p-4 border border-gray-100">
                       <p className="text-xs text-gray-500 uppercase font-semibold">Saldo</p>
@@ -209,13 +185,6 @@ function FluxoCaixaContent() {
                     </button>
                   </div>
 
-                  {!dados.faturamentoAplicavel && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-start gap-2 text-xs text-blue-800">
-                      <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-                      <span>Faturamento e Meta de Venda não se aplicam ao rateio — ele não vende, só recebe custo.</span>
-                    </div>
-                  )}
-
                   <FluxoMensalTabela dados={dados} onAbrirDrilldown={(titulo, linhas) => setModalDrilldown({ titulo, linhas })} />
                 </>
               ) : null}
@@ -231,7 +200,7 @@ function FluxoCaixaContent() {
           <OrcamentoEditorModal
             ano={ano}
             mes={mes}
-            unidadeInicial={unidade === 'consolidado' ? 'loja1' : unidade}
+            unidadeInicial="loja1"
             usuarioId={usuario.id}
             onClose={() => setModalOrcamento(false)}
             onSalvo={carregar}
@@ -240,7 +209,7 @@ function FluxoCaixaContent() {
 
         {modalNovaReceita && usuario && (
           <NovaReceitaDinheiroModal
-            unidadeInicial={unidade === 'loja2' ? 'loja2' : 'loja1'}
+            unidadeInicial="loja1"
             usuarioId={usuario.id}
             onClose={() => setModalNovaReceita(false)}
             onCriada={carregar}

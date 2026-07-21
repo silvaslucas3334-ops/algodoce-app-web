@@ -51,20 +51,15 @@ export interface FluxoMensalResultado {
   entradasCaixaPorCategoria: { categoria: CategoriaReceita; label: string; total: number }[]
   totalEntradasCaixa: number
 
-  saidasFixoPorDia: number[]
-  saidasFixoPorConta: FluxoMensalLinhaGrupo[]
-  totalSaidasFixo: number
-
-  saidasVariavelPorDia: number[]
-  saidasVariavelPorFornecedor: FluxoMensalLinhaGrupo[]
-  totalSaidasVariavel: number
+  saidasPorDia: number[]
+  saidasPorGrupo: FluxoMensalLinhaGrupo[] // por conta (despesa) + por fornecedor (compra_insumos), juntos — não há marcador de fixo/variável nos dados
+  totalSaidas: number
 
   saldoDiaPorDia: number[]
   saldoInicial: number | null
   saldoAcumuladoPorDia: number[]
 
-  orcadoXRealizadoFixo: FluxoMensalOrcadoRealizado[]
-  orcadoXRealizadoVariavel: FluxoMensalOrcadoRealizado[]
+  orcadoXRealizado: FluxoMensalOrcadoRealizado[]
 }
 
 // --- utilitários de data ----------------------------------------------------
@@ -104,8 +99,7 @@ async function buscarFaturamentoLoja(
   ano: number,
   mes: number,
   dias: string[],
-  hoje: string,
-  cenario: Cenario
+  hoje: string
 ): Promise<{ porDia: (number | null)[]; ehForecastPorDia: boolean[]; participacaoPorDiaSemana: number[] }> {
   const { inicio, fim } = primeiroEUltimoDia(ano, mes)
   const inicioHistorico = inicioJanelaHistorico(hoje)
@@ -144,8 +138,10 @@ async function buscarFaturamentoLoja(
       porDia.push(porDiaReal.get(dia) ?? 0)
       ehForecastPorDia.push(false)
     } else {
+      // Cenário (pessimista/moderado/otimista) só se aplica ao forecast de
+      // Entradas de Caixa — Faturamento usa a média histórica pura.
       const media = mediaPorDiaSemana[new Date(dia + 'T00:00:00').getDay()]
-      porDia.push(media != null ? media * CENARIO_MULTIPLICADOR[cenario] : null)
+      porDia.push(media)
       ehForecastPorDia.push(true)
     }
   })
@@ -184,7 +180,7 @@ export async function buscarFluxoMensal(
 
   if (faturamentoAplicavel) {
     const lojas: ('loja1' | 'loja2')[] = unidade === 'consolidado' ? ['loja1', 'loja2'] : [unidade as 'loja1' | 'loja2']
-    const resultadosPorLoja = await Promise.all(lojas.map((l) => buscarFaturamentoLoja(l, ano, mes, dias, hoje, cenario)))
+    const resultadosPorLoja = await Promise.all(lojas.map((l) => buscarFaturamentoLoja(l, ano, mes, dias, hoje)))
 
     faturamentoPorDia = dias.map((_, i) => {
       const valores = resultadosPorLoja.map((r) => r.porDia[i])
@@ -388,14 +384,18 @@ export async function buscarFluxoMensal(
 
   const saidasFixoPorDia = agruparLinhasPorDia(linhasFixo)
   const saidasFixoPorConta = agruparLinhasPorChave(linhasFixo, 'contaId', 'contaNome')
-  const totalSaidasFixo = saidasFixoPorDia.reduce((s, v) => s + v, 0)
-
   const saidasVariavelPorDia = agruparLinhasPorDia(linhasVariavel)
   const saidasVariavelPorFornecedor = agruparLinhasPorChave(linhasVariavel, 'parteId', 'parteNome')
-  const totalSaidasVariavel = saidasVariavelPorDia.reduce((s, v) => s + v, 0)
+
+  // Uma linha só de Saídas — despesa (por conta) e compra_insumos (por
+  // fornecedor) não representam fixo x variável de verdade, então não
+  // fazem sentido como duas seções separadas na tela.
+  const saidasPorDia = dias.map((_, i) => saidasFixoPorDia[i] + saidasVariavelPorDia[i])
+  const saidasPorGrupo = [...saidasFixoPorConta, ...saidasVariavelPorFornecedor].sort((a, b) => b.total - a.total)
+  const totalSaidas = saidasPorDia.reduce((s, v) => s + v, 0)
 
   // --- Saldo -------------------------------------------------------------------
-  const saldoDiaPorDia = dias.map((_, i) => entradasCaixaPorDia[i] - saidasFixoPorDia[i] - saidasVariavelPorDia[i])
+  const saldoDiaPorDia = dias.map((_, i) => entradasCaixaPorDia[i] - saidasPorDia[i])
 
   const orcamentosSaldo =
     unidade === 'consolidado'
@@ -438,8 +438,10 @@ export async function buscarFluxoMensal(
     return resultado.sort((a, b) => b.previsto - a.previsto)
   }
 
-  const orcadoXRealizadoFixo = compararOrcado(todosItens, 'despesa', saidasFixoPorConta, 'conta_id')
-  const orcadoXRealizadoVariavel = compararOrcado(todosItens, 'compra_insumos', saidasVariavelPorFornecedor, 'parte_id')
+  const orcadoXRealizado = [
+    ...compararOrcado(todosItens, 'despesa', saidasFixoPorConta, 'conta_id'),
+    ...compararOrcado(todosItens, 'compra_insumos', saidasVariavelPorFornecedor, 'parte_id'),
+  ].sort((a, b) => b.previsto - a.previsto)
 
   return {
     unidade,
@@ -458,17 +460,13 @@ export async function buscarFluxoMensal(
     entradasCaixaEhForecastPorDia,
     entradasCaixaPorCategoria,
     totalEntradasCaixa,
-    saidasFixoPorDia,
-    saidasFixoPorConta,
-    totalSaidasFixo,
-    saidasVariavelPorDia,
-    saidasVariavelPorFornecedor,
-    totalSaidasVariavel,
+    saidasPorDia,
+    saidasPorGrupo,
+    totalSaidas,
     saldoDiaPorDia,
     saldoInicial,
     saldoAcumuladoPorDia,
-    orcadoXRealizadoFixo,
-    orcadoXRealizadoVariavel,
+    orcadoXRealizado,
   }
 }
 
