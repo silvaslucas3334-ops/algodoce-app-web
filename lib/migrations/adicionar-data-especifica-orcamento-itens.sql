@@ -7,9 +7,17 @@
 --
 -- No máximo um dos dois (dia_semana, data_especifica) pode estar
 -- preenchido — os dois juntos não fazem sentido.
+--
+-- Também recria dia_semana (IF NOT EXISTS) por segurança — este arquivo
+-- precisa funcionar sozinho independente de
+-- lib/migrations/adicionar-dia-semana-orcamento-itens.sql já ter rodado
+-- ou não, senão a constraint abaixo falha referenciando uma coluna
+-- inexistente.
 -- ============================================================
 
-ALTER TABLE financeiro_orcamento_itens ADD COLUMN IF NOT EXISTS data_especifica DATE;
+ALTER TABLE financeiro_orcamento_itens
+  ADD COLUMN IF NOT EXISTS dia_semana INT CHECK (dia_semana IS NULL OR dia_semana BETWEEN 0 AND 6),
+  ADD COLUMN IF NOT EXISTS data_especifica DATE;
 
 DO $$
 BEGIN
