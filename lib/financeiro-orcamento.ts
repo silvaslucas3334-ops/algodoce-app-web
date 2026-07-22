@@ -73,6 +73,7 @@ export interface ItemOrcamentoPayload {
   conta_id: string | null
   valor_previsto: number
   dia_semana: number | null // 0=domingo..6=sábado; presente = valor_previsto é "por ocorrência" (ex: toda segunda)
+  data_especifica: string | null // AAAA-MM-DD; no máximo um entre dia_semana/data_especifica
   observacao: string | null
 }
 

@@ -42,11 +42,19 @@ export interface FluxoMensalResultado {
   entradasCaixaPorCategoria: { categoria: CategoriaReceita; label: string; porDia: (number | null)[]; total: number }[]
   totalEntradasCaixa: number
 
-  saidasPorDia: number[]
-  saidasPorGrupo: FluxoMensalLinhaGrupo[] // por conta (despesa) + por fornecedor (compra_insumos), juntos — não há marcador de fixo/variável nos dados
-  saidasFixoPorConta: FluxoMensalLinhaGrupo[]
-  saidasVariavelPorFornecedor: FluxoMensalLinhaGrupo[]
+  saidasPorDia: number[] // já inclui a previsão do orçamento (por dia da semana/data específica) nos dias futuros
+  saidasPorGrupo: FluxoMensalLinhaGrupo[] // por conta (despesa) + por fornecedor (compra_insumos), juntos — não há marcador de fixo/variável nos dados; já inclui previsão
+  saidasFixoPorConta: FluxoMensalLinhaGrupo[] // já inclui previsão
+  saidasVariavelPorFornecedor: FluxoMensalLinhaGrupo[] // já inclui previsão
   totalSaidas: number
+
+  // Versões SEM a previsão do orçamento injetada — só o realizado (pago +
+  // já lançado com vencimento futuro + recorrências). Usadas na
+  // comparação orçado x realizado (senão compararia o orçamento com ele
+  // mesmo) e como base pro wizard recalcular a prévia em cima do rascunho.
+  saidasPorDiaRealizado: number[]
+  saidasFixoPorContaRealizado: FluxoMensalLinhaGrupo[]
+  saidasVariavelPorFornecedorRealizado: FluxoMensalLinhaGrupo[]
 
   saldoDiaPorDia: (number | null)[]
   saldoInicial: number | null
@@ -127,6 +135,87 @@ export function compararOrcado(
     resultado.push({ id, nome: grupo?.nome || '—', previsto, projetado, cor: corComparacao(previsto, projetado, 'despesa') })
   })
   return resultado.sort((a, b) => b.previsto - a.previsto)
+}
+
+/**
+ * Datas (dentro de `dias`, sempre futuras — dia > hoje) em que um item de
+ * despesa variável do orçamento deveria projetar sua previsão no
+ * calendário. "Por dia da semana" gera uma ocorrência por semana restante
+ * do mês; "data específica" gera no máximo uma ocorrência. Sem nenhum dos
+ * dois, o item não projeta em dia nenhum (só entra na comparação orçado x
+ * realizado, como um valor único do mês).
+ */
+export function ocorrenciasForecastItem(
+  item: Pick<FinanceiroOrcamentoItem, 'dia_semana' | 'data_especifica'>,
+  dias: string[],
+  hoje: string
+): string[] {
+  if (item.data_especifica) {
+    return item.data_especifica > hoje && dias.includes(item.data_especifica) ? [item.data_especifica] : []
+  }
+  if (item.dia_semana != null) {
+    return dias.filter((d) => d > hoje && new Date(d + 'T00:00:00').getDay() === item.dia_semana)
+  }
+  return []
+}
+
+export interface EventoForecastVariavel {
+  data: string
+  valor: number
+  tipo: TipoLancamento
+  parteId: string | null
+  parteNome: string
+  contaId: string | null
+  contaNome: string
+}
+
+/**
+ * Gera os eventos de previsão (por dia da semana ou data específica) dos
+ * itens do orçamento pros dias futuros — pulando qualquer ocorrência que
+ * já tenha um valor REAL lançado pra mesma conta/fornecedor naquela data
+ * exata (evita duplicar quando a nota/boleto já foi lançado de verdade).
+ * `gruposFixoRealizado`/`gruposVariavelRealizado` devem vir SEM a própria
+ * previsão injetada (real puro) — é contra eles que o "já realizado" é
+ * checado. Exportada — usada tanto por buscarFluxoMensal (calendário)
+ * quanto pelo wizard de orçamento (prévia ao vivo do rascunho).
+ */
+export function gerarEventosForecastOrcamento(
+  itens: Pick<FinanceiroOrcamentoItem, 'tipo' | 'parte_id' | 'conta_id' | 'valor_previsto' | 'dia_semana' | 'data_especifica'>[],
+  gruposFixoRealizado: FluxoMensalLinhaGrupo[],
+  gruposVariavelRealizado: FluxoMensalLinhaGrupo[],
+  dias: string[],
+  hoje: string
+): EventoForecastVariavel[] {
+  const eventos: EventoForecastVariavel[] = []
+  itens.forEach((item: any) => {
+    const ehFixo = item.tipo === 'despesa'
+    const id = ehFixo ? item.conta_id : item.parte_id
+    if (!id) return
+    const grupos = ehFixo ? gruposFixoRealizado : gruposVariavelRealizado
+    const grupo = grupos.find((g) => g.id === id)
+    ocorrenciasForecastItem(item, dias, hoje).forEach((data) => {
+      const indice = dias.indexOf(data)
+      if (indice < 0) return
+      if (grupo && grupo.porDia[indice] > 0) return // já realizado nessa data — não duplica
+      eventos.push({
+        data,
+        valor: item.valor_previsto,
+        tipo: item.tipo,
+        parteId: ehFixo ? null : id,
+        parteNome: ehFixo ? 'Sem beneficiário' : item.parte?.nome || 'Sem beneficiário',
+        contaId: ehFixo ? id : null,
+        contaNome: ehFixo ? item.conta?.nome || 'Sem classificação' : 'Sem classificação',
+      })
+    })
+  })
+  return eventos
+}
+
+/** Soma os eventos de forecast por dia — útil pra quem só precisa do total diário (ex: prévia de Saldo Projetado no wizard), sem o detalhamento por conta/fornecedor. */
+export function somarEventosPorDia(eventos: EventoForecastVariavel[], dias: string[]): number[] {
+  const porDia = new Map<string, number>()
+  eventos.forEach((e) => porDia.set(e.data, (porDia.get(e.data) || 0) + e.valor))
+  return dias.map((d) => porDia.get(d) || 0)
 }
 
 // --- Meta de Venda / Previsão de Entrada cadastradas por dia da semana ------
@@ -445,26 +534,31 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
   // --- Saídas (fixas + variáveis) --------------------------------------------
   const unidadesDespesa = unidade === 'consolidado' ? ['loja1', 'loja2', 'rateio'] : [unidade]
 
-  const [{ data: pagos, error: erroPagos }, { data: abertosVariavelFuturos, error: erroAbertos }, despesasFixasFuturas] = await Promise.all([
-    supabase
-      .from('financeiro_lancamentos')
-      .select('valor_total, tipo, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_pagamento')
-      .in('unidade', unidadesDespesa)
-      .eq('status', 'pago')
-      .gte('data_pagamento', inicio)
-      .lte('data_pagamento', fim),
-    supabase
-      .from('financeiro_lancamentos')
-      .select('valor_total, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
-      .in('unidade', unidadesDespesa)
-      .eq('status', 'aberto')
-      .eq('tipo', 'compra_insumos')
-      .gte('data_vencimento', hoje)
-      .lte('data_vencimento', fim),
-    buscarDespesasFixasFuturas(unidade, ano, mes),
-  ])
+  // Despesas orçadas são sempre consolidadas — um balde só ('geral'), sem
+  // distinção de loja/rateio (a empresa tratada como uma unidade só).
+  const [{ data: pagos, error: erroPagos }, { data: abertosVariavelFuturos, error: erroAbertos }, despesasFixasFuturas, orcamentoGeral] =
+    await Promise.all([
+      supabase
+        .from('financeiro_lancamentos')
+        .select('valor_total, tipo, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_pagamento')
+        .in('unidade', unidadesDespesa)
+        .eq('status', 'pago')
+        .gte('data_pagamento', inicio)
+        .lte('data_pagamento', fim),
+      supabase
+        .from('financeiro_lancamentos')
+        .select('valor_total, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
+        .in('unidade', unidadesDespesa)
+        .eq('status', 'aberto')
+        .eq('tipo', 'compra_insumos')
+        .gte('data_vencimento', hoje)
+        .lte('data_vencimento', fim),
+      buscarDespesasFixasFuturas(unidade, ano, mes),
+      buscarOrcamento(ano, mes, 'geral'),
+    ])
   if (erroPagos) throw new Error(erroPagos.message)
   if (erroAbertos) throw new Error(erroAbertos.message)
+  const todosItens = orcamentoGeral?.itens || []
 
   interface LinhaSaida {
     data: string
@@ -525,6 +619,36 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
     return Array.from(grupos.values()).sort((a, b) => b.total - a.total)
   }
 
+  // Agregações do REALIZADO puro (pago + já lançado com vencimento futuro
+  // + recorrências) — antes de injetar a previsão do orçamento. Servem de
+  // base pro "já realizado" (evita duplicar) e pra comparação orçado x
+  // realizado (que não pode incluir a própria previsão, senão vira
+  // tautologia).
+  const saidasFixoPorContaRealizado = agruparLinhasPorChave(linhasFixo, 'contaId', 'contaNome')
+  const saidasVariavelPorFornecedorRealizado = agruparLinhasPorChave(linhasVariavel, 'parteId', 'parteNome')
+  const saidasFixoPorDiaRealizado = agruparLinhasPorDia(linhasFixo)
+  const saidasVariavelPorDiaRealizado = agruparLinhasPorDia(linhasVariavel)
+  const saidasPorDiaRealizado = dias.map((_, i) => saidasFixoPorDiaRealizado[i] + saidasVariavelPorDiaRealizado[i])
+
+  // Injeta a previsão do orçamento (por dia da semana ou data específica)
+  // nos dias futuros — some sozinha se o dia já passou (dia <= hoje nunca
+  // recebe previsão, só real) ou se já existe um lançamento real na mesma
+  // conta/fornecedor naquela data exata (checado contra o Realizado acima).
+  const eventosForecast = gerarEventosForecastOrcamento(todosItens, saidasFixoPorContaRealizado, saidasVariavelPorFornecedorRealizado, dias, hoje)
+  eventosForecast.forEach((ev) => {
+    const linha: LinhaSaida = {
+      data: ev.data,
+      valor: ev.valor,
+      parteId: ev.parteId || 'sem-parte',
+      parteNome: ev.parteNome,
+      contaId: ev.contaId || 'sem-conta',
+      contaNome: ev.contaNome,
+    }
+    if (ev.tipo === 'despesa') linhasFixo.push(linha)
+    else linhasVariavel.push(linha)
+  })
+
+  // Com a previsão já injetada — usado no calendário (totais e detalhamento).
   const saidasFixoPorDia = agruparLinhasPorDia(linhasFixo)
   const saidasFixoPorConta = agruparLinhasPorChave(linhasFixo, 'contaId', 'contaNome')
   const saidasVariavelPorDia = agruparLinhasPorDia(linhasVariavel)
@@ -544,14 +668,12 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
   const { saldoDiaPorDia, saldoAcumuladoPorDia } = calcularSaldoDiarioEAcumulado(entradasCaixaPorDia, saidasPorDia, saldoInicial)
 
   // --- Comparação orçado x realizado (projeção do mês inteiro) -----------------
-  // Despesas orçadas são sempre consolidadas — um balde só ('geral'), sem
-  // distinção de loja/rateio (a empresa tratada como uma unidade só).
-  const orcamentoGeral = await buscarOrcamento(ano, mes, 'geral')
-  const todosItens = orcamentoGeral?.itens || []
-
+  // Usa as agregações REALIZADO (sem a previsão injetada) — comparar o
+  // orçamento contra um número que já inclui a própria previsão seria
+  // comparar o orçamento com ele mesmo.
   const orcadoXRealizado = [
-    ...compararOrcado(todosItens, 'despesa', saidasFixoPorConta, 'conta_id', dias),
-    ...compararOrcado(todosItens, 'compra_insumos', saidasVariavelPorFornecedor, 'parte_id', dias),
+    ...compararOrcado(todosItens, 'despesa', saidasFixoPorContaRealizado, 'conta_id', dias),
+    ...compararOrcado(todosItens, 'compra_insumos', saidasVariavelPorFornecedorRealizado, 'parte_id', dias),
   ].sort((a, b) => b.previsto - a.previsto)
 
   return {
@@ -575,6 +697,9 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
     saidasFixoPorConta,
     saidasVariavelPorFornecedor,
     totalSaidas,
+    saidasPorDiaRealizado,
+    saidasFixoPorContaRealizado,
+    saidasVariavelPorFornecedorRealizado,
     saldoDiaPorDia,
     saldoInicial,
     saldoAcumuladoPorDia,

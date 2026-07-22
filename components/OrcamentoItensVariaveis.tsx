@@ -11,6 +11,7 @@ export interface ItemOrcamentoVariavel {
   nome: string
   valor_previsto: number
   diaSemana: number | null // 0=domingo..6=sábado; presente = valor_previsto é "por ocorrência" (ex: toda segunda)
+  dataEspecifica: string | null // AAAA-MM-DD; previsão pontual numa data exata — no máximo um entre diaSemana/dataEspecifica
 }
 
 interface Props {
@@ -18,11 +19,13 @@ interface Props {
   onChange: (itens: ItemOrcamentoVariavel[]) => void
   fornecedores: FinanceiroParte[]
   contas: FinanceiroConta[]
-  dias: string[] // dias do mês sendo editado — usado só pra calcular o total mensal de itens "por dia da semana"
+  dias: string[] // dias do mês sendo editado — usado pra calcular o total mensal e limitar a data específica
   readOnly?: boolean
 }
 
 const DIA_SEMANA_LABEL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+
+type ModoQuando = 'sem_padrao' | 'dia_semana' | 'data_especifica'
 
 /**
  * Previsão manual de despesas variáveis (insumos, embalagens, despesas
@@ -30,34 +33,55 @@ const DIA_SEMANA_LABEL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'S
  * gerais sem fornecedor específico (ex: distribuição de lucro/pró-labore).
  * As duas formas cobrem casos diferentes, nenhuma substitui a outra.
  *
- * Cada item pode opcionalmente ter um dia da semana — pra fornecedores com
- * padrão semanal previsível (ex: boleto pago toda segunda), o valor vira
- * "por ocorrência" e o total do mês é calculado automaticamente. Sem dia
- * da semana, o valor continua sendo um total único pro mês inteiro.
+ * Cada item tem um "quando" opcional: sem padrão (valor único do mês,
+ * só entra na comparação orçado x realizado), por dia da semana (ex:
+ * fornecedor pago toda segunda — valor "por ocorrência", projeta nos
+ * dias futuros do calendário) ou numa data específica (ex: retirada de
+ * lucro no dia 25 — previsão pontual, também projeta no calendário). A
+ * previsão por dia da semana/data específica some sozinha quando o dia
+ * passa ou quando já existe um lançamento real na mesma data.
  */
 export default function OrcamentoItensVariaveis({ itens, onChange, fornecedores, contas, dias, readOnly }: Props) {
   const [novoModo, setNovoModo] = useState<'despesa' | 'compra_insumos'>('compra_insumos')
   const [novoId, setNovoId] = useState('')
   const [novoValor, setNovoValor] = useState('')
-  const [novoDiaSemana, setNovoDiaSemana] = useState<string>('')
+  const [novoQuando, setNovoQuando] = useState<ModoQuando>('sem_padrao')
+  const [novoDiaSemana, setNovoDiaSemana] = useState('0')
+  const [novoDataEspecifica, setNovoDataEspecifica] = useState('')
+
+  const primeiroDia = dias[0]
+  const ultimoDia = dias[dias.length - 1]
 
   function adicionarItem() {
     if (!novoId || Number(novoValor) <= 0) return
+    if (novoQuando === 'data_especifica' && !novoDataEspecifica) return
     const nome = novoModo === 'despesa' ? contas.find((c) => c.id === novoId)?.nome : fornecedores.find((f) => f.id === novoId)?.nome
     onChange([
       ...itens,
-      { tipo: novoModo, id: novoId, nome: nome || '—', valor_previsto: Number(novoValor), diaSemana: novoDiaSemana !== '' ? Number(novoDiaSemana) : null },
+      {
+        tipo: novoModo,
+        id: novoId,
+        nome: nome || '—',
+        valor_previsto: Number(novoValor),
+        diaSemana: novoQuando === 'dia_semana' ? Number(novoDiaSemana) : null,
+        dataEspecifica: novoQuando === 'data_especifica' ? novoDataEspecifica : null,
+      },
     ])
     setNovoId('')
     setNovoValor('')
-    setNovoDiaSemana('')
+    setNovoQuando('sem_padrao')
+    setNovoDiaSemana('0')
+    setNovoDataEspecifica('')
   }
 
   function removerItem(indice: number) {
     onChange(itens.filter((_, i) => i !== indice))
   }
 
-  const total = itens.reduce((s, i) => s + valorMensalItemOrcamento({ valor_previsto: i.valor_previsto, dia_semana: i.diaSemana }, dias), 0)
+  const total = itens.reduce(
+    (s, i) => s + valorMensalItemOrcamento({ valor_previsto: i.valor_previsto, dia_semana: i.diaSemana }, dias),
+    0
+  )
 
   return (
     <div>
@@ -70,6 +94,9 @@ export default function OrcamentoItensVariaveis({ itens, onChange, fornecedores,
                 {item.nome}
                 <span className="ml-1.5 text-[10px] font-semibold text-gray-400">{item.tipo === 'despesa' ? 'conta' : 'fornecedor'}</span>
                 {item.diaSemana != null && <span className="block text-[10px] text-purple-600">toda {DIA_SEMANA_LABEL[item.diaSemana]}</span>}
+                {item.dataEspecifica && (
+                  <span className="block text-[10px] text-purple-600">dia {new Date(item.dataEspecifica + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
+                )}
               </span>
               <div className="flex items-center gap-2">
                 <div className="text-right">
@@ -109,20 +136,54 @@ export default function OrcamentoItensVariaveis({ itens, onChange, fornecedores,
               ? contas.map((c) => <option key={c.id} value={c.id}>{c.codigo} — {c.nome}</option>)
               : fornecedores.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
           </select>
-          <select value={novoDiaSemana} onChange={(e) => setNovoDiaSemana(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
-            <option value="">Valor único do mês (sem padrão semanal)</option>
-            {DIA_SEMANA_LABEL.map((label, i) => (
-              <option key={i} value={i}>Toda {label}</option>
-            ))}
-          </select>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setNovoQuando('sem_padrao')}
+              className={`flex-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold border-2 ${novoQuando === 'sem_padrao' ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'}`}
+            >
+              Valor único do mês
+            </button>
+            <button
+              type="button"
+              onClick={() => setNovoQuando('dia_semana')}
+              className={`flex-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold border-2 ${novoQuando === 'dia_semana' ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'}`}
+            >
+              Toda [dia da semana]
+            </button>
+            <button
+              type="button"
+              onClick={() => setNovoQuando('data_especifica')}
+              className={`flex-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold border-2 ${novoQuando === 'data_especifica' ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'}`}
+            >
+              Numa data
+            </button>
+          </div>
+
+          {novoQuando === 'dia_semana' && (
+            <select value={novoDiaSemana} onChange={(e) => setNovoDiaSemana(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
+              {DIA_SEMANA_LABEL.map((label, i) => (
+                <option key={i} value={i}>Toda {label}</option>
+              ))}
+            </select>
+          )}
+          {novoQuando === 'data_especifica' && (
+            <input
+              type="date" value={novoDataEspecifica} min={primeiroDia} max={ultimoDia}
+              onChange={(e) => setNovoDataEspecifica(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            />
+          )}
+
           <div className="flex gap-2">
             <input
               type="number" step="0.01" min={0} value={novoValor} onChange={(e) => setNovoValor(e.target.value)}
-              placeholder={novoDiaSemana !== '' ? 'Valor por ocorrência (R$)' : 'Valor previsto (R$)'} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              placeholder={novoQuando === 'dia_semana' ? 'Valor por ocorrência (R$)' : 'Valor previsto (R$)'} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
             <button
               onClick={adicionarItem}
-              disabled={!novoId || Number(novoValor) <= 0}
+              disabled={!novoId || Number(novoValor) <= 0 || (novoQuando === 'data_especifica' && !novoDataEspecifica)}
               className="bg-pink-700 text-white rounded-lg px-3 py-2 text-sm font-semibold disabled:opacity-50 flex items-center gap-1"
             >
               <Plus size={16} /> Adicionar

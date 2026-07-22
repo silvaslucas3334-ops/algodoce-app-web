@@ -1068,19 +1068,27 @@ CREATE TABLE IF NOT EXISTS financeiro_orcamento_itens (
   parte_id UUID REFERENCES financeiro_partes(id),
   conta_id UUID REFERENCES financeiro_contas(id),
   valor_previsto NUMERIC NOT NULL CHECK (valor_previsto > 0),
-  -- Dia da semana opcional (0=domingo..6=sábado) — quando presente,
-  -- valor_previsto passa a ser "por ocorrência" (ex: R$500 toda segunda),
-  -- e o total do mês é calculado multiplicando pela quantidade de
-  -- ocorrências daquele dia. Sem dia_semana, continua um valor único do
-  -- mês inteiro. Só entra na comparação orçado x realizado, nunca na
-  -- linha real de Saídas (evita duplicar com nota/boleto já lançado).
+  -- "Quando" da previsão — no máximo um dos dois preenchido, os dois
+  -- juntos não fazem sentido:
+  --  - dia_semana (0=domingo..6=sábado): valor_previsto é "por ocorrência"
+  --    (ex: R$500 toda segunda), total do mês = valor × ocorrências.
+  --  - data_especifica: previsão pontual numa data exata (ex: retirada de
+  --    lucro no dia 25).
+  -- Sem nenhum dos dois, valor_previsto é um total único do mês inteiro
+  -- (sem projeção diária, só entra na comparação orçado x realizado).
+  -- Com um dos dois, a previsão TAMBÉM é injetada nos dias futuros do
+  -- calendário (Saídas) — e some sozinha quando o dia passa ou quando já
+  -- existe nota/boleto real lançado pra mesma conta/fornecedor naquela
+  -- data (evita duplicar).
   dia_semana INT CHECK (dia_semana IS NULL OR dia_semana BETWEEN 0 AND 6),
+  data_especifica DATE,
   observacao TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   CONSTRAINT foi_eixo_por_tipo CHECK (
     (tipo = 'despesa' AND conta_id IS NOT NULL) OR
     (tipo = 'compra_insumos' AND parte_id IS NOT NULL)
-  )
+  ),
+  CONSTRAINT foi_dia_ou_data_nao_ambos CHECK (dia_semana IS NULL OR data_especifica IS NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_foi_orcamento ON financeiro_orcamento_itens(orcamento_id);
 
@@ -1110,8 +1118,8 @@ BEGIN
     RAISE EXCEPTION 'apenas admin pode editar orçamento';
   END IF;
   DELETE FROM financeiro_orcamento_itens WHERE orcamento_id = p_orcamento_id;
-  INSERT INTO financeiro_orcamento_itens (orcamento_id, tipo, parte_id, conta_id, valor_previsto, dia_semana, observacao)
-  SELECT p_orcamento_id, i->>'tipo', (i->>'parte_id')::UUID, (i->>'conta_id')::UUID, (i->>'valor_previsto')::NUMERIC, (i->>'dia_semana')::INT, i->>'observacao'
+  INSERT INTO financeiro_orcamento_itens (orcamento_id, tipo, parte_id, conta_id, valor_previsto, dia_semana, data_especifica, observacao)
+  SELECT p_orcamento_id, i->>'tipo', (i->>'parte_id')::UUID, (i->>'conta_id')::UUID, (i->>'valor_previsto')::NUMERIC, (i->>'dia_semana')::INT, (i->>'data_especifica')::DATE, i->>'observacao'
   FROM jsonb_array_elements(p_itens) AS i;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

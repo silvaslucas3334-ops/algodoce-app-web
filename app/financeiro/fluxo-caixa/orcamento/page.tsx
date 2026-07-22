@@ -17,6 +17,8 @@ import {
   calcularDeltaEGap,
   calcularSaldoDiarioEAcumulado,
   compararOrcado,
+  gerarEventosForecastOrcamento,
+  somarEventosPorDia,
   FluxoMensalResultado,
   LinhaDespesaFixaFutura,
   FluxoMensalOrcadoRealizado,
@@ -122,6 +124,7 @@ function OrcamentoWizardContent() {
           nome: i.tipo === 'despesa' ? i.conta?.nome || '—' : i.parte?.nome || '—',
           valor_previsto: i.valor_previsto,
           diaSemana: i.dia_semana ?? null,
+          dataEspecifica: i.data_especifica ?? null,
         }))
       )
       setRecorrencias((recs || []).map((r) => ({ nome: r.parte?.nome || r.descricao, valor: r.valor, diaVencimento: r.dia_vencimento })))
@@ -171,8 +174,6 @@ function OrcamentoWizardContent() {
     if (l1 == null && l2 == null) return null
     return (l1 || 0) + (l2 || 0)
   })()
-  const { saldoAcumuladoPorDia } = calcularSaldoDiarioEAcumulado(entradasCaixaPorDiaDraft, dadosFluxo?.saidasPorDia || [], saldoInicialDraft)
-  const saldoProjetado = saldoAcumuladoPorDia.length > 0 ? saldoAcumuladoPorDia[saldoAcumuladoPorDia.length - 1] : null
 
   const itensVariaveisComoPrevisto = itensVariaveis.map((i) => ({
     tipo: i.tipo,
@@ -180,13 +181,28 @@ function OrcamentoWizardContent() {
     conta_id: i.tipo === 'despesa' ? i.id : undefined,
     valor_previsto: i.valor_previsto,
     dia_semana: i.diaSemana,
+    data_especifica: i.dataEspecifica,
   }))
+
+  // Comparação orçado x realizado usa as agregações REALIZADO (sem
+  // previsão), senão compararia o orçamento com ele mesmo.
   const orcadoXRealizadoDraft: FluxoMensalOrcadoRealizado[] = dadosFluxo
     ? [
-        ...compararOrcado(itensVariaveisComoPrevisto, 'despesa', dadosFluxo.saidasFixoPorConta, 'conta_id', dias),
-        ...compararOrcado(itensVariaveisComoPrevisto, 'compra_insumos', dadosFluxo.saidasVariavelPorFornecedor, 'parte_id', dias),
+        ...compararOrcado(itensVariaveisComoPrevisto, 'despesa', dadosFluxo.saidasFixoPorContaRealizado, 'conta_id', dias),
+        ...compararOrcado(itensVariaveisComoPrevisto, 'compra_insumos', dadosFluxo.saidasVariavelPorFornecedorRealizado, 'parte_id', dias),
       ]
     : []
+
+  // Saldo Projetado: parte do REALIZADO (sem a previsão salva no banco) e
+  // injeta a previsão do RASCUNHO por cima — assim reflete edições ainda
+  // não salvas, igual buscarFluxoMensal faria depois de salvar.
+  const eventosForecastDraft = dadosFluxo
+    ? gerarEventosForecastOrcamento(itensVariaveisComoPrevisto, dadosFluxo.saidasFixoPorContaRealizado, dadosFluxo.saidasVariavelPorFornecedorRealizado, dias, hojeStr)
+    : []
+  const forecastPorDiaDraft = somarEventosPorDia(eventosForecastDraft, dias)
+  const saidasPorDiaDraft = dias.map((_, i) => (dadosFluxo?.saidasPorDiaRealizado[i] || 0) + forecastPorDiaDraft[i])
+  const { saldoAcumuladoPorDia } = calcularSaldoDiarioEAcumulado(entradasCaixaPorDiaDraft, saidasPorDiaDraft, saldoInicialDraft)
+  const saldoProjetado = saldoAcumuladoPorDia.length > 0 ? saldoAcumuladoPorDia[saldoAcumuladoPorDia.length - 1] : null
 
   async function salvar() {
     if (!usuario) return
@@ -210,6 +226,7 @@ function OrcamentoWizardContent() {
         conta_id: i.tipo === 'despesa' ? i.id : null,
         valor_previsto: i.valor_previsto,
         dia_semana: i.diaSemana,
+        data_especifica: i.dataEspecifica,
         observacao: null,
       }))
       await salvarItensOrcamento(geralId, payload)
@@ -359,6 +376,9 @@ function OrcamentoWizardContent() {
                   <div>
                     <h2 className="text-lg font-bold text-gray-800">Despesas Variáveis</h2>
                     <p className="text-sm text-gray-500 mt-1">Insumos, embalagens, despesas diversas — por fornecedor ou por conta (ex: pró-labore, distribuição de lucro).</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Com dia da semana ou data marcada, a previsão também aparece nos dias futuros do calendário do Fluxo de Caixa — e some sozinha quando o dia passa ou quando a despesa real for lançada.
+                    </p>
                   </div>
                   <OrcamentoItensVariaveis itens={itensVariaveis} onChange={setItensVariaveis} fornecedores={fornecedores} contas={contas} dias={dias} readOnly={bloqueado} />
                 </div>
