@@ -138,9 +138,7 @@ export default function FluxoMensalTabela({ dados, onAbrirDrilldown }: Props) {
           {dados.entradasCaixaPorCategoria.map((c) => (
             <tr key={c.categoria}>
               <td className="sticky left-0 bg-white px-3 py-1 pl-6 text-gray-500">{c.label}</td>
-              <td colSpan={dados.dias.length} className="sticky left-[160px] bg-white px-2 py-1 text-left text-gray-400 italic whitespace-nowrap">
-                só mês inteiro — {formatBRL(c.total)}
-              </td>
+              {c.porDia.map((v, i) => <CelulaDia key={i} valor={v} className={bordaHoje(dados.dias[i], hoje)} />)}
               <td className="px-3 py-1 text-right text-gray-600">{formatBRL(c.total)}</td>
             </tr>
           ))}

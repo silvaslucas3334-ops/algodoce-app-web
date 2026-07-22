@@ -48,7 +48,7 @@ export interface FluxoMensalResultado {
 
   entradasCaixaPorDia: number[]
   entradasCaixaEhForecastPorDia: boolean[]
-  entradasCaixaPorCategoria: { categoria: CategoriaReceita; label: string; total: number }[]
+  entradasCaixaPorCategoria: { categoria: CategoriaReceita; label: string; porDia: (number | null)[]; total: number }[]
   totalEntradasCaixa: number
 
   saidasPorDia: number[]
@@ -266,13 +266,25 @@ export async function buscarFluxoMensal(
     }
   })
 
-  const somaPorCategoria = new Map<CategoriaReceita, number>()
-  Object.keys(CATEGORIA_RECEITA_LABEL).forEach((c) => somaPorCategoria.set(c as CategoriaReceita, 0))
-  receitasReais.forEach((r) => somaPorCategoria.set(r.categoria, (somaPorCategoria.get(r.categoria) || 0) + r.valor))
-  const entradasCaixaPorCategoria = Array.from(somaPorCategoria.entries()).map(([categoria, total]) => ({
+  // Detalhe por categoria, dia a dia — só realizado (regime de caixa não
+  // tem forecast por categoria, só o total agregado); dias futuros ficam
+  // null (não é "zero", é "não projetado nesse nível de detalhe").
+  const porCategoriaEDia = new Map<CategoriaReceita, (number | null)[]>()
+  Object.keys(CATEGORIA_RECEITA_LABEL).forEach((c) =>
+    porCategoriaEDia.set(c as CategoriaReceita, dias.map((d) => (d <= hoje ? 0 : null)))
+  )
+  receitasReais.forEach((r) => {
+    if (r.data > hoje) return
+    const porDia = porCategoriaEDia.get(r.categoria)
+    if (!porDia) return
+    const indice = dias.indexOf(r.data)
+    if (indice >= 0) porDia[indice] = (porDia[indice] || 0) + r.valor
+  })
+  const entradasCaixaPorCategoria = Array.from(porCategoriaEDia.entries()).map(([categoria, porDia]) => ({
     categoria,
     label: CATEGORIA_RECEITA_LABEL[categoria],
-    total,
+    porDia,
+    total: porDia.reduce((s: number, v) => s + (v || 0), 0),
   }))
   const totalEntradasCaixa = entradasCaixaPorDia.reduce((s, v) => s + v, 0)
 

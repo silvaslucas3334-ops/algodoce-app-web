@@ -8,7 +8,6 @@ import FluxoMensalDrilldownModal, { LinhaDrilldown } from '@/components/FluxoMen
 import OrcamentoEditorModal from '@/components/OrcamentoEditorModal'
 import NovaReceitaDinheiroModal from '@/components/NovaReceitaDinheiroModal'
 import { buscarFluxoMensal, buscarAtrasados, FluxoMensalResultado, FluxoMensalAtrasados } from '@/lib/financeiro-fluxo-mensal'
-import { Cenario } from '@/lib/financeiro-forecast'
 import { formatBRL } from '@/lib/ofx'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark } from 'lucide-react'
@@ -17,8 +16,6 @@ const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ]
-
-const CENARIO_LABEL: Record<Cenario, string> = { pessimista: 'Pessimista', moderado: 'Moderado', otimista: 'Otimista' }
 
 type Aba = 'mensal' | 'extrato'
 
@@ -31,7 +28,6 @@ function FluxoCaixaContent() {
   const [aba, setAba] = useState<Aba>(params.get('tab') === 'extrato' ? 'extrato' : 'mensal')
   const [ano, setAno] = useState(hoje.getFullYear())
   const [mes, setMes] = useState(hoje.getMonth() + 1)
-  const [cenario, setCenario] = useState<Cenario>('moderado')
 
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
@@ -43,14 +39,14 @@ function FluxoCaixaContent() {
 
   useEffect(() => {
     if (aba === 'mensal') carregar()
-  }, [aba, ano, mes, cenario])
+  }, [aba, ano, mes])
 
   async function carregar() {
     setLoading(true)
     setErro('')
     try {
       const [resultado, atrasadosResultado] = await Promise.all([
-        buscarFluxoMensal('consolidado', ano, mes, cenario),
+        buscarFluxoMensal('consolidado', ano, mes, 'moderado'),
         buscarAtrasados('consolidado'),
       ])
       setDados(resultado)
@@ -120,29 +116,14 @@ function FluxoCaixaContent() {
             <ConciliarExtratoTab />
           ) : (
             <>
-              <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-                <div className="flex items-center gap-3">
-                  <button onClick={mesAnterior} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
-                    <ChevronLeft size={20} className="text-gray-600" />
-                  </button>
-                  <p className="text-lg font-semibold text-gray-800 min-w-[160px] text-center">{MESES[mes - 1]} de {ano}</p>
-                  <button onClick={proximoMes} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
-                    <ChevronRight size={20} className="text-gray-600" />
-                  </button>
-                </div>
-                <div className="flex gap-1">
-                  {(['pessimista', 'moderado', 'otimista'] as Cenario[]).map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => setCenario(c)}
-                      className={`px-3 py-1.5 rounded-full text-xs border ${
-                        cenario === c ? 'bg-gray-800 text-white border-transparent font-semibold' : 'bg-white border-gray-200 text-gray-500'
-                      }`}
-                    >
-                      {CENARIO_LABEL[c]}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex items-center gap-3 mb-4">
+                <button onClick={mesAnterior} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                  <ChevronLeft size={20} className="text-gray-600" />
+                </button>
+                <p className="text-lg font-semibold text-gray-800 min-w-[160px] text-center">{MESES[mes - 1]} de {ano}</p>
+                <button onClick={proximoMes} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+                  <ChevronRight size={20} className="text-gray-600" />
+                </button>
               </div>
 
               {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">{erro}</div>}
