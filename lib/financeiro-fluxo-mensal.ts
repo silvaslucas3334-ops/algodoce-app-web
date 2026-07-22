@@ -86,23 +86,39 @@ export function corComparacao(previsto: number, projetado: number, tipo: 'receit
 }
 
 /**
+ * Valor mensal efetivo de um item de orçamento — se tiver dia_semana
+ * marcado, valor_previsto é "por ocorrência" (ex: R$500 toda segunda) e o
+ * total do mês é esse valor multiplicado pela quantidade de ocorrências
+ * daquele dia no mês. Sem dia_semana, valor_previsto já é o total do mês.
+ */
+export function valorMensalItemOrcamento(
+  item: Pick<FinanceiroOrcamentoItem, 'valor_previsto' | 'dia_semana'>,
+  dias: string[]
+): number {
+  if (item.dia_semana == null) return item.valor_previsto
+  const ocorrencias = dias.filter((d) => new Date(d + 'T00:00:00').getDay() === item.dia_semana).length
+  return item.valor_previsto * ocorrencias
+}
+
+/**
  * Compara itens previstos do orçamento (por tipo) contra o realizado
  * agrupado (por conta ou por fornecedor). Exportada — usada tanto pelo
  * calendário mensal quanto pelo step de Revisão do wizard de orçamento,
  * pra nunca ter duas implementações que podem divergir.
  */
 export function compararOrcado(
-  itensPrevisto: Pick<FinanceiroOrcamentoItem, 'tipo' | 'parte_id' | 'conta_id' | 'valor_previsto'>[],
+  itensPrevisto: Pick<FinanceiroOrcamentoItem, 'tipo' | 'parte_id' | 'conta_id' | 'valor_previsto' | 'dia_semana'>[],
   tipo: TipoLancamento,
   grupos: FluxoMensalLinhaGrupo[],
-  chave: 'parte_id' | 'conta_id'
+  chave: 'parte_id' | 'conta_id',
+  dias: string[]
 ): FluxoMensalOrcadoRealizado[] {
   const previstoPorId = new Map<string, number>()
   itensPrevisto
     .filter((i) => i.tipo === tipo)
     .forEach((i: any) => {
       const id = i[chave] || 'sem-id'
-      previstoPorId.set(id, (previstoPorId.get(id) || 0) + i.valor_previsto)
+      previstoPorId.set(id, (previstoPorId.get(id) || 0) + valorMensalItemOrcamento(i, dias))
     })
   const resultado: FluxoMensalOrcadoRealizado[] = []
   previstoPorId.forEach((previsto, id) => {
@@ -534,8 +550,8 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
   const todosItens = orcamentoGeral?.itens || []
 
   const orcadoXRealizado = [
-    ...compararOrcado(todosItens, 'despesa', saidasFixoPorConta, 'conta_id'),
-    ...compararOrcado(todosItens, 'compra_insumos', saidasVariavelPorFornecedor, 'parte_id'),
+    ...compararOrcado(todosItens, 'despesa', saidasFixoPorConta, 'conta_id', dias),
+    ...compararOrcado(todosItens, 'compra_insumos', saidasVariavelPorFornecedor, 'parte_id', dias),
   ].sort((a, b) => b.previsto - a.previsto)
 
   return {

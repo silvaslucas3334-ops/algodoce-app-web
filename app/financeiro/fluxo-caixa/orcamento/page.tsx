@@ -121,6 +121,7 @@ function OrcamentoWizardContent() {
           id: (i.tipo === 'despesa' ? i.conta_id : i.parte_id) || '',
           nome: i.tipo === 'despesa' ? i.conta?.nome || '—' : i.parte?.nome || '—',
           valor_previsto: i.valor_previsto,
+          diaSemana: i.dia_semana ?? null,
         }))
       )
       setRecorrencias((recs || []).map((r) => ({ nome: r.parte?.nome || r.descricao, valor: r.valor, diaVencimento: r.dia_vencimento })))
@@ -178,11 +179,12 @@ function OrcamentoWizardContent() {
     parte_id: i.tipo === 'compra_insumos' ? i.id : undefined,
     conta_id: i.tipo === 'despesa' ? i.id : undefined,
     valor_previsto: i.valor_previsto,
+    dia_semana: i.diaSemana,
   }))
   const orcadoXRealizadoDraft: FluxoMensalOrcadoRealizado[] = dadosFluxo
     ? [
-        ...compararOrcado(itensVariaveisComoPrevisto, 'despesa', dadosFluxo.saidasFixoPorConta, 'conta_id'),
-        ...compararOrcado(itensVariaveisComoPrevisto, 'compra_insumos', dadosFluxo.saidasVariavelPorFornecedor, 'parte_id'),
+        ...compararOrcado(itensVariaveisComoPrevisto, 'despesa', dadosFluxo.saidasFixoPorConta, 'conta_id', dias),
+        ...compararOrcado(itensVariaveisComoPrevisto, 'compra_insumos', dadosFluxo.saidasVariavelPorFornecedor, 'parte_id', dias),
       ]
     : []
 
@@ -207,6 +209,7 @@ function OrcamentoWizardContent() {
         parte_id: i.tipo === 'compra_insumos' ? i.id : null,
         conta_id: i.tipo === 'despesa' ? i.id : null,
         valor_previsto: i.valor_previsto,
+        dia_semana: i.diaSemana,
         observacao: null,
       }))
       await salvarItensOrcamento(geralId, payload)
@@ -357,7 +360,7 @@ function OrcamentoWizardContent() {
                     <h2 className="text-lg font-bold text-gray-800">Despesas Variáveis</h2>
                     <p className="text-sm text-gray-500 mt-1">Insumos, embalagens, despesas diversas — por fornecedor ou por conta (ex: pró-labore, distribuição de lucro).</p>
                   </div>
-                  <OrcamentoItensVariaveis itens={itensVariaveis} onChange={setItensVariaveis} fornecedores={fornecedores} contas={contas} readOnly={bloqueado} />
+                  <OrcamentoItensVariaveis itens={itensVariaveis} onChange={setItensVariaveis} fornecedores={fornecedores} contas={contas} dias={dias} readOnly={bloqueado} />
                 </div>
               )}
 

@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { formatBRL } from '@/lib/ofx'
 import { FinanceiroParte, FinanceiroConta } from '@/lib/types'
+import { valorMensalItemOrcamento } from '@/lib/financeiro-fluxo-mensal'
 import { Plus, Trash2 } from 'lucide-react'
 
 export interface ItemOrcamentoVariavel {
@@ -9,6 +10,7 @@ export interface ItemOrcamentoVariavel {
   id: string // parte_id ou conta_id
   nome: string
   valor_previsto: number
+  diaSemana: number | null // 0=domingo..6=sábado; presente = valor_previsto é "por ocorrência" (ex: toda segunda)
 }
 
 interface Props {
@@ -16,33 +18,46 @@ interface Props {
   onChange: (itens: ItemOrcamentoVariavel[]) => void
   fornecedores: FinanceiroParte[]
   contas: FinanceiroConta[]
+  dias: string[] // dias do mês sendo editado — usado só pra calcular o total mensal de itens "por dia da semana"
   readOnly?: boolean
 }
+
+const DIA_SEMANA_LABEL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 
 /**
  * Previsão manual de despesas variáveis (insumos, embalagens, despesas
  * diversas) — por fornecedor (compra_insumos) ou por conta, pra alocações
  * gerais sem fornecedor específico (ex: distribuição de lucro/pró-labore).
  * As duas formas cobrem casos diferentes, nenhuma substitui a outra.
+ *
+ * Cada item pode opcionalmente ter um dia da semana — pra fornecedores com
+ * padrão semanal previsível (ex: boleto pago toda segunda), o valor vira
+ * "por ocorrência" e o total do mês é calculado automaticamente. Sem dia
+ * da semana, o valor continua sendo um total único pro mês inteiro.
  */
-export default function OrcamentoItensVariaveis({ itens, onChange, fornecedores, contas, readOnly }: Props) {
+export default function OrcamentoItensVariaveis({ itens, onChange, fornecedores, contas, dias, readOnly }: Props) {
   const [novoModo, setNovoModo] = useState<'despesa' | 'compra_insumos'>('compra_insumos')
   const [novoId, setNovoId] = useState('')
   const [novoValor, setNovoValor] = useState('')
+  const [novoDiaSemana, setNovoDiaSemana] = useState<string>('')
 
   function adicionarItem() {
     if (!novoId || Number(novoValor) <= 0) return
     const nome = novoModo === 'despesa' ? contas.find((c) => c.id === novoId)?.nome : fornecedores.find((f) => f.id === novoId)?.nome
-    onChange([...itens, { tipo: novoModo, id: novoId, nome: nome || '—', valor_previsto: Number(novoValor) }])
+    onChange([
+      ...itens,
+      { tipo: novoModo, id: novoId, nome: nome || '—', valor_previsto: Number(novoValor), diaSemana: novoDiaSemana !== '' ? Number(novoDiaSemana) : null },
+    ])
     setNovoId('')
     setNovoValor('')
+    setNovoDiaSemana('')
   }
 
   function removerItem(indice: number) {
     onChange(itens.filter((_, i) => i !== indice))
   }
 
-  const total = itens.reduce((s, i) => s + i.valor_previsto, 0)
+  const total = itens.reduce((s, i) => s + valorMensalItemOrcamento({ valor_previsto: i.valor_previsto, dia_semana: i.diaSemana }, dias), 0)
 
   return (
     <div>
@@ -54,9 +69,13 @@ export default function OrcamentoItensVariaveis({ itens, onChange, fornecedores,
               <span className="text-gray-700">
                 {item.nome}
                 <span className="ml-1.5 text-[10px] font-semibold text-gray-400">{item.tipo === 'despesa' ? 'conta' : 'fornecedor'}</span>
+                {item.diaSemana != null && <span className="block text-[10px] text-purple-600">toda {DIA_SEMANA_LABEL[item.diaSemana]}</span>}
               </span>
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-gray-800">{formatBRL(item.valor_previsto)}</span>
+                <div className="text-right">
+                  <span className="font-semibold text-gray-800">{formatBRL(item.valor_previsto)}</span>
+                  {item.diaSemana != null && <span className="block text-[10px] text-gray-400">por ocorrência</span>}
+                </div>
                 {!readOnly && (
                   <button onClick={() => removerItem(i)} className="text-red-600 hover:text-red-700"><Trash2 size={14} /></button>
                 )}
@@ -90,10 +109,16 @@ export default function OrcamentoItensVariaveis({ itens, onChange, fornecedores,
               ? contas.map((c) => <option key={c.id} value={c.id}>{c.codigo} — {c.nome}</option>)
               : fornecedores.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
           </select>
+          <select value={novoDiaSemana} onChange={(e) => setNovoDiaSemana(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
+            <option value="">Valor único do mês (sem padrão semanal)</option>
+            {DIA_SEMANA_LABEL.map((label, i) => (
+              <option key={i} value={i}>Toda {label}</option>
+            ))}
+          </select>
           <div className="flex gap-2">
             <input
               type="number" step="0.01" min={0} value={novoValor} onChange={(e) => setNovoValor(e.target.value)}
-              placeholder="Valor previsto (R$)" className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              placeholder={novoDiaSemana !== '' ? 'Valor por ocorrência (R$)' : 'Valor previsto (R$)'} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
             <button
               onClick={adicionarItem}

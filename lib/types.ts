@@ -402,6 +402,7 @@ export interface FinanceiroOrcamentoItem {
   conta_id?: string
   conta?: FinanceiroConta
   valor_previsto: number
+  dia_semana?: number | null // 0=domingo..6=sábado; presente = valor_previsto é "por ocorrência" (ex: toda segunda), não um total do mês
   observacao?: string
   created_at: string
 }
