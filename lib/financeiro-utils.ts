@@ -85,6 +85,17 @@ export function hojeISO(): string {
 }
 
 /**
+ * Mês (ano, mes) já encerrado em relação a hoje — o Orçamento vira
+ * somente leitura pra esses meses (o passado é a realidade, não se
+ * reedita o plano de um mês que já fechou). O mês corrente, mesmo
+ * parcialmente decorrido, e meses futuros continuam totalmente editáveis.
+ */
+export function mesEncerrado(ano: number, mes: number): boolean {
+  const [anoAtual, mesAtual] = hojeISO().split('-').map(Number)
+  return ano < anoAtual || (ano === anoAtual && mes < mesAtual)
+}
+
+/**
  * Rótulo de status para exibição: "aberto" vira Planejada ou Atrasada
  * conforme o vencimento (calculado, não persistido).
  */

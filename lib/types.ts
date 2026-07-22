@@ -374,14 +374,18 @@ export interface FinanceiroReceita {
   criado_em: string
 }
 
-// Orçamento do mês — meta de venda + saldo inicial (só loja1/loja2) e
-// previsão manual de despesas, base da visão mensal do Fluxo de Caixa.
+// Orçamento do mês — meta de venda + previsão de entrada de caixa por dia
+// da semana + saldo inicial (só loja1/loja2) e previsão manual de
+// despesas, base da visão mensal do Fluxo de Caixa. Arrays sempre length
+// 7, índice 0=domingo..6=sábado (igual Date.getDay()); item null = "não
+// cadastrado" (nunca 0 por omissão). Sempre all-null pra unidade 'geral'.
 export interface FinanceiroOrcamento {
   id: string
   ano: number
   mes: number
   unidade: UnidadeOrcamento
-  valor_meta_venda?: number // null/undefined pra 'geral', ou loja ainda sem meta cadastrada
+  metaVendaPorDiaSemana: (number | null)[]
+  entradaPrevistaPorDiaSemana: (number | null)[]
   saldo_inicial?: number // null/undefined = "não informado", nunca 0 por omissão
   criado_por: string
   created_at: string

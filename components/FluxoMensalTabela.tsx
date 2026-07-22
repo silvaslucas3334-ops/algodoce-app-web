@@ -186,7 +186,7 @@ export default function FluxoMensalTabela({ dados, onAbrirDrilldown }: Props) {
             {dados.saldoDiaPorDia.map((v, i) => (
               <td
                 key={i}
-                className={`px-2 py-1.5 text-right whitespace-nowrap font-medium ${v >= 0 ? 'text-green-600' : 'text-red-600'} ${bordaHoje(dados.dias[i], hoje)}`}
+                className={`px-2 py-1.5 text-right whitespace-nowrap font-medium ${v == null ? 'text-gray-400' : v >= 0 ? 'text-green-600' : 'text-red-600'} ${bordaHoje(dados.dias[i], hoje)}`}
               >
                 {formatCompacto(v)}
               </td>
@@ -200,13 +200,16 @@ export default function FluxoMensalTabela({ dados, onAbrirDrilldown }: Props) {
             {dados.saldoAcumuladoPorDia.map((v, i) => (
               <td
                 key={i}
-                className={`px-2 py-1.5 text-right whitespace-nowrap font-medium ${v >= 0 ? 'text-green-600' : 'text-red-600'} ${bordaHoje(dados.dias[i], hoje)}`}
+                className={`px-2 py-1.5 text-right whitespace-nowrap font-medium ${v == null ? 'text-gray-400' : v >= 0 ? 'text-green-600' : 'text-red-600'} ${bordaHoje(dados.dias[i], hoje)}`}
               >
                 {formatCompacto(v)}
               </td>
             ))}
             <td className="px-3 py-1.5 text-right font-bold text-gray-800">
-              {formatBRL(dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1] || 0)}
+              {(() => {
+                const ultimo = dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1]
+                return ultimo != null ? formatBRL(ultimo) : '—'
+              })()}
             </td>
           </tr>
         </tbody>

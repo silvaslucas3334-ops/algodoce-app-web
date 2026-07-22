@@ -1,6 +1,22 @@
 import { supabase } from './supabase'
 import { FinanceiroOrcamento, FinanceiroRecorrencia, TipoLancamento, UnidadeOrcamento } from './types'
 
+// Ordem das colunas por dia da semana no banco — índice 0=domingo..6=sábado,
+// igual Date.getDay() e DIA_SEMANA_LABEL em components/FluxoMensalTabela.tsx.
+const SUFIXOS_DIA_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'] as const
+
+function colunasParaArray(row: any, prefixo: 'meta_venda' | 'entrada_prevista'): (number | null)[] {
+  return SUFIXOS_DIA_SEMANA.map((sufixo) => row[`${prefixo}_${sufixo}`] ?? null)
+}
+
+function arrayParaColunas(valores: (number | null)[], prefixo: 'meta_venda' | 'entrada_prevista'): Record<string, number | null> {
+  const colunas: Record<string, number | null> = {}
+  SUFIXOS_DIA_SEMANA.forEach((sufixo, i) => {
+    colunas[`${prefixo}_${sufixo}`] = valores[i] ?? null
+  })
+  return colunas
+}
+
 export async function buscarOrcamento(ano: number, mes: number, unidade: UnidadeOrcamento): Promise<FinanceiroOrcamento | null> {
   const { data, error } = await supabase
     .from('financeiro_orcamentos')
@@ -10,18 +26,24 @@ export async function buscarOrcamento(ano: number, mes: number, unidade: Unidade
     .eq('unidade', unidade)
     .maybeSingle()
   if (error) throw new Error(error.message)
-  return data
+  if (!data) return null
+  return {
+    ...data,
+    metaVendaPorDiaSemana: colunasParaArray(data, 'meta_venda'),
+    entradaPrevistaPorDiaSemana: colunasParaArray(data, 'entrada_prevista'),
+  }
 }
 
 /**
- * Cria ou atualiza o orçamento do mês (meta de venda + saldo inicial) num
- * passo só — chave única (ano, mes, unidade) garante que nunca duplica.
+ * Cria ou atualiza o orçamento do mês (meta de venda + previsão de
+ * entrada por dia da semana + saldo inicial) num passo só — chave única
+ * (ano, mes, unidade) garante que nunca duplica.
  */
 export async function salvarOrcamento(
   ano: number,
   mes: number,
   unidade: UnidadeOrcamento,
-  dados: { valor_meta_venda: number | null; saldo_inicial: number | null },
+  dados: { metaVendaPorDiaSemana: (number | null)[]; entradaPrevistaPorDiaSemana: (number | null)[]; saldo_inicial: number | null },
   usuarioId: string
 ): Promise<string> {
   const { data, error } = await supabase
@@ -31,7 +53,8 @@ export async function salvarOrcamento(
         ano,
         mes,
         unidade,
-        valor_meta_venda: dados.valor_meta_venda,
+        ...arrayParaColunas(dados.metaVendaPorDiaSemana, 'meta_venda'),
+        ...arrayParaColunas(dados.entradaPrevistaPorDiaSemana, 'entrada_prevista'),
         saldo_inicial: dados.saldo_inicial,
         criado_por: usuarioId,
         updated_at: new Date().toISOString(),

@@ -5,11 +5,11 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import ConciliarExtratoTab from '@/components/ConciliarExtratoTab'
 import FluxoMensalTabela from '@/components/FluxoMensalTabela'
 import FluxoMensalDrilldownModal, { LinhaDrilldown } from '@/components/FluxoMensalDrilldownModal'
-import OrcamentoEditorModal from '@/components/OrcamentoEditorModal'
 import NovaReceitaDinheiroModal from '@/components/NovaReceitaDinheiroModal'
 import { buscarFluxoMensal, buscarAtrasados, FluxoMensalResultado, FluxoMensalAtrasados } from '@/lib/financeiro-fluxo-mensal'
 import { formatBRL } from '@/lib/ofx'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark } from 'lucide-react'
 
 const MESES = [
@@ -26,15 +26,14 @@ function FluxoCaixaContent() {
   const hoje = new Date()
 
   const [aba, setAba] = useState<Aba>(params.get('tab') === 'extrato' ? 'extrato' : 'mensal')
-  const [ano, setAno] = useState(hoje.getFullYear())
-  const [mes, setMes] = useState(hoje.getMonth() + 1)
+  const [ano, setAno] = useState(Number(params.get('ano')) || hoje.getFullYear())
+  const [mes, setMes] = useState(Number(params.get('mes')) || hoje.getMonth() + 1)
 
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [dados, setDados] = useState<FluxoMensalResultado | null>(null)
   const [atrasados, setAtrasados] = useState<FluxoMensalAtrasados | null>(null)
   const [modalDrilldown, setModalDrilldown] = useState<{ titulo: string; linhas: LinhaDrilldown[] } | null>(null)
-  const [modalOrcamento, setModalOrcamento] = useState(false)
   const [modalNovaReceita, setModalNovaReceita] = useState(false)
 
   useEffect(() => {
@@ -46,7 +45,7 @@ function FluxoCaixaContent() {
     setErro('')
     try {
       const [resultado, atrasadosResultado] = await Promise.all([
-        buscarFluxoMensal('consolidado', ano, mes, 'moderado'),
+        buscarFluxoMensal('consolidado', ano, mes),
         buscarAtrasados('consolidado'),
       ])
       setDados(resultado)
@@ -66,7 +65,7 @@ function FluxoCaixaContent() {
     if (mes === 12) { setMes(1); setAno(ano + 1) } else { setMes(mes + 1) }
   }
 
-  const saldoFinal = dados ? dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1] || 0 : 0
+  const saldoFinal = dados && dados.saldoAcumuladoPorDia.length > 0 ? dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1] : null
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
@@ -87,12 +86,12 @@ function FluxoCaixaContent() {
                 >
                   <Plus size={16} /> Dinheiro
                 </button>
-                <button
-                  onClick={() => setModalOrcamento(true)}
+                <Link
+                  href={`/financeiro/fluxo-caixa/orcamento?ano=${ano}&mes=${mes}`}
                   className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800 text-sm"
                 >
                   <Settings size={16} /> Orçamento
-                </button>
+                </Link>
                 <button
                   onClick={() => setAba('extrato')}
                   className="bg-white border-2 border-gray-200 text-gray-700 rounded-lg px-3 py-2 font-semibold flex items-center gap-1.5 hover:border-gray-300 text-sm"
@@ -145,8 +144,8 @@ function FluxoCaixaContent() {
                     </div>
                     <div className="bg-white rounded-xl p-4 border border-gray-100">
                       <p className="text-xs text-gray-500 uppercase font-semibold">Saldo</p>
-                      <p className={`text-lg font-bold mt-1 ${saldoFinal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatBRL(saldoFinal)}
+                      <p className={`text-lg font-bold mt-1 ${saldoFinal == null ? 'text-gray-400' : saldoFinal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {saldoFinal != null ? formatBRL(saldoFinal) : 'Incompleto'}
                       </p>
                     </div>
                     <button
@@ -175,16 +174,6 @@ function FluxoCaixaContent() {
 
         {modalDrilldown && (
           <FluxoMensalDrilldownModal titulo={modalDrilldown.titulo} linhas={modalDrilldown.linhas} onClose={() => setModalDrilldown(null)} />
-        )}
-
-        {modalOrcamento && usuario && (
-          <OrcamentoEditorModal
-            ano={ano}
-            mes={mes}
-            usuarioId={usuario.id}
-            onClose={() => setModalOrcamento(false)}
-            onSalvo={carregar}
-          />
         )}
 
         {modalNovaReceita && usuario && (

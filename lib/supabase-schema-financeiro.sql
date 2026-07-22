@@ -1000,13 +1000,22 @@ GRANT EXECUTE ON FUNCTION financeiro_produto_final_salvar_itens TO authenticated
 SELECT tablename, rowsecurity FROM pg_tables WHERE tablename LIKE 'financeiro_pre_preparo%' OR tablename LIKE 'financeiro_produto_final%';
 
 -- ============================================================
--- 16. Orçamento do mês — meta de venda + saldo inicial + previsão manual
--- de despesas, base da visão mensal em calendário do Fluxo de Caixa.
+-- 16. Orçamento do mês — meta de venda + previsão de entrada de caixa por
+-- dia da semana + saldo inicial + previsão manual de despesas, base da
+-- visão mensal em calendário do Fluxo de Caixa.
 --
--- Um registro por (ano, mes, unidade). Meta de venda e saldo inicial são
--- por loja (loja1/loja2 — só quem vende e tem conta bancária própria);
--- 'geral' é o balde único das despesas orçadas do mês inteiro, tratando a
--- empresa como uma unidade só (CHECK trava meta/saldo fora das lojas).
+-- Um registro por (ano, mes, unidade). Meta de venda, previsão de entrada
+-- e saldo inicial são por loja (loja1/loja2 — só quem vende e tem conta
+-- bancária própria); 'geral' é o balde único das despesas orçadas do mês
+-- inteiro, tratando a empresa como uma unidade só (CHECK trava meta/
+-- saldo/previsão fora das lojas).
+--
+-- Meta de venda e previsão de entrada são cadastradas à mão, por dia da
+-- semana (7 colunas cada, dom-sáb) — não por média histórica automática,
+-- ainda não há dado suficiente pra isso significar algo (ver
+-- lib/migrations/reestrutura-orcamento-metas-semanais.sql). Índice de dia
+-- da semana combina com Date.getDay() (0=domingo..6=sábado), igual
+-- DIA_SEMANA_LABEL em components/FluxoMensalTabela.tsx.
 --
 -- financeiro_orcamento_itens não tem policy de INSERT/UPDATE/DELETE — é
 -- um rascunho editável o mês inteiro, mas DELETE é bloqueado em toda
@@ -1020,13 +1029,36 @@ CREATE TABLE IF NOT EXISTS financeiro_orcamentos (
   ano INT NOT NULL,
   mes INT NOT NULL CHECK (mes BETWEEN 1 AND 12),
   unidade TEXT NOT NULL CHECK (unidade IN ('loja1','loja2','geral')),
-  valor_meta_venda NUMERIC CHECK (valor_meta_venda IS NULL OR valor_meta_venda > 0),
+  meta_venda_dom NUMERIC, meta_venda_seg NUMERIC, meta_venda_ter NUMERIC, meta_venda_qua NUMERIC,
+  meta_venda_qui NUMERIC, meta_venda_sex NUMERIC, meta_venda_sab NUMERIC,
+  entrada_prevista_dom NUMERIC, entrada_prevista_seg NUMERIC, entrada_prevista_ter NUMERIC, entrada_prevista_qua NUMERIC,
+  entrada_prevista_qui NUMERIC, entrada_prevista_sex NUMERIC, entrada_prevista_sab NUMERIC,
   saldo_inicial NUMERIC, -- saldo bancário no início do mês; null = "não informado", nunca 0 por omissão
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (ano, mes, unidade),
-  CONSTRAINT fo_meta_e_saldo_so_loja CHECK (unidade <> 'geral' OR (valor_meta_venda IS NULL AND saldo_inicial IS NULL))
+  CONSTRAINT fo_meta_venda_positiva CHECK (
+    (meta_venda_dom IS NULL OR meta_venda_dom > 0) AND (meta_venda_seg IS NULL OR meta_venda_seg > 0) AND
+    (meta_venda_ter IS NULL OR meta_venda_ter > 0) AND (meta_venda_qua IS NULL OR meta_venda_qua > 0) AND
+    (meta_venda_qui IS NULL OR meta_venda_qui > 0) AND (meta_venda_sex IS NULL OR meta_venda_sex > 0) AND
+    (meta_venda_sab IS NULL OR meta_venda_sab > 0)
+  ),
+  CONSTRAINT fo_entrada_prevista_positiva CHECK (
+    (entrada_prevista_dom IS NULL OR entrada_prevista_dom > 0) AND (entrada_prevista_seg IS NULL OR entrada_prevista_seg > 0) AND
+    (entrada_prevista_ter IS NULL OR entrada_prevista_ter > 0) AND (entrada_prevista_qua IS NULL OR entrada_prevista_qua > 0) AND
+    (entrada_prevista_qui IS NULL OR entrada_prevista_qui > 0) AND (entrada_prevista_sex IS NULL OR entrada_prevista_sex > 0) AND
+    (entrada_prevista_sab IS NULL OR entrada_prevista_sab > 0)
+  ),
+  CONSTRAINT fo_meta_e_saldo_so_loja CHECK (
+    unidade <> 'geral' OR (
+      saldo_inicial IS NULL AND
+      meta_venda_dom IS NULL AND meta_venda_seg IS NULL AND meta_venda_ter IS NULL AND
+      meta_venda_qua IS NULL AND meta_venda_qui IS NULL AND meta_venda_sex IS NULL AND meta_venda_sab IS NULL AND
+      entrada_prevista_dom IS NULL AND entrada_prevista_seg IS NULL AND entrada_prevista_ter IS NULL AND
+      entrada_prevista_qua IS NULL AND entrada_prevista_qui IS NULL AND entrada_prevista_sex IS NULL AND entrada_prevista_sab IS NULL
+    )
+  )
 );
 
 CREATE TABLE IF NOT EXISTS financeiro_orcamento_itens (
