@@ -1,4 +1,4 @@
-import { MessageSquare, RotateCw, CheckCircle2, LucideIcon } from 'lucide-react'
+import { MessageSquare, RotateCw, CheckCircle2, Plus, LucideIcon } from 'lucide-react'
 import { TarefaNotificacao } from '@/lib/types'
 
 /**
@@ -15,10 +15,13 @@ export function textoNotificacao(n: TarefaNotificacao, usuarioId: string): strin
 
   switch (n.tipo) {
     case 'comentario': {
-      const ehResponsavel = n.tarefa?.responsavel_atual_id === usuarioId
-      return ehResponsavel
-        ? `${autor} comentou na tarefa "${titulo}", da qual você é responsável`
-        : `${autor} comentou na tarefa "${titulo}", em que você está envolvido`
+      if (n.tarefa?.responsavel_atual_id === usuarioId) {
+        return `${autor} comentou na tarefa "${titulo}", da qual você é responsável`
+      }
+      if (n.tarefa?.criado_por === usuarioId) {
+        return `${autor} comentou na tarefa "${titulo}", que você criou`
+      }
+      return `${autor} comentou na tarefa "${titulo}", em que você está envolvido`
     }
     case 'feedback_refazer':
       return `"${titulo}" voltou para refazer${n.mensagem ? ` — feedback: "${n.mensagem}"` : ''}`
@@ -26,6 +29,10 @@ export function textoNotificacao(n: TarefaNotificacao, usuarioId: string): strin
       return `"${titulo}" foi aprovada! 🎉`
     case 'concluida_por_gestor':
       return `${autor} concluiu "${titulo}" por você${n.mensagem ? ` — "${n.mensagem}"` : ''}`
+    case 'nova_tarefa':
+      return `${autor} criou uma nova tarefa para você: "${titulo}"`
+    case 'concluida':
+      return `${autor} concluiu "${titulo}", que você criou`
     default:
       return titulo
   }
@@ -37,8 +44,11 @@ export function iconeNotificacao(tipo: TarefaNotificacao['tipo']): LucideIcon {
       return MessageSquare
     case 'feedback_refazer':
       return RotateCw
+    case 'nova_tarefa':
+      return Plus
     case 'aprovada':
     case 'concluida_por_gestor':
+    case 'concluida':
       return CheckCircle2
   }
 }

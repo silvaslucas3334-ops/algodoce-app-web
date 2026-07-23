@@ -777,6 +777,7 @@ function TarefasContent() {
             usuariosDoSetor={usuariosDoSetor}
             gestores={gestores}
             criadoPor={usuario.id}
+            criadoPorNome={usuario.nome}
             permitirRecorrencia={true}
             onClose={() => setCriandoTarefa(false)}
             onCreated={carregarTarefas}

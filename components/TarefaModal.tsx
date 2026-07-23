@@ -376,6 +376,13 @@ export default function TarefaModal({
       })
       if (histError) logErro('Concluiu, mas falhou ao gravar histórico:', histError)
 
+      // Quem criou a tarefa é avisado que ela foi concluída — importante
+      // principalmente quando o criador não é o responsável (gestor abriu
+      // a tarefa pra outra pessoa fazer).
+      if (tarefa.criado_por && tarefa.criado_por !== usuarioAtualId) {
+        await notificar([tarefa.criado_por], 'concluida', null)
+      }
+
       onStatusChange?.()
       onClose()
     } catch (err: any) {
@@ -477,10 +484,13 @@ export default function TarefaModal({
     }
   }
 
-  // Responsável + envolvidos, exceto quem disparou a ação — mesmo grupo de
-  // acesso que já rege podeConluir (ehResponsavel || ehEnvolvido).
+  // Responsável + envolvidos + quem criou, exceto quem disparou a ação —
+  // o criador entra porque comentário pode ser um pedido de aprovação que
+  // só ele resolve (ex: gestor abriu a tarefa, colaborador comenta pedindo
+  // autorização — se só responsável/envolvidos fossem avisados, o gestor
+  // podia nunca ver e a tarefa vencer sem resposta).
   function destinatariosNotificacao(): string[] {
-    const ids = [tarefa.responsavel_atual_id, ...envolvidos.map((e) => e.usuario_id)]
+    const ids = [tarefa.responsavel_atual_id, tarefa.criado_por, ...envolvidos.map((e) => e.usuario_id)]
     return Array.from(new Set(ids)).filter((id) => id && id !== usuarioAtualId)
   }
 

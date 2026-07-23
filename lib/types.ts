@@ -139,12 +139,12 @@ export interface TarefaNotificacao {
   id: string
   tarefa_id: string
   usuario_id: string
-  tipo: 'comentario' | 'feedback_refazer' | 'aprovada' | 'concluida_por_gestor'
+  tipo: 'comentario' | 'feedback_refazer' | 'aprovada' | 'concluida_por_gestor' | 'nova_tarefa' | 'concluida'
   mensagem: string | null
   criado_por: string | null
   lida_em: string | null
   created_at: string
-  tarefa?: { titulo: string; responsavel_atual_id: string }
+  tarefa?: { titulo: string; responsavel_atual_id: string; criado_por: string }
 }
 
 export type FrequenciaRecorrencia = 'diaria' | 'semanal' | 'mensal'

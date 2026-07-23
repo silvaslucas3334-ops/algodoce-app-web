@@ -11,6 +11,7 @@ interface NovaTarefaModalProps {
   usuariosDoSetor: { id: string; nome: string }[]
   gestores?: { id: string; nome: string }[]
   criadoPor: string
+  criadoPorNome: string
   permitirRecorrencia?: boolean
   onClose: () => void
   onCreated: () => void
@@ -32,6 +33,7 @@ export default function NovaTarefaModal({
   usuariosDoSetor,
   gestores = [],
   criadoPor,
+  criadoPorNome,
   permitirRecorrencia = false,
   onClose,
   onCreated,
@@ -291,6 +293,17 @@ export default function NovaTarefaModal({
             .from('tarefas_envolvidos')
             .insert(envolvidosFinal.map((usuario_id) => ({ tarefa_id: novaTarefa.id, usuario_id })))
           if (envError) console.error('Erro ao salvar envolvidos da tarefa:', envError)
+        }
+
+        if (novaTarefa && form.responsavel_id !== criadoPor) {
+          const { error: notifError } = await supabase.from('tarefas_notificacoes').insert({
+            tarefa_id: novaTarefa.id,
+            usuario_id: form.responsavel_id,
+            tipo: 'nova_tarefa',
+            mensagem: null,
+            criado_por: criadoPorNome,
+          })
+          if (notifError) console.error('Erro ao notificar responsável da nova tarefa:', notifError)
         }
       }
 

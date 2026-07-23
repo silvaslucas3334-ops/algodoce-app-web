@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { TarefaNotificacao } from '@/lib/types'
 
-const LIMITE_FEED = 30
+const JANELA_FEED_DIAS = 5
 
 // Feed de atividade das tarefas (comentário, devolução pra refazer,
-// aprovação, conclusão pelo gestor) — histórico rolável (lidas + não
-// lidas), não uma caixa de entrada que esvazia. Atualiza em tempo real via
-// Realtime (mesmo padrão de hooks/useTaskNotifications.ts), com filtro no
-// servidor já que o alvo é sempre o próprio usuário.
+// aprovação, conclusão, nova tarefa atribuída) — mostra toda notificação
+// não lida (não importa a idade, nada se perde) mais as lidas dos últimos
+// 5 dias (histórico recente, sem acumular pra sempre). Atualiza em tempo
+// real via Realtime (mesmo padrão de hooks/useTaskNotifications.ts), com
+// filtro no servidor já que o alvo é sempre o próprio usuário.
 export function useNotificacoesTarefas(usuarioId: string | undefined) {
   const [notificacoes, setNotificacoes] = useState<TarefaNotificacao[]>([])
   const [carregando, setCarregando] = useState(true)
@@ -20,12 +21,13 @@ export function useNotificacoesTarefas(usuarioId: string | undefined) {
     }
     setCarregando(true)
     try {
+      const limiteJanela = new Date(Date.now() - JANELA_FEED_DIAS * 86400000).toISOString()
       const { data, error } = await supabase
         .from('tarefas_notificacoes')
-        .select('*, tarefa:tarefas(titulo, responsavel_atual_id)')
+        .select('*, tarefa:tarefas(titulo, responsavel_atual_id, criado_por)')
         .eq('usuario_id', usuarioId)
+        .or(`lida_em.is.null,created_at.gte.${limiteJanela}`)
         .order('created_at', { ascending: false })
-        .limit(LIMITE_FEED)
 
       if (error) {
         console.error('Erro ao carregar notificações:', error)
@@ -59,11 +61,11 @@ export function useNotificacoesTarefas(usuarioId: string | undefined) {
           // O payload do Realtime não traz o join — busca o título à parte.
           const { data: tarefa } = await supabase
             .from('tarefas')
-            .select('titulo, responsavel_atual_id')
+            .select('titulo, responsavel_atual_id, criado_por')
             .eq('id', nova.tarefa_id)
             .single()
 
-          setNotificacoes((prev) => [{ ...nova, tarefa: tarefa || undefined }, ...prev].slice(0, LIMITE_FEED))
+          setNotificacoes((prev) => [{ ...nova, tarefa: tarefa || undefined }, ...prev])
         }
       )
       .subscribe()
