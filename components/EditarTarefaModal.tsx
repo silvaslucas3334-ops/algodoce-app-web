@@ -226,8 +226,9 @@ export default function EditarTarefaModal({
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Responsável *</label>
             <SeletorPessoas
-              grupos={[{ label: 'Responsável', pessoas: usuariosDoSetor }]}
+              pessoas={usuariosDoSetor}
               selecionados={form.responsavel_id ? [form.responsavel_id] : []}
+              placeholder="Selecione o responsável..."
               onChange={(ids) => setForm({ ...form, responsavel_id: ids[0] || '' })}
             />
           </div>
@@ -238,14 +239,10 @@ export default function EditarTarefaModal({
               Além do responsável, quem mais pode concluir esta tarefa.
             </p>
             <SeletorPessoas
-              grupos={[
-                {
-                  label: 'Envolvidos',
-                  pessoas: usuariosDoSetor.filter((u) => u.id !== form.responsavel_id),
-                },
-              ]}
+              pessoas={usuariosDoSetor.filter((u) => u.id !== form.responsavel_id)}
               selecionados={envolvidoIds}
               multi
+              placeholder="Selecione os envolvidos..."
               onChange={setEnvolvidoIds}
             />
           </div>

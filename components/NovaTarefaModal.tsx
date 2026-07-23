@@ -72,6 +72,14 @@ export default function NovaTarefaModal({
   // Aviso de duplicidade (não bloqueante)
   const [avisoDup, setAvisoDup] = useState<string | null>(null)
 
+  // Lista única pro seletor de responsável/envolvidos — sem separar por
+  // setor/gestores (a divisão em grupos poluía a UI sem agregar muito,
+  // já que gestor também pode ser responsável por qualquer tarefa).
+  const pessoasDisponiveis = [
+    ...usuariosDoSetor,
+    ...gestores.filter((g) => !usuariosDoSetor.some((u) => u.id === g.id)),
+  ]
+
   // Não pré-seleciona responsável — obriga o usuário a escolher alguém
   // (deixar um padrão pré-marcado fazia as pessoas simplesmente não trocarem).
   useEffect(() => {
@@ -413,14 +421,9 @@ export default function NovaTarefaModal({
                 Responsável *
               </label>
               <SeletorPessoas
-                grupos={[
-                  { label: setor.nome, pessoas: usuariosDoSetor },
-                  {
-                    label: 'Gestores',
-                    pessoas: gestores.filter((g) => !usuariosDoSetor.some((u) => u.id === g.id)),
-                  },
-                ]}
+                pessoas={pessoasDisponiveis}
                 selecionados={form.responsavel_id ? [form.responsavel_id] : []}
+                placeholder="Selecione o responsável..."
                 onChange={(ids) => setForm({ ...form, responsavel_id: ids[0] || '' })}
               />
               {!recorrente && !mostrarEnvolvidos && (
@@ -444,22 +447,29 @@ export default function NovaTarefaModal({
                   Além do responsável, quem mais pode concluir esta tarefa.
                 </p>
                 <SeletorPessoas
-                  grupos={[
-                    {
-                      label: setor.nome,
-                      pessoas: usuariosDoSetor.filter((u) => u.id !== form.responsavel_id),
-                    },
-                    {
-                      label: 'Gestores',
-                      pessoas: gestores.filter(
-                        (g) => g.id !== form.responsavel_id && !usuariosDoSetor.some((u) => u.id === g.id)
-                      ),
-                    },
-                  ]}
+                  pessoas={pessoasDisponiveis.filter((p) => p.id !== form.responsavel_id)}
                   selecionados={envolvidoIds}
                   multi
+                  placeholder="Selecione os envolvidos..."
                   onChange={setEnvolvidoIds}
                 />
+              </div>
+            )}
+
+            {/* Tarefa recorrente: decide aqui, antes de preencher vencimento —
+                se marcar, o campo de vencimento único vira início/fim */}
+            {permitirRecorrencia && (
+              <div className="flex items-center gap-2 border-t border-gray-200 pt-4">
+                <input
+                  type="checkbox"
+                  id="recorrente"
+                  checked={recorrente}
+                  onChange={(e) => setRecorrente(e.target.checked)}
+                  className="w-4 h-4 rounded"
+                />
+                <label htmlFor="recorrente" className="text-sm font-medium text-gray-700">
+                  🔁 Tarefa recorrente
+                </label>
               </div>
             )}
 
@@ -582,45 +592,6 @@ export default function NovaTarefaModal({
               </div>
             )}
 
-            {/* Foto obrigatória + Recorrência lado a lado, pra encurtar o formulário */}
-            <div className="flex items-center gap-6 border-t border-gray-200 pt-4">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="foto_obrigatoria"
-                  checked={form.foto_obrigatoria}
-                  onChange={(e) =>
-                    setForm({ ...form, foto_obrigatoria: e.target.checked })
-                  }
-                  className="w-4 h-4 rounded"
-                />
-                <label
-                  htmlFor="foto_obrigatoria"
-                  className="text-sm font-medium text-gray-700"
-                >
-                  Exigir foto para concluir
-                </label>
-              </div>
-
-              {permitirRecorrencia && (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="recorrente"
-                    checked={recorrente}
-                    onChange={(e) => setRecorrente(e.target.checked)}
-                    className="w-4 h-4 rounded"
-                  />
-                  <label
-                    htmlFor="recorrente"
-                    className="text-sm font-medium text-gray-700"
-                  >
-                    🔁 Tarefa recorrente
-                  </label>
-                </div>
-              )}
-            </div>
-
             {/* Detalhes da recorrência */}
             {permitirRecorrencia && recorrente && (
                 <div className="space-y-3 pl-1">
@@ -676,6 +647,25 @@ export default function NovaTarefaModal({
                   </p>
                 </div>
             )}
+
+            {/* Exigir foto */}
+            <div className="flex items-center gap-2 border-t border-gray-200 pt-4">
+              <input
+                type="checkbox"
+                id="foto_obrigatoria"
+                checked={form.foto_obrigatoria}
+                onChange={(e) =>
+                  setForm({ ...form, foto_obrigatoria: e.target.checked })
+                }
+                className="w-4 h-4 rounded"
+              />
+              <label
+                htmlFor="foto_obrigatoria"
+                className="text-sm font-medium text-gray-700"
+              >
+                Exigir foto para concluir
+              </label>
+            </div>
 
             {/* Aviso de duplicidade (não bloqueante) */}
             {avisoDup && (
