@@ -283,6 +283,56 @@ FOR INSERT WITH CHECK (
   )
 );
 
+-- 6. TABELA TAREFAS_NOTIFICACOES
+-- ============================================
+-- Feed de atividade (comentário, devolução pra refazer, aprovação,
+-- conclusão pelo gestor em nome do colaborador) — consumido em tempo real
+-- (Supabase Realtime) pelo sino em app/tarefas/page.tsx e por um modal
+-- bloqueante que aparece no máximo 1x/dia. `tipo` é TEXT livre (sem CHECK)
+-- de propósito: o texto exibido é montado em
+-- lib/tarefas-notificacoes-utils.ts a partir de tipo + a relação do
+-- destinatário com a tarefa (responsável vs. envolvido), nunca armazenado
+-- pronto.
+CREATE TABLE IF NOT EXISTS tarefas_notificacoes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tarefa_id UUID NOT NULL REFERENCES tarefas(id) ON DELETE CASCADE,
+  usuario_id UUID NOT NULL REFERENCES usuarios(id),
+  tipo TEXT NOT NULL DEFAULT 'concluida_por_gestor',
+  mensagem TEXT,
+  criado_por TEXT,
+  lida_em TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tarefas_notificacoes_usuario_nao_lida
+  ON tarefas_notificacoes(usuario_id) WHERE lida_em IS NULL;
+CREATE INDEX IF NOT EXISTS idx_tarefas_notificacoes_usuario_created
+  ON tarefas_notificacoes(usuario_id, created_at DESC);
+
+ALTER TABLE tarefas_notificacoes ENABLE ROW LEVEL SECURITY;
+
+-- SELECT: cada usuário só vê a própria notificação
+CREATE POLICY notificacoes_select_own ON tarefas_notificacoes
+FOR SELECT TO authenticated USING (usuario_id = auth.uid());
+
+-- INSERT: admin, ou qualquer usuário notificando alguém numa tarefa do
+-- próprio setor (comentário/refazer/aprovação podem vir de colaborador)
+CREATE POLICY notificacoes_insert_qualquer ON tarefas_notificacoes
+FOR INSERT TO authenticated
+WITH CHECK (
+  (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+  OR tarefa_id IN (
+    SELECT id FROM tarefas
+    WHERE setor_id IN (SELECT setor_id FROM usuarios WHERE id = auth.uid() AND setor_id IS NOT NULL)
+  )
+);
+
+-- UPDATE: cada usuário só marca a própria notificação como lida
+CREATE POLICY notificacoes_update_own ON tarefas_notificacoes
+FOR UPDATE TO authenticated
+USING (usuario_id = auth.uid())
+WITH CHECK (usuario_id = auth.uid());
+
 -- ============================================
 -- INSTRUÇÕES MANUAIS (via Supabase Dashboard)
 -- ============================================

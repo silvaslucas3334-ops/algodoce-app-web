@@ -131,6 +131,22 @@ export interface TarefaEnvolvido {
   criado_em: string
 }
 
+// Feed de atividade da tarefa (comentário, devolução, aprovação, conclusão
+// pelo gestor) — o texto exibido não fica pronto aqui, é montado em
+// lib/tarefas-notificacoes-utils.ts a partir de tipo + tarefa.responsavel_atual_id
+// (mesmo evento produz frase diferente pro responsável vs. envolvido).
+export interface TarefaNotificacao {
+  id: string
+  tarefa_id: string
+  usuario_id: string
+  tipo: 'comentario' | 'feedback_refazer' | 'aprovada' | 'concluida_por_gestor'
+  mensagem: string | null
+  criado_por: string | null
+  lida_em: string | null
+  created_at: string
+  tarefa?: { titulo: string; responsavel_atual_id: string }
+}
+
 export type FrequenciaRecorrencia = 'diaria' | 'semanal' | 'mensal'
 
 export interface TarefaRecorrencia {

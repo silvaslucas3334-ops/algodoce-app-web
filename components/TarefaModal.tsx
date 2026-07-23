@@ -203,6 +203,11 @@ export default function TarefaModal({
       })
       if (histError) logErro('Aprovou, mas falhou ao gravar histórico:', histError)
 
+      // Aprovação é pessoal — só quem fez a tarefa é avisado, não os envolvidos.
+      if (tarefa.responsavel_atual_id && tarefa.responsavel_atual_id !== usuarioAtualId) {
+        await notificar([tarefa.responsavel_atual_id], 'aprovada', null)
+      }
+
       onStatusChange?.()
       onClose()
     } catch (err: any) {
@@ -265,6 +270,8 @@ export default function TarefaModal({
         registrado_por: usuarioAtualId,
       })
       if (histError) logErro('Refez, mas falhou ao gravar histórico:', histError)
+
+      await notificar(destinatariosNotificacao(), 'feedback_refazer', feedbackTexto.trim())
 
       onStatusChange?.()
       onClose()
@@ -458,6 +465,8 @@ export default function TarefaModal({
         alert('Erro ao comentar: ' + (error.message || 'sem mensagem'))
         return
       }
+      await notificar(destinatariosNotificacao(), 'comentario', novoComentarioTexto.trim())
+
       setNovoComentarioTexto('')
       onComentario?.()
     } catch (err: any) {
@@ -466,6 +475,27 @@ export default function TarefaModal({
     } finally {
       setEnviandoComentario(false)
     }
+  }
+
+  // Responsável + envolvidos, exceto quem disparou a ação — mesmo grupo de
+  // acesso que já rege podeConluir (ehResponsavel || ehEnvolvido).
+  function destinatariosNotificacao(): string[] {
+    const ids = [tarefa.responsavel_atual_id, ...envolvidos.map((e) => e.usuario_id)]
+    return Array.from(new Set(ids)).filter((id) => id && id !== usuarioAtualId)
+  }
+
+  async function notificar(usuarioIds: string[], tipo: string, mensagem: string | null) {
+    if (usuarioIds.length === 0) return
+    const { error } = await supabase.from('tarefas_notificacoes').insert(
+      usuarioIds.map((usuario_id) => ({
+        tarefa_id: tarefa.id,
+        usuario_id,
+        tipo,
+        mensagem,
+        criado_por: usuariosMap[usuarioAtualId]?.nome || 'Alguém',
+      }))
+    )
+    if (error) logErro('Falhou ao gravar notificação:', error)
   }
 
   const nomesEnvolvidos = envolvidos
