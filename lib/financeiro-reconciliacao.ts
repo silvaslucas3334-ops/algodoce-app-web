@@ -98,10 +98,16 @@ function ordenarPorConfianca(candidatos: CandidatoConciliacao[]): CandidatoConci
 }
 
 /**
- * Sugere lançamentos em aberto que podem corresponder a uma transação de
- * saída do extrato. Como a nota multi-item vira UM lançamento (valor = soma
- * dos itens), o match por valor exato cobre notas e despesas igualmente;
- * parcelas são lançamentos próprios e casam individualmente.
+ * Sugere lançamentos que podem corresponder a uma transação de saída do
+ * extrato — em aberto (fluxo normal, confirmar marca como pago) OU já
+ * pagos sem vínculo de extrato ainda (alguém já registrou o pagamento por
+ * outro caminho; confirmar só vincula, não reaplica "marcar como pago" —
+ * ver confirmarConciliacaoJaPago). Um lançamento pago já vinculado a OUTRA
+ * transação nunca entra aqui (evita vínculo duplicado; a coluna também tem
+ * índice único parcial garantindo isso no banco).
+ * Como a nota multi-item vira UM lançamento (valor = soma dos itens), o
+ * match por valor exato cobre notas e despesas igualmente; parcelas são
+ * lançamentos próprios e casam individualmente.
  * Confiança: alta (CNPJ/CPF bate) > média (vencimento ±5 dias) > baixa (só valor).
  * Nunca aplica sozinho — só retorna candidatos para o usuário confirmar.
  */
@@ -116,7 +122,8 @@ export async function sugerirCorrespondencias(
   const { data: lancamentos, error } = await supabase
     .from('financeiro_lancamentos')
     .select('*, parte:financeiro_partes!parte_id(*), conta:financeiro_contas(codigo, nome)')
-    .eq('status', 'aberto')
+    .in('status', ['aberto', 'pago'])
+    .is('extrato_transacao_id', null)
     .eq('valor_total', valorAbs)
 
   if (error) throw new Error(error.message)
@@ -124,6 +131,7 @@ export async function sugerirCorrespondencias(
   const candidatos: CandidatoConciliacao[] = (lancamentos || []).map((l: FinanceiroLancamento) => ({
     lancamento: l,
     confianca: classificarConfianca(transacaoData, documentoExtraido, l),
+    jaPago: l.status === 'pago',
   }))
 
   return ordenarPorConfianca(candidatos)
@@ -161,6 +169,7 @@ export async function sugerirCorrespondenciasPorSoma(
   const candidatos: CandidatoConciliacao[] = (lancamentos || []).map((l: FinanceiroLancamento) => ({
     lancamento: l,
     confianca: classificarConfianca(dataReferencia, null, l),
+    jaPago: false, // esta variante (soma/grupo) continua só 'aberto' nesta rodada
   }))
 
   // Dentro de cada nível de confiança, prioriza o candidato cujo valor mais
@@ -204,6 +213,38 @@ export async function confirmarConciliacao(
       updated_at: new Date().toISOString(),
     })
     .eq('id', candidato.lancamento.id)
+  if (erroLancamento) throw new Error(erroLancamento.message)
+}
+
+/**
+ * Confirma a conciliação de um lançamento que JÁ está pago (alguém
+ * registrou o pagamento por outro caminho, sem vincular a esta transação
+ * do extrato) — só vincula os dois lados, nunca mexe em status/data_pagamento
+ * do lançamento (já estão corretos). Espelha vincularTransacaoInterno
+ * (mesmo guard por status_conciliacao='pendente' + checagem de linha
+ * afetada), mas também registra o vínculo inverso no lançamento quando ele
+ * ainda não tiver um (.is('extrato_transacao_id', null) como guard — nunca
+ * sobrescreve um vínculo já existente).
+ */
+export async function confirmarConciliacaoJaPago(
+  transacaoId: string,
+  lancamentoId: string,
+  parteId: string
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .update({ status_conciliacao: 'conciliado', lancamento_id: lancamentoId, parte_id: parteId })
+    .eq('id', transacaoId)
+    .eq('status_conciliacao', 'pendente')
+    .select('id')
+  if (error) throw new Error(error.message)
+  if (!data || data.length === 0) throw new Error('Transação já foi conciliada em outra sessão.')
+
+  const { error: erroLancamento } = await supabase
+    .from('financeiro_lancamentos')
+    .update({ extrato_transacao_id: transacaoId, updated_at: new Date().toISOString() })
+    .eq('id', lancamentoId)
+    .is('extrato_transacao_id', null)
   if (erroLancamento) throw new Error(erroLancamento.message)
 }
 

@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { sugerirCorrespondencias, confirmarConciliacao, ignorarTransacao } from '@/lib/financeiro-reconciliacao'
+import { sugerirCorrespondencias, confirmarConciliacao, confirmarConciliacaoJaPago, ignorarTransacao } from '@/lib/financeiro-reconciliacao'
 import { formatBRL } from '@/lib/ofx'
 import { CandidatoConciliacao, FinanceiroExtratoTransacao } from '@/lib/types'
 import { TIPO_LANCAMENTO_LABEL } from '@/lib/constants'
@@ -37,7 +37,11 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
     setProcessando(true)
     setErro('')
     try {
-      await confirmarConciliacao(transacao.id, candidato, transacao.data)
+      if (candidato.jaPago) {
+        await confirmarConciliacaoJaPago(transacao.id, candidato.lancamento.id, candidato.lancamento.parte_id)
+      } else {
+        await confirmarConciliacao(transacao.id, candidato, transacao.data)
+      }
       onResolvido()
       onClose()
     } catch (err: any) {
@@ -93,7 +97,7 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
           </div>
         ) : candidatos.length === 0 ? (
           <p className="text-sm text-gray-500 py-4">
-            Nenhum lançamento em aberto com esse valor. Confira se já foi lançado, ou ignore esta transação.
+            Nenhum lançamento (aberto ou pago) com esse valor. Confira se já foi lançado, ou ignore esta transação.
           </p>
         ) : (
           <div className="space-y-2 mb-4">
@@ -109,10 +113,17 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
                         {l.parte?.nome} · {formatBRL(l.valor_total)} · venc.{' '}
                         {new Date(l.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}
                       </p>
-                      <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">
-                        {TIPO_LANCAMENTO_LABEL[l.tipo]}
-                        {l.parcela_num && l.parcela_total ? ` · parcela ${l.parcela_num}/${l.parcela_total}` : ''}
-                      </span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        <span className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold">
+                          {TIPO_LANCAMENTO_LABEL[l.tipo]}
+                          {l.parcela_num && l.parcela_total ? ` · parcela ${l.parcela_num}/${l.parcela_total}` : ''}
+                        </span>
+                        {c.jaPago && (
+                          <span className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold">
+                            Já pago no sistema — só vincular
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${conf.color}`}>{conf.label}</span>
                   </div>
@@ -121,7 +132,7 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
                     disabled={processando}
                     className="w-full bg-green-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    <CheckCircle size={16} /> Confirmar este
+                    <CheckCircle size={16} /> {c.jaPago ? 'Vincular a este' : 'Confirmar este'}
                   </button>
                 </div>
               )

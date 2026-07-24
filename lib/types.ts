@@ -438,6 +438,9 @@ export interface FinanceiroCustoMedioMensal {
 export interface CandidatoConciliacao {
   lancamento: FinanceiroLancamento
   confianca: 'alta' | 'media' | 'baixa'
+  // true = lançamento já está status='pago' (não veio da busca por 'aberto')
+  // — confirmar só vincula ao extrato, não deve marcar como pago de novo.
+  jaPago: boolean
 }
 
 export interface FinanceiroCustoPorFornecedor {
