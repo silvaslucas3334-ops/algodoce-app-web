@@ -984,6 +984,7 @@ export default function TarefaModal({
         <EditarRecorrenciaModal
           tarefa={tarefa}
           recorrencia={recorrenciaData}
+          usuariosDoSetor={usuariosDoSetor}
           onClose={() => setMostrarEditarRecorrencia(false)}
           onSaved={() => {
             setMostrarEditarRecorrencia(false)

@@ -1,25 +1,9 @@
--- ============================================
--- MÓDULO DE TAREFAS - FASE 2.1
--- Vigência da recorrência + geração efetiva por janela (30 dias)
--- ============================================
+-- ============================================================
+-- Envolvidos em tarefas recorrentes — hoje só existe pra tarefa avulsa
+-- (tarefas_envolvidos). Uma recorrência (molde) precisa de sua própria
+-- lista, copiada pra tarefas_envolvidos de cada instância gerada.
+-- ============================================================
 
--- 1. Vínculo instância -> recorrência (rastreabilidade + anti-duplicação)
-ALTER TABLE tarefas ADD COLUMN IF NOT EXISTS recorrencia_id UUID REFERENCES tarefas_recorrencias(id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_tarefa_recorrencia_data
-  ON tarefas(recorrencia_id, data_vencimento)
-  WHERE recorrencia_id IS NOT NULL;
-
--- 2. Período de vigência da recorrência
-ALTER TABLE tarefas_recorrencias ADD COLUMN IF NOT EXISTS data_inicio DATE;
-ALTER TABLE tarefas_recorrencias ADD COLUMN IF NOT EXISTS data_fim DATE;
-
--- Backfill: recorrências antigas usam proxima_data como início
-UPDATE tarefas_recorrencias SET data_inicio = proxima_data WHERE data_inicio IS NULL;
-
--- 2.5 Envolvidos de uma recorrência (molde) — espelha tarefas_envolvidos,
---     mas ligado à recorrência em vez da tarefa individual. Copiado pra
---     tarefas_envolvidos de cada instância gerada em gerar_tarefas_recorrentes().
 CREATE TABLE IF NOT EXISTS tarefas_recorrencias_envolvidos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   recorrencia_id UUID NOT NULL REFERENCES tarefas_recorrencias(id) ON DELETE CASCADE,
@@ -48,8 +32,11 @@ CREATE POLICY recorrencias_envolvidos_delete ON tarefas_recorrencias_envolvidos 
   OR recorrencia_id IN (SELECT id FROM tarefas_recorrencias WHERE setor_id IN (SELECT setor_id FROM usuarios WHERE id = auth.uid() AND setor_id IS NOT NULL))
 );
 
--- 3. Função de geração por JANELA (idempotente, catch-up de 30 dias)
---    Convenção dias_semana: 0=Segunda .. 6=Domingo | Timezone America/Sao_Paulo
+-- gerar_tarefas_recorrentes(): mesma lógica de lib/supabase-schema-tarefas-fase2-1.sql,
+-- só adiciona RETURNING id + a cópia pra tarefas_envolvidos da instância nova.
+-- SECURITY DEFINER já ignora RLS nas tabelas que toca (é assim que o INSERT em
+-- tarefas já funciona hoje apesar da policy exigir criado_por = auth.uid()),
+-- então o INSERT em tarefas_envolvidos aqui dentro não precisa de policy extra.
 CREATE OR REPLACE FUNCTION gerar_tarefas_recorrentes()
 RETURNS INT AS $$
 DECLARE
@@ -63,22 +50,17 @@ DECLARE
   nova_tarefa_id UUID;
 BEGIN
   FOR rec IN SELECT * FROM tarefas_recorrencias WHERE ativa LOOP
-    -- Janela: de max(inicio, hoje) até min(hoje+30, fim)
     ini := GREATEST(COALESCE(rec.data_inicio, rec.proxima_data), hoje);
     fim := LEAST(hoje + 30, COALESCE(rec.data_fim, hoje + 30));
-
     d := ini;
     WHILE d <= fim LOOP
-      app_dow := (EXTRACT(DOW FROM d)::int + 6) % 7; -- 0=Seg..6=Dom
-
+      app_dow := (EXTRACT(DOW FROM d)::int + 6) % 7;
       IF (
            rec.frequencia = 'diaria'
            OR (rec.frequencia = 'semanal' AND rec.dias_semana IS NOT NULL AND app_dow = ANY(rec.dias_semana))
            OR (rec.frequencia = 'mensal' AND EXTRACT(DAY FROM d)::int = COALESCE(rec.dia_mes, EXTRACT(DAY FROM d)::int))
          )
-         AND NOT EXISTS (
-           SELECT 1 FROM tarefas WHERE recorrencia_id = rec.id AND data_vencimento = d
-         )
+         AND NOT EXISTS (SELECT 1 FROM tarefas WHERE recorrencia_id = rec.id AND data_vencimento = d)
       THEN
         INSERT INTO tarefas (
           titulo, descricao, setor_id, status, data_vencimento, hora_limite,
@@ -97,39 +79,16 @@ BEGIN
 
         criadas := criadas + 1;
       END IF;
-
       d := d + 1;
     END LOOP;
-
-    -- proxima_data serve só como cursor informativo agora
     UPDATE tarefas_recorrencias SET proxima_data = fim + 1 WHERE id = rec.id;
   END LOOP;
-
   RETURN criadas;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Permitir chamada via RPC pelo app (geração imediata na criação)
 GRANT EXECUTE ON FUNCTION gerar_tarefas_recorrentes() TO authenticated;
 
--- 4. Cancelar uma recorrência: desativa + cancela instâncias FUTURAS ainda pendentes
-CREATE OR REPLACE FUNCTION cancelar_recorrencia(rec_id UUID)
-RETURNS INT AS $$
-DECLARE
-  hoje DATE := (now() AT TIME ZONE 'America/Sao_Paulo')::date;
-  canceladas INT := 0;
-BEGIN
-  UPDATE tarefas_recorrencias SET ativa = false WHERE id = rec_id;
-
-  UPDATE tarefas
-  SET status = 'cancelada', updated_at = now()
-  WHERE recorrencia_id = rec_id
-    AND data_vencimento >= hoje
-    AND status IN ('pendente', 'refazer_pendente');
-  GET DIAGNOSTICS canceladas = ROW_COUNT;
-
-  RETURN canceladas;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-GRANT EXECUTE ON FUNCTION cancelar_recorrencia(UUID) TO authenticated;
+-- Verificação
+SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'tarefas_recorrencias_envolvidos' ORDER BY ordinal_position;
+SELECT policyname, cmd FROM pg_policies WHERE tablename = 'tarefas_recorrencias_envolvidos' ORDER BY cmd;

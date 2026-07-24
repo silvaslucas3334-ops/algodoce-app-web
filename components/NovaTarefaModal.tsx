@@ -54,7 +54,8 @@ export default function NovaTarefaModal({
   const [modoData, setModoData] = useState<'hoje' | 'amanha' | 'outro' | ''>('')
   const [definirHora, setDefinirHora] = useState(false)
 
-  // Envolvidos além do responsável — só p/ tarefa avulsa (não recorrente)
+  // Envolvidos além do responsável — vale pra tarefa avulsa e pra recorrência
+  // (nesse caso, aplicado em cada instância gerada)
   const [envolvidoIds, setEnvolvidoIds] = useState<string[]>([])
   const [mostrarEnvolvidos, setMostrarEnvolvidos] = useState(false)
 
@@ -228,7 +229,7 @@ export default function NovaTarefaModal({
       if (recorrente) {
         // Cria o molde; a função gera as instâncias da janela
         const diaMes = new Date(dataInicio + 'T12:00:00').getDate()
-        const { error: recError } = await supabase
+        const { data: novaRecorrencia, error: recError } = await supabase
           .from('tarefas_recorrencias')
           .insert({
             titulo: tituloFinal,
@@ -246,6 +247,8 @@ export default function NovaTarefaModal({
             ativa: true,
             criado_por: criadoPor,
           })
+          .select('id')
+          .single()
 
         if (recError) {
           setErro('Falha ao salvar recorrência: ' + recError.message)
@@ -253,7 +256,16 @@ export default function NovaTarefaModal({
           return
         }
 
-        // Geração imediata das instâncias (janela de 30 dias)
+        const envolvidosRecorrencia = envolvidoIds.filter((id) => id !== form.responsavel_id)
+        if (envolvidosRecorrencia.length > 0 && novaRecorrencia) {
+          const { error: envRecError } = await supabase
+            .from('tarefas_recorrencias_envolvidos')
+            .insert(envolvidosRecorrencia.map((usuario_id) => ({ recorrencia_id: novaRecorrencia.id, usuario_id })))
+          if (envRecError) console.error('Erro ao salvar envolvidos da recorrência:', envRecError)
+        }
+
+        // Geração imediata das instâncias (janela de 30 dias) — já sai com
+        // os envolvidos copiados pra cada instância (gerar_tarefas_recorrentes())
         const { data: qtd, error: rpcError } = await supabase.rpc(
           'gerar_tarefas_recorrentes'
         )
@@ -439,7 +451,7 @@ export default function NovaTarefaModal({
                 placeholder="Selecione o responsável..."
                 onChange={(ids) => setForm({ ...form, responsavel_id: ids[0] || '' })}
               />
-              {!recorrente && !mostrarEnvolvidos && (
+              {!mostrarEnvolvidos && (
                 <button
                   type="button"
                   onClick={() => setMostrarEnvolvidos(true)}
@@ -450,14 +462,15 @@ export default function NovaTarefaModal({
               )}
             </div>
 
-            {/* Envolvidos: além do responsável, quem mais pode concluir a tarefa */}
-            {!recorrente && mostrarEnvolvidos && (
+            {/* Envolvidos: além do responsável, quem mais pode concluir a tarefa
+                (na recorrência, aplicado a cada instância gerada) */}
+            {mostrarEnvolvidos && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Envolvidos (opcional)
                 </label>
                 <p className="text-xs text-gray-400 mb-2">
-                  Além do responsável, quem mais pode concluir esta tarefa.
+                  Além do responsável, quem mais pode concluir {recorrente ? 'cada tarefa gerada' : 'esta tarefa'}.
                 </p>
                 <SeletorPessoas
                   pessoas={pessoasDisponiveis.filter((p) => p.id !== form.responsavel_id)}

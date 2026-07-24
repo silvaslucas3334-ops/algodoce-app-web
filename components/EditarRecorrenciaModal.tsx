@@ -1,12 +1,14 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tarefa } from '@/lib/types'
 import { X, Save, Loader } from 'lucide-react'
+import SeletorPessoas from './SeletorPessoas'
 
 interface EditarRecorrenciaModalProps {
   tarefa: Tarefa
   recorrencia: any // TarefaRecorrencia
+  usuariosDoSetor: { id: string; nome: string }[]
   onClose: () => void
   onSaved: () => void
 }
@@ -25,6 +27,7 @@ const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 export default function EditarRecorrenciaModal({
   tarefa,
   recorrencia,
+  usuariosDoSetor,
   onClose,
   onSaved,
 }: EditarRecorrenciaModalProps) {
@@ -40,6 +43,21 @@ export default function EditarRecorrenciaModal({
     fotoObrigatoria: recorrencia.foto_obrigatoria,
     dataFim: recorrencia.data_fim || '',
   })
+
+  // Envolvidos da recorrência — aplicados em cada instância gerada
+  const [envolvidoIds, setEnvolvidoIds] = useState<string[]>([])
+  const [carregandoEnvolvidos, setCarregandoEnvolvidos] = useState(true)
+
+  useEffect(() => {
+    supabase
+      .from('tarefas_recorrencias_envolvidos')
+      .select('usuario_id')
+      .eq('recorrencia_id', recorrencia.id)
+      .then(({ data }) => {
+        setEnvolvidoIds((data || []).map((e: any) => e.usuario_id))
+        setCarregandoEnvolvidos(false)
+      })
+  }, [recorrencia.id])
 
   function toggleDia(d: number) {
     setForm((f) => ({
@@ -84,7 +102,44 @@ export default function EditarRecorrenciaModal({
         return
       }
 
-      // Regenera instâncias futuras (função idempotente)
+      // Envolvidos: substitui a lista inteira (delete-all-reinsert, mesmo
+      // padrão de EditarTarefaModal.tsx pra tarefa avulsa)
+      const envolvidosFinal = envolvidoIds.filter((id) => id !== recorrencia.responsavel_id)
+      const { error: delEnvError } = await supabase
+        .from('tarefas_recorrencias_envolvidos')
+        .delete()
+        .eq('recorrencia_id', recorrencia.id)
+      if (delEnvError) logErro('Falhou ao limpar envolvidos da recorrência:', delEnvError)
+      else if (envolvidosFinal.length > 0) {
+        const { error: envError } = await supabase
+          .from('tarefas_recorrencias_envolvidos')
+          .insert(envolvidosFinal.map((usuario_id) => ({ recorrencia_id: recorrencia.id, usuario_id })))
+        if (envError) logErro('Falhou ao salvar envolvidos da recorrência:', envError)
+      }
+
+      // Propaga pras instâncias já geradas e ainda abertas — sem isso, só
+      // as instâncias futuras (ainda não criadas) sairiam com os envolvidos
+      // certos, e é justamente o caso de "já criei ontem sem envolvidos"
+      // que motivou este ajuste.
+      const { data: instanciasAbertas } = await supabase
+        .from('tarefas')
+        .select('id')
+        .eq('recorrencia_id', recorrencia.id)
+        .in('status', ['pendente', 'refazer_pendente'])
+      const idsAbertas = (instanciasAbertas || []).map((t: any) => t.id)
+      if (idsAbertas.length > 0) {
+        const { error: delInstError } = await supabase.from('tarefas_envolvidos').delete().in('tarefa_id', idsAbertas)
+        if (delInstError) logErro('Falhou ao limpar envolvidos das instâncias abertas:', delInstError)
+        else if (envolvidosFinal.length > 0) {
+          const { error: insInstError } = await supabase.from('tarefas_envolvidos').insert(
+            idsAbertas.flatMap((tarefa_id) => envolvidosFinal.map((usuario_id) => ({ tarefa_id, usuario_id })))
+          )
+          if (insInstError) logErro('Falhou ao propagar envolvidos pras instâncias abertas:', insInstError)
+        }
+      }
+
+      // Regenera instâncias futuras (função idempotente) — já sai com os
+      // envolvidos atualizados acima
       const { error: rpcError } = await supabase.rpc('gerar_tarefas_recorrentes')
       if (rpcError) logErro('Recorrência atualizada, mas falhou ao regenerar instâncias:', rpcError)
 
@@ -271,6 +326,27 @@ export default function EditarRecorrenciaModal({
               onChange={(e) => setForm({ ...form, horaLimite: e.target.value })}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Envolvidos (opcional)</label>
+            <p className="text-xs text-gray-400 mb-2">
+              Além do responsável, quem mais pode concluir cada tarefa gerada.
+            </p>
+            {carregandoEnvolvidos ? (
+              <p className="text-xs text-gray-400">Carregando...</p>
+            ) : (
+              <SeletorPessoas
+                pessoas={usuariosDoSetor.filter((u) => u.id !== recorrencia.responsavel_id)}
+                selecionados={envolvidoIds}
+                multi
+                placeholder="Selecione os envolvidos..."
+                onChange={setEnvolvidoIds}
+              />
+            )}
+            <p className="text-xs text-gray-500 mt-1">
+              Aplica também às instâncias já geradas e ainda pendentes.
+            </p>
           </div>
 
           <div>
