@@ -18,20 +18,24 @@ export interface ItemNota {
 
 interface Props {
   materias: FinanceiroMateriaPrima[]
+  itemInicial?: ItemNota // presente = editar item já existente, pula a busca e pré-popula os valores
   onAdd: (item: ItemNota) => void
   onClose: () => void
 }
 
-export default function SelecionarMateriaPrimaModal({ materias, onAdd, onClose }: Props) {
+export default function SelecionarMateriaPrimaModal({ materias, itemInicial, onAdd, onClose }: Props) {
+  const editando = !!itemInicial
   const [busca, setBusca] = useState('')
-  const [selecionada, setSelecionada] = useState<FinanceiroMateriaPrima | null>(null)
+  const [selecionada, setSelecionada] = useState<FinanceiroMateriaPrima | null>(
+    itemInicial ? materias.find((m) => m.id === itemInicial.materia_prima_id) || null : null
+  )
 
-  const [quantidade, setQuantidade] = useState('')
-  const [unidadeNota, setUnidadeNota] = useState('')
-  const [fatorConversao, setFatorConversao] = useState('')
-  const [valorUnitario, setValorUnitario] = useState('')
-  const [valorTotal, setValorTotal] = useState('')
-  const [valorTotalEditadoManualmente, setValorTotalEditadoManualmente] = useState(false)
+  const [quantidade, setQuantidade] = useState(itemInicial ? String(itemInicial.quantidade) : '')
+  const [unidadeNota, setUnidadeNota] = useState(itemInicial?.unidade_nota || '')
+  const [fatorConversao, setFatorConversao] = useState(itemInicial ? String(itemInicial.fator_conversao) : '')
+  const [valorUnitario, setValorUnitario] = useState(itemInicial ? String(itemInicial.valor_unitario) : '')
+  const [valorTotal, setValorTotal] = useState(itemInicial ? String(itemInicial.valor_total) : '')
+  const [valorTotalEditadoManualmente, setValorTotalEditadoManualmente] = useState(editando)
 
   const filtradas = materias.filter((m) =>
     m.nome.toLowerCase().includes(busca.trim().toLowerCase()) ||
@@ -90,7 +94,7 @@ export default function SelecionarMateriaPrimaModal({ materias, onAdd, onClose }
       <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            {selecionada && (
+            {selecionada && !editando && (
               <button onClick={() => setSelecionada(null)} className="text-gray-500 hover:text-gray-700">
                 <ArrowLeft size={20} />
               </button>
@@ -226,7 +230,7 @@ export default function SelecionarMateriaPrimaModal({ materias, onAdd, onClose }
               disabled={!itemValido}
               className="w-full bg-pink-700 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              <Plus size={16} /> Adicionar à nota
+              {editando ? 'Salvar alterações' : (<><Plus size={16} /> Adicionar à nota</>)}
             </button>
           </div>
         )}

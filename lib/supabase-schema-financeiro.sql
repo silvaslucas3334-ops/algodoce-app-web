@@ -373,6 +373,9 @@ CREATE POLICY financeiro_lancamento_itens_select ON financeiro_lancamento_itens 
         )
     )
   );
+-- INSERT não trava por status: criar os itens é parte do mesmo fluxo
+-- atômico de lançar a nota, mesmo quando ela já nasce paga (status='pago')
+-- — só a UPDATE (editar item depois) trava em status='aberto'.
 DROP POLICY IF EXISTS financeiro_lancamento_itens_insert ON financeiro_lancamento_itens;
 CREATE POLICY financeiro_lancamento_itens_insert ON financeiro_lancamento_itens FOR INSERT TO authenticated
   WITH CHECK (
@@ -381,7 +384,7 @@ CREATE POLICY financeiro_lancamento_itens_insert ON financeiro_lancamento_itens 
       WHERE l.id = lancamento_id
         AND (
           (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
-          OR (l.unidade = financeiro_unidade_do_usuario() AND l.status = 'aberto')
+          OR l.unidade = financeiro_unidade_do_usuario()
         )
     )
   );
@@ -397,8 +400,11 @@ CREATE POLICY financeiro_lancamento_itens_update ON financeiro_lancamento_itens 
         )
     )
   );
+-- DELETE liberado só pro admin — corrige item errado sem refazer a nota
+-- inteira. O cabeçalho (financeiro_lancamentos) continua sem DELETE nunca.
 DROP POLICY IF EXISTS financeiro_lancamento_itens_delete_blocked ON financeiro_lancamento_itens;
-CREATE POLICY financeiro_lancamento_itens_delete_blocked ON financeiro_lancamento_itens FOR DELETE USING (false);
+CREATE POLICY financeiro_lancamento_itens_delete_admin ON financeiro_lancamento_itens FOR DELETE TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
 
 -- recorrencias: só admin.
 DROP POLICY IF EXISTS financeiro_recorrencias_select ON financeiro_recorrencias;
