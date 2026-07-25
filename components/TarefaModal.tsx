@@ -533,7 +533,12 @@ export default function TarefaModal({
             )}
           </div>
           <div className="flex items-center gap-1">
-            {podeEditar && (
+            {/* Instância de recorrência: só edita pela recorrência (título,
+                envolvidos etc. são do molde, não da instância — editar a
+                instância direto deixava campos como Envolvidos sempre em
+                branco, já que essa informação nem mora ali). Tarefa avulsa
+                continua com o lápis normal. */}
+            {podeEditar && !recorrenciaData && (
               <button
                 onClick={() => setEditando(true)}
                 className="p-2 hover:bg-gray-100 rounded-lg text-gray-500"
