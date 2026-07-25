@@ -257,6 +257,7 @@ export default function DetalheMateriaPrimaPage() {
                       <th className="py-2 pr-3">Nº compras</th>
                       <th className="py-2 pr-3">Última compra</th>
                       <th className="py-2 pr-3">Custo médio/{materia.unidade_medida}</th>
+                      <th className="py-2 pr-3">Preço/{materia.unidade_compra}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -266,6 +267,9 @@ export default function DetalheMateriaPrimaPage() {
                         <td className="py-2 pr-3 text-gray-600">{c.numero_compras}</td>
                         <td className="py-2 pr-3 text-gray-600">{new Date(c.ultima_compra + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
                         <td className="py-2 pr-3 text-gray-600">{formatBRL(c.custo_medio_por_unidade_medida)}</td>
+                        <td className="py-2 pr-3 font-medium text-gray-800">
+                          {formatBRL(c.custo_medio_por_unidade_medida * materia.fator_conversao)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
