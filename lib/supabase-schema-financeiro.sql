@@ -140,6 +140,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_fet_dedupe ON financeiro_extrato_transacoe
 CREATE INDEX IF NOT EXISTS idx_fet_status ON financeiro_extrato_transacoes(status_conciliacao);
 CREATE INDEX IF NOT EXISTS idx_fet_data ON financeiro_extrato_transacoes(data);
 
+-- 4.1 financeiro_ofx_contas_conhecidas — aprendizado fingerprint -> loja,
+--     pra avisar quando o toggle "Loja deste extrato" divergir do que já
+--     foi confirmado antes pra aquela conta (ver lib/ofx.ts, fingerprintOFX).
+CREATE TABLE IF NOT EXISTS financeiro_ofx_contas_conhecidas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fingerprint TEXT NOT NULL UNIQUE,
+  conta_bancaria TEXT NOT NULL,
+  bank_id TEXT,
+  acct_id TEXT,
+  cnpj TEXT,
+  aprendido_por UUID NOT NULL REFERENCES usuarios(id),
+  aprendido_em TIMESTAMPTZ DEFAULT now()
+);
+
 -- ============================================================
 -- 5. financeiro_recorrencias (despesas fixas mensais)
 -- ============================================================
@@ -431,8 +445,30 @@ DROP POLICY IF EXISTS financeiro_extrato_transacoes_update ON financeiro_extrato
 CREATE POLICY financeiro_extrato_transacoes_update ON financeiro_extrato_transacoes FOR UPDATE TO authenticated
   USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
   WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+-- DELETE: admin pode reverter um upload feito pra loja errada, mas só
+-- enquanto a linha ainda estiver 'pendente' (ver reverter-importacao-ofx.sql).
 DROP POLICY IF EXISTS financeiro_extrato_transacoes_delete_blocked ON financeiro_extrato_transacoes;
-CREATE POLICY financeiro_extrato_transacoes_delete_blocked ON financeiro_extrato_transacoes FOR DELETE USING (false);
+CREATE POLICY financeiro_extrato_transacoes_delete_admin_pendente ON financeiro_extrato_transacoes FOR DELETE TO authenticated
+  USING (
+    (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+    AND status_conciliacao = 'pendente'
+  );
+
+-- financeiro_ofx_contas_conhecidas: só admin, mesmo padrão do extrato.
+-- DELETE fica bloqueado — mapeamento errado se autocorrige via upsert.
+ALTER TABLE financeiro_ofx_contas_conhecidas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS financeiro_ofx_contas_conhecidas_select ON financeiro_ofx_contas_conhecidas;
+CREATE POLICY financeiro_ofx_contas_conhecidas_select ON financeiro_ofx_contas_conhecidas FOR SELECT TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+DROP POLICY IF EXISTS financeiro_ofx_contas_conhecidas_insert ON financeiro_ofx_contas_conhecidas;
+CREATE POLICY financeiro_ofx_contas_conhecidas_insert ON financeiro_ofx_contas_conhecidas FOR INSERT TO authenticated
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+DROP POLICY IF EXISTS financeiro_ofx_contas_conhecidas_update ON financeiro_ofx_contas_conhecidas;
+CREATE POLICY financeiro_ofx_contas_conhecidas_update ON financeiro_ofx_contas_conhecidas FOR UPDATE TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+DROP POLICY IF EXISTS financeiro_ofx_contas_conhecidas_delete_blocked ON financeiro_ofx_contas_conhecidas;
+CREATE POLICY financeiro_ofx_contas_conhecidas_delete_blocked ON financeiro_ofx_contas_conhecidas FOR DELETE USING (false);
 
 -- ============================================================
 -- 10. Geração automática das despesas recorrentes (pg_cron)

@@ -21,22 +21,23 @@ export interface PagamentoRecorrente {
   proximaData: string // YYYY-MM-DD
 }
 
+function extrairTag(bloco: string, nome: string): string | null {
+  const m = bloco.match(new RegExp(`<${nome}>([^<\\r\\n]*)`, 'i'))
+  return m ? m[1].trim() : null
+}
+
 /**
  * Extrai transações de um arquivo OFX (formato SGML, não é XML estrito).
  */
 export function parseOFX(texto: string): TransacaoOFX[] {
   const blocos = texto.split(/<STMTTRN>/i).slice(1)
-  const tag = (bloco: string, nome: string): string | null => {
-    const m = bloco.match(new RegExp(`<${nome}>([^<\\r\\n]*)`, 'i'))
-    return m ? m[1].trim() : null
-  }
 
   const transacoes: TransacaoOFX[] = []
   for (const bloco of blocos) {
-    const dtRaw = tag(bloco, 'DTPOSTED')
-    const amtRaw = tag(bloco, 'TRNAMT')
-    const nome = tag(bloco, 'NAME') || tag(bloco, 'MEMO') || 'Beneficiário'
-    const fitidRaw = tag(bloco, 'FITID')
+    const dtRaw = extrairTag(bloco, 'DTPOSTED')
+    const amtRaw = extrairTag(bloco, 'TRNAMT')
+    const nome = extrairTag(bloco, 'NAME') || extrairTag(bloco, 'MEMO') || 'Beneficiário'
+    const fitidRaw = extrairTag(bloco, 'FITID')
     if (!dtRaw || !amtRaw) continue
 
     const data = `${dtRaw.substring(0, 4)}-${dtRaw.substring(4, 6)}-${dtRaw.substring(6, 8)}`
@@ -46,6 +47,49 @@ export function parseOFX(texto: string): TransacaoOFX[] {
     transacoes.push({ data, valor, nome: nome.trim(), fitid: fitidRaw ? fitidRaw.trim() : null })
   }
   return transacoes
+}
+
+export interface OFXConta {
+  bankId: string | null
+  acctId: string | null
+  cnpj: string | null
+}
+
+// CNPJ pontuado obrigatório: o cabeçalho do OFX (antes do primeiro
+// <STMTTRN>) tem outras tags puramente numéricas de 14 dígitos (ex:
+// <DTSTART>20240601000000) que colidiriam com um regex de CNPJ sem
+// separador. Um CNPJ real em texto livre (ex: dentro de <ORG>) quase
+// sempre vem formatado, então exigir pontuação elimina esse falso positivo.
+const RE_CNPJ_HEADER = /\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/
+
+/**
+ * Extrai identificadores da CONTA (não da transação) do cabeçalho do OFX —
+ * o trecho antes do primeiro <STMTTRN>, hoje descartado por parseOFX
+ * (split(...).slice(1)). BANKID/ACCTID quase sempre presentes num extrato
+ * de banco brasileiro; CNPJ do titular é oportunista (nem todo banco expõe
+ * esse dado no arquivo). Ver fingerprintOFX para como isso vira uma chave
+ * estável de "qual conta é esta".
+ */
+export function parseOFXConta(texto: string): OFXConta {
+  const header = texto.split(/<STMTTRN>/i)[0]
+  const bankId = extrairTag(header, 'BANKID')
+  const acctId = extrairTag(header, 'ACCTID')
+  const mCnpj = header.match(RE_CNPJ_HEADER)
+  const cnpj = mCnpj ? mCnpj[0].replace(/\D/g, '') : null
+  return { bankId, acctId, cnpj }
+}
+
+/**
+ * Chave estável pra identificar "de qual conta bancária este arquivo é" —
+ * prioriza CNPJ (mais específico) e cai pra banco+número da conta quando
+ * CNPJ não está disponível (o caso comum). Retorna null quando nem
+ * BANKID+ACCTID estão presentes (arquivo atípico demais pra detectar;
+ * segue o fluxo manual normal).
+ */
+export function fingerprintOFX(conta: OFXConta): string | null {
+  if (conta.cnpj) return `cnpj:${conta.cnpj}`
+  if (conta.bankId && conta.acctId) return `conta:${conta.bankId}:${conta.acctId}`
+  return null
 }
 
 function proximaDataGeneral(

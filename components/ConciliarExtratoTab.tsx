@@ -8,9 +8,10 @@ import CategorizarReceitaModal from '@/components/CategorizarReceitaModal'
 import CategorizarReceitasLoteModal from '@/components/CategorizarReceitasLoteModal'
 import ConciliarGrupoModal from '@/components/ConciliarGrupoModal'
 import CriarDespesasLoteModal from '@/components/CriarDespesasLoteModal'
-import { importarTransacoesOFX } from '@/lib/financeiro-reconciliacao'
-import { formatBRL } from '@/lib/ofx'
-import { Upload, Loader, Link2, Tag, Layers, Receipt } from 'lucide-react'
+import ReverterImportacaoModal from '@/components/ReverterImportacaoModal'
+import { importarTransacoesOFX, buscarContaAprendida, aprenderContaOFX } from '@/lib/financeiro-reconciliacao'
+import { formatBRL, parseOFXConta, fingerprintOFX, OFXConta } from '@/lib/ofx'
+import { Upload, Loader, Link2, Tag, Layers, Receipt, History, AlertTriangle } from 'lucide-react'
 import { FinanceiroExtratoTransacao, StatusConciliacao } from '@/lib/types'
 import { UNIDADE_LABEL } from '@/lib/constants'
 
@@ -52,6 +53,14 @@ export default function ConciliarExtratoTab() {
   const [modalLote, setModalLote] = useState(false)
   const [modalGrupo, setModalGrupo] = useState(false)
   const [modalDespesasLote, setModalDespesasLote] = useState(false)
+  const [modalImportacoes, setModalImportacoes] = useState(false)
+  const [avisoConta, setAvisoConta] = useState<{
+    texto: string
+    fp: string
+    info: OFXConta
+    contaSelecionada: 'loja1' | 'loja2'
+    contaAprendida: 'loja1' | 'loja2'
+  } | null>(null)
 
   useEffect(() => {
     carregar()
@@ -72,26 +81,48 @@ export default function ConciliarExtratoTab() {
     setLoading(false)
   }
 
+  async function executarImportacao(texto: string, conta: 'loja1' | 'loja2', fp: string | null, info: OFXConta) {
+    setImportando(true)
+    try {
+      const resultado = await importarTransacoesOFX(texto, conta, usuario!.id)
+      setMsgImportacao(`${resultado.novas} transação(ões) nova(s) importada(s), ${resultado.duplicadas} já existiam.`)
+      await carregar()
+      // Aprender/atualizar o mapeamento é best-effort — não deve derrubar uma
+      // importação que já foi concluída com sucesso.
+      if (fp) aprenderContaOFX(fp, conta, usuario!.id, info).catch((err) => console.error('Erro ao aprender conta OFX:', err))
+    } catch (err: any) {
+      console.error(err)
+      setErro('Erro ao importar OFX: ' + (err?.message || 'desconhecido'))
+    } finally {
+      setImportando(false)
+    }
+  }
+
   function onArquivo(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file || !usuario) return
     setErro('')
     setMsgImportacao('')
+    setAvisoConta(null)
     const reader = new FileReader()
     reader.onload = async (ev) => {
-      setImportando(true)
-      try {
-        const texto = ev.target?.result as string
-        const resultado = await importarTransacoesOFX(texto, contaImport, usuario.id)
-        setMsgImportacao(`${resultado.novas} transação(ões) nova(s) importada(s), ${resultado.duplicadas} já existiam.`)
-        await carregar()
-      } catch (err: any) {
-        console.error(err)
-        setErro('Erro ao importar OFX: ' + (err?.message || 'desconhecido'))
-      } finally {
-        setImportando(false)
-        e.target.value = ''
+      const texto = ev.target?.result as string
+      const info = parseOFXConta(texto)
+      const fp = fingerprintOFX(info)
+      if (fp) {
+        try {
+          const aprendida = await buscarContaAprendida(fp)
+          if (aprendida && aprendida !== contaImport && (aprendida === 'loja1' || aprendida === 'loja2')) {
+            setAvisoConta({ texto, fp, info, contaSelecionada: contaImport, contaAprendida: aprendida })
+            e.target.value = ''
+            return
+          }
+        } catch (err) {
+          console.error('Erro ao checar conta aprendida (seguindo import normal):', err)
+        }
       }
+      await executarImportacao(texto, contaImport, fp, info)
+      e.target.value = ''
     }
     reader.readAsText(file)
   }
@@ -147,8 +178,51 @@ export default function ConciliarExtratoTab() {
           <span className="text-sm">{importando ? 'Importando...' : 'Selecionar arquivo .ofx'}</span>
           <input type="file" accept=".ofx,.OFX,text/plain" onChange={onArquivo} disabled={importando} className="hidden" />
         </label>
+
+        {avisoConta && (
+          <div className="border-2 border-amber-400 bg-amber-50 rounded-lg p-4 mt-3">
+            <p className="text-sm text-amber-800 flex items-start gap-2">
+              <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+              <span>
+                Este arquivo já foi importado antes como <strong>{UNIDADE_LABEL[avisoConta.contaAprendida]}</strong>, mas a loja
+                selecionada agora é <strong>{UNIDADE_LABEL[avisoConta.contaSelecionada]}</strong>.
+              </span>
+            </p>
+            <div className="flex gap-2 mt-3 flex-wrap">
+              <button
+                onClick={() => {
+                  setContaImport(avisoConta.contaAprendida)
+                  executarImportacao(avisoConta.texto, avisoConta.contaAprendida, avisoConta.fp, avisoConta.info)
+                  setAvisoConta(null)
+                }}
+                className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700"
+              >
+                Usar {UNIDADE_LABEL[avisoConta.contaAprendida]}
+              </button>
+              <button
+                onClick={() => {
+                  executarImportacao(avisoConta.texto, avisoConta.contaSelecionada, avisoConta.fp, avisoConta.info)
+                  setAvisoConta(null)
+                }}
+                className="px-3 py-1.5 border-2 border-amber-600 text-amber-700 rounded-lg text-xs font-semibold hover:bg-amber-100"
+              >
+                Continuar com {UNIDADE_LABEL[avisoConta.contaSelecionada]}
+              </button>
+              <button onClick={() => setAvisoConta(null)} className="px-3 py-1.5 text-xs text-gray-500">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
         {msgImportacao && <p className="text-sm text-green-700 mt-3">{msgImportacao}</p>}
         {erro && <p className="text-sm text-red-700 mt-3">{erro}</p>}
+        <button
+          onClick={() => setModalImportacoes(true)}
+          className="text-xs font-medium text-gray-500 hover:text-gray-700 mt-3 flex items-center gap-1"
+        >
+          <History size={13} /> Ver importações recentes / reverter
+        </button>
       </div>
 
       <div className="flex gap-2 mb-2 flex-wrap">
@@ -335,6 +409,10 @@ export default function ConciliarExtratoTab() {
             setSelecionados(new Set())
           }}
         />
+      )}
+
+      {modalImportacoes && (
+        <ReverterImportacaoModal onClose={() => setModalImportacoes(false)} onResolvido={carregar} />
       )}
     </div>
   )

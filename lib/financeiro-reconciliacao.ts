@@ -77,6 +77,114 @@ export async function importarTransacoesOFX(
   return { novas: novas.length, duplicadas: transacoes.length - novas.length }
 }
 
+export interface LoteImportacao {
+  contaBancaria: string
+  importadoEm: string
+  total: number
+  pendentes: number
+  conciliados: number
+  ignorados: number
+}
+
+/**
+ * Agrupa transações de extrato em "lotes de importação" por
+ * (conta_bancaria, importado_em) — sem coluna nova: todas as linhas de UM
+ * upload (uma chamada de importarTransacoesOFX) compartilham o mesmo
+ * timestamp literal do now() do Postgres, estável dentro de uma única
+ * instrução INSERT. Agrupamento feito em memória — volume baixo (staging
+ * de extrato bancário dos últimos meses).
+ */
+export async function listarImportacoesRecentes(limiteDias = 60): Promise<LoteImportacao[]> {
+  const desde = new Date(Date.now() - limiteDias * 86400000).toISOString()
+  const { data, error } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .select('conta_bancaria, importado_em, status_conciliacao')
+    .gte('importado_em', desde)
+  if (error) throw new Error(error.message)
+
+  const grupos = new Map<string, LoteImportacao>()
+  for (const row of data || []) {
+    const chave = `${row.conta_bancaria}|${row.importado_em}`
+    const g = grupos.get(chave) || {
+      contaBancaria: row.conta_bancaria,
+      importadoEm: row.importado_em,
+      total: 0,
+      pendentes: 0,
+      conciliados: 0,
+      ignorados: 0,
+    }
+    g.total++
+    if (row.status_conciliacao === 'pendente') g.pendentes++
+    else if (row.status_conciliacao === 'conciliado') g.conciliados++
+    else g.ignorados++
+    grupos.set(chave, g)
+  }
+  return Array.from(grupos.values()).sort((a, b) => b.importadoEm.localeCompare(a.importadoEm))
+}
+
+/**
+ * Reverte um lote de importação feito com a loja errada: remove só as
+ * linhas ainda 'pendente' daquele (conta_bancaria, importado_em). Linhas
+ * conciliadas/ignoradas do mesmo lote são preservadas (a RLS já impõe o
+ * mesmo filtro; o .eq aqui garante que o número reportado ao chamador
+ * reflita exatamente o que foi de fato removido).
+ */
+export async function reverterImportacao(contaBancaria: string, importadoEm: string): Promise<{ removidas: number }> {
+  const { data, error } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .delete()
+    .eq('conta_bancaria', contaBancaria)
+    .eq('importado_em', importadoEm)
+    .eq('status_conciliacao', 'pendente')
+    .select('id')
+  if (error) throw new Error(error.message)
+  return { removidas: (data || []).length }
+}
+
+/**
+ * Consulta o mapeamento fingerprint->loja aprendido de uma importação
+ * anterior bem-sucedida (ver aprenderContaOFX) — usado pra avisar o admin
+ * quando o toggle "Loja deste extrato" divergir do que já foi confirmado
+ * antes pra aquela mesma conta bancária (mesmo CNPJ, ou mesmo banco+número
+ * de conta quando o CNPJ não está disponível no arquivo).
+ */
+export async function buscarContaAprendida(fingerprint: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('financeiro_ofx_contas_conhecidas')
+    .select('conta_bancaria')
+    .eq('fingerprint', fingerprint)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data?.conta_bancaria ?? null
+}
+
+/**
+ * Aprende/atualiza (upsert) o mapeamento fingerprint->loja depois de uma
+ * importação bem-sucedida — inclusive quando o admin confirma manualmente
+ * por cima de um aviso de divergência, o que também autocorrige um
+ * mapeamento anterior errado. Best-effort: erro aqui nunca deve derrubar a
+ * importação já concluída (ver chamador em ConciliarExtratoTab.tsx).
+ */
+export async function aprenderContaOFX(
+  fingerprint: string,
+  contaBancaria: string,
+  usuarioId: string,
+  info: { bankId: string | null; acctId: string | null; cnpj: string | null }
+): Promise<void> {
+  const { error } = await supabase.from('financeiro_ofx_contas_conhecidas').upsert(
+    {
+      fingerprint,
+      conta_bancaria: contaBancaria,
+      bank_id: info.bankId,
+      acct_id: info.acctId,
+      cnpj: info.cnpj,
+      aprendido_por: usuarioId,
+    },
+    { onConflict: 'fingerprint' }
+  )
+  if (error) throw new Error(error.message)
+}
+
 function diasEntre(dataA: string, dataB: string): number {
   const a = new Date(dataA + 'T00:00:00')
   const b = new Date(dataB + 'T00:00:00')
