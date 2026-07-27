@@ -9,6 +9,7 @@ interface EditarRecorrenciaModalProps {
   tarefa: Tarefa
   recorrencia: any // TarefaRecorrencia
   usuariosDoSetor: { id: string; nome: string }[]
+  usuarioAtualId: string
   onClose: () => void
   onSaved: () => void
 }
@@ -28,6 +29,7 @@ export default function EditarRecorrenciaModal({
   tarefa,
   recorrencia,
   usuariosDoSetor,
+  usuarioAtualId,
   onClose,
   onSaved,
 }: EditarRecorrenciaModalProps) {
@@ -46,6 +48,9 @@ export default function EditarRecorrenciaModal({
 
   // Envolvidos da recorrência — aplicados em cada instância gerada
   const [envolvidoIds, setEnvolvidoIds] = useState<string[]>([])
+  // Snapshot do que já estava envolvido antes desta edição — usado só pra
+  // saber quem é novo e precisa ser notificado (ver salvar()).
+  const [envolvidoIdsOriginais, setEnvolvidoIdsOriginais] = useState<string[]>([])
   const [carregandoEnvolvidos, setCarregandoEnvolvidos] = useState(true)
 
   useEffect(() => {
@@ -54,7 +59,9 @@ export default function EditarRecorrenciaModal({
       .select('usuario_id')
       .eq('recorrencia_id', recorrencia.id)
       .then(({ data }) => {
-        setEnvolvidoIds((data || []).map((e: any) => e.usuario_id))
+        const ids = (data || []).map((e: any) => e.usuario_id)
+        setEnvolvidoIds(ids)
+        setEnvolvidoIdsOriginais(ids)
         setCarregandoEnvolvidos(false)
       })
   }, [recorrencia.id])
@@ -105,16 +112,24 @@ export default function EditarRecorrenciaModal({
       // Envolvidos: substitui a lista inteira (delete-all-reinsert, mesmo
       // padrão de EditarTarefaModal.tsx pra tarefa avulsa)
       const envolvidosFinal = envolvidoIds.filter((id) => id !== recorrencia.responsavel_id)
+      let envolvidosRecorrenciaSalvos = true
       const { error: delEnvError } = await supabase
         .from('tarefas_recorrencias_envolvidos')
         .delete()
         .eq('recorrencia_id', recorrencia.id)
-      if (delEnvError) logErro('Falhou ao limpar envolvidos da recorrência:', delEnvError)
-      else if (envolvidosFinal.length > 0) {
+      if (delEnvError) {
+        envolvidosRecorrenciaSalvos = false
+        logErro('Falhou ao limpar envolvidos da recorrência:', delEnvError)
+        alert('Recorrência salva, mas falhou ao atualizar os envolvidos: ' + delEnvError.message + '. Tente editar novamente.')
+      } else if (envolvidosFinal.length > 0) {
         const { error: envError } = await supabase
           .from('tarefas_recorrencias_envolvidos')
           .insert(envolvidosFinal.map((usuario_id) => ({ recorrencia_id: recorrencia.id, usuario_id })))
-        if (envError) logErro('Falhou ao salvar envolvidos da recorrência:', envError)
+        if (envError) {
+          envolvidosRecorrenciaSalvos = false
+          logErro('Falhou ao salvar envolvidos da recorrência:', envError)
+          alert('Recorrência salva, mas falhou ao salvar os envolvidos: ' + envError.message + '. Tente editar novamente.')
+        }
       }
 
       // Propaga pras instâncias já geradas e ainda abertas — sem isso, só
@@ -128,13 +143,51 @@ export default function EditarRecorrenciaModal({
         .in('status', ['pendente', 'refazer_pendente'])
       const idsAbertas = (instanciasAbertas || []).map((t: any) => t.id)
       if (idsAbertas.length > 0) {
+        let envolvidosInstanciasSalvos = true
         const { error: delInstError } = await supabase.from('tarefas_envolvidos').delete().in('tarefa_id', idsAbertas)
-        if (delInstError) logErro('Falhou ao limpar envolvidos das instâncias abertas:', delInstError)
-        else if (envolvidosFinal.length > 0) {
+        if (delInstError) {
+          envolvidosInstanciasSalvos = false
+          logErro('Falhou ao limpar envolvidos das instâncias abertas:', delInstError)
+          alert('Recorrência salva, mas falhou ao atualizar os envolvidos das tarefas já geradas: ' + delInstError.message + '. Tente editar novamente.')
+        } else if (envolvidosFinal.length > 0) {
           const { error: insInstError } = await supabase.from('tarefas_envolvidos').insert(
             idsAbertas.flatMap((tarefa_id) => envolvidosFinal.map((usuario_id) => ({ tarefa_id, usuario_id })))
           )
-          if (insInstError) logErro('Falhou ao propagar envolvidos pras instâncias abertas:', insInstError)
+          if (insInstError) {
+            envolvidosInstanciasSalvos = false
+            logErro('Falhou ao propagar envolvidos pras instâncias abertas:', insInstError)
+            alert('Recorrência salva, mas falhou ao propagar os envolvidos pras tarefas já geradas: ' + insInstError.message + '. Tente editar novamente.')
+          }
+        }
+
+        // Só avisa quem foi ADICIONADO agora — usando a instância aberta mais
+        // próxima do vencimento como referência (notificação é por tarefa
+        // concreta, não pelo molde da recorrência).
+        const novosEnvolvidos =
+          envolvidosRecorrenciaSalvos && envolvidosInstanciasSalvos
+            ? envolvidosFinal.filter((id) => !envolvidoIdsOriginais.includes(id) && id !== usuarioAtualId)
+            : []
+        if (novosEnvolvidos.length > 0) {
+          const { data: instanciaMaisProxima } = await supabase
+            .from('tarefas')
+            .select('id')
+            .in('id', idsAbertas)
+            .order('data_vencimento', { ascending: true })
+            .limit(1)
+            .maybeSingle()
+          if (instanciaMaisProxima) {
+            const nomeAtor = usuariosDoSetor.find((u) => u.id === usuarioAtualId)?.nome || 'Alguém'
+            const { error: notifEnvError } = await supabase.from('tarefas_notificacoes').insert(
+              novosEnvolvidos.map((usuario_id) => ({
+                tarefa_id: instanciaMaisProxima.id,
+                usuario_id,
+                tipo: 'envolvido_adicionado',
+                mensagem: null,
+                criado_por: nomeAtor,
+              }))
+            )
+            if (notifEnvError) logErro('Falhou ao notificar novos envolvidos da recorrência:', notifEnvError)
+          }
         }
       }
 

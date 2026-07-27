@@ -139,7 +139,7 @@ export interface TarefaNotificacao {
   id: string
   tarefa_id: string
   usuario_id: string
-  tipo: 'comentario' | 'feedback_refazer' | 'aprovada' | 'concluida_por_gestor' | 'nova_tarefa' | 'concluida'
+  tipo: 'comentario' | 'feedback_refazer' | 'aprovada' | 'concluida_por_gestor' | 'nova_tarefa' | 'concluida' | 'envolvido_adicionado'
   mensagem: string | null
   criado_por: string | null
   lida_em: string | null

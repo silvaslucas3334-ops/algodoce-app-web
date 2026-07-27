@@ -1,4 +1,4 @@
-import { MessageSquare, RotateCw, CheckCircle2, Plus, LucideIcon } from 'lucide-react'
+import { MessageSquare, RotateCw, CheckCircle2, Plus, UserPlus, LucideIcon } from 'lucide-react'
 import { TarefaNotificacao } from '@/lib/types'
 
 /**
@@ -27,12 +27,22 @@ export function textoNotificacao(n: TarefaNotificacao, usuarioId: string): strin
       return `"${titulo}" voltou para refazer${n.mensagem ? ` — feedback: "${n.mensagem}"` : ''}`
     case 'aprovada':
       return `"${titulo}" foi aprovada! 🎉`
-    case 'concluida_por_gestor':
-      return `${autor} concluiu "${titulo}" por você${n.mensagem ? ` — "${n.mensagem}"` : ''}`
+    case 'concluida_por_gestor': {
+      if (n.tarefa?.responsavel_atual_id === usuarioId) {
+        return `${autor} concluiu "${titulo}" por você${n.mensagem ? ` — "${n.mensagem}"` : ''}`
+      }
+      return `${autor} concluiu "${titulo}", em que você estava envolvido${n.mensagem ? ` — "${n.mensagem}"` : ''}`
+    }
     case 'nova_tarefa':
       return `${autor} criou uma nova tarefa para você: "${titulo}"`
-    case 'concluida':
-      return `${autor} concluiu "${titulo}", que você criou`
+    case 'concluida': {
+      if (n.tarefa?.criado_por === usuarioId) {
+        return `${autor} concluiu "${titulo}", que você criou`
+      }
+      return `${autor} concluiu "${titulo}", em que você estava envolvido`
+    }
+    case 'envolvido_adicionado':
+      return `${autor} te envolveu na tarefa "${titulo}"`
     default:
       return titulo
   }
@@ -46,6 +56,8 @@ export function iconeNotificacao(tipo: TarefaNotificacao['tipo']): LucideIcon {
       return RotateCw
     case 'nova_tarefa':
       return Plus
+    case 'envolvido_adicionado':
+      return UserPlus
     case 'aprovada':
     case 'concluida_por_gestor':
     case 'concluida':

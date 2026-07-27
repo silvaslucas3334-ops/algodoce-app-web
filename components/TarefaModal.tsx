@@ -96,11 +96,14 @@ export default function TarefaModal({
   const podeConluir =
     (ehResponsavel || ehEnvolvido) &&
     (tarefa.status === 'pendente' || tarefa.status === 'refazer_pendente')
-  // Admin cancela qualquer tarefa aberta; criador (colaborador) só a que criou,
-  // ainda pendente e sem evidência enviada.
+  // Admin cancela qualquer tarefa aberta; criador (colaborador) e envolvido só
+  // a que criaram/estão envolvidos, ainda pendente e sem evidência enviada.
   const podeCancelar =
     (ehAdmin && tarefa.status !== 'cancelada' && tarefa.status !== 'concluida') ||
     (ehCriador &&
+      tarefa.status === 'pendente' &&
+      evidencias.length === 0) ||
+    (ehEnvolvido &&
       tarefa.status === 'pendente' &&
       evidencias.length === 0)
   const podeRevisar = ehAdmin && tarefa.status === 'pronta_revisao'
@@ -376,12 +379,11 @@ export default function TarefaModal({
       })
       if (histError) logErro('Concluiu, mas falhou ao gravar histórico:', histError)
 
-      // Quem criou a tarefa é avisado que ela foi concluída — importante
-      // principalmente quando o criador não é o responsável (gestor abriu
-      // a tarefa pra outra pessoa fazer).
-      if (tarefa.criado_por && tarefa.criado_por !== usuarioAtualId) {
-        await notificar([tarefa.criado_por], 'concluida', null)
-      }
+      // Quem tem relação com a tarefa é avisado que ela foi concluída —
+      // criador (importante principalmente quando ele não é o responsável,
+      // ex: gestor abriu a tarefa pra outra pessoa fazer) e envolvidos que
+      // não foram quem concluiu.
+      await notificar(destinatariosNotificacao(), 'concluida', null)
 
       onStatusChange?.()
       onClose()
@@ -435,16 +437,9 @@ export default function TarefaModal({
       })
       if (histError) logErro('Concluiu como gestor, mas falhou ao gravar histórico:', histError)
 
-      if (tarefa.responsavel_atual_id) {
-        const { error: notifError } = await supabase.from('tarefas_notificacoes').insert({
-          tarefa_id: tarefa.id,
-          usuario_id: tarefa.responsavel_atual_id,
-          tipo: 'concluida_por_gestor',
-          mensagem: comentarioGestorTexto.trim(),
-          criado_por: usuariosMap[usuarioAtualId]?.nome || 'Gestor',
-        })
-        if (notifError) logErro('Concluiu como gestor, mas falhou ao gravar notificação:', notifError)
-      }
+      // Responsável (por quem o gestor concluiu) + envolvidos, cada um com o
+      // texto certo pra sua relação (ver textoNotificacao, case concluida_por_gestor).
+      await notificar(destinatariosNotificacao(), 'concluida_por_gestor', comentarioGestorTexto.trim())
 
       onStatusChange?.()
       onClose()
@@ -990,6 +985,7 @@ export default function TarefaModal({
           tarefa={tarefa}
           recorrencia={recorrenciaData}
           usuariosDoSetor={usuariosDoSetor}
+          usuarioAtualId={usuarioAtualId}
           onClose={() => setMostrarEditarRecorrencia(false)}
           onSaved={() => {
             setMostrarEditarRecorrencia(false)

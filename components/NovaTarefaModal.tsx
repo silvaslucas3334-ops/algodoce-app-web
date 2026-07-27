@@ -257,11 +257,16 @@ export default function NovaTarefaModal({
         }
 
         const envolvidosRecorrencia = envolvidoIds.filter((id) => id !== form.responsavel_id)
+        let envolvidosRecorrenciaSalvos = true
         if (envolvidosRecorrencia.length > 0 && novaRecorrencia) {
           const { error: envRecError } = await supabase
             .from('tarefas_recorrencias_envolvidos')
             .insert(envolvidosRecorrencia.map((usuario_id) => ({ recorrencia_id: novaRecorrencia.id, usuario_id })))
-          if (envRecError) console.error('Erro ao salvar envolvidos da recorrência:', envRecError)
+          if (envRecError) {
+            envolvidosRecorrenciaSalvos = false
+            console.error('Erro ao salvar envolvidos da recorrência:', envRecError)
+            alert('Recorrência criada, mas falhou ao salvar os envolvidos: ' + envRecError.message + '. Adicione novamente editando a recorrência.')
+          }
         }
 
         // Geração imediata das instâncias (janela de 30 dias) — já sai com
@@ -274,6 +279,33 @@ export default function NovaTarefaModal({
           setSalvando(false)
           return
         }
+
+        // Avisa os envolvidos usando a primeira instância gerada como
+        // referência concreta (notificação é sempre por tarefa, não por
+        // recorrência/molde).
+        const notificarEnvolvidosRec = envolvidosRecorrencia.filter((id) => id !== criadoPor)
+        if (notificarEnvolvidosRec.length > 0 && novaRecorrencia) {
+          const { data: primeiraInstancia } = await supabase
+            .from('tarefas')
+            .select('id')
+            .eq('recorrencia_id', novaRecorrencia.id)
+            .order('data_vencimento', { ascending: true })
+            .limit(1)
+            .maybeSingle()
+          if (primeiraInstancia) {
+            const { error: notifEnvError } = await supabase.from('tarefas_notificacoes').insert(
+              notificarEnvolvidosRec.map((usuario_id) => ({
+                tarefa_id: primeiraInstancia.id,
+                usuario_id,
+                tipo: 'envolvido_adicionado',
+                mensagem: null,
+                criado_por: criadoPorNome,
+              }))
+            )
+            if (notifEnvError) console.error('Erro ao notificar envolvidos da recorrência:', notifEnvError)
+          }
+        }
+
         alert(`Recorrência criada — ${qtd ?? 0} instâncias geradas nos próximos 30 dias.`)
       } else {
         const { data: novaTarefa, error } = await supabase
@@ -304,7 +336,24 @@ export default function NovaTarefaModal({
           const { error: envError } = await supabase
             .from('tarefas_envolvidos')
             .insert(envolvidosFinal.map((usuario_id) => ({ tarefa_id: novaTarefa.id, usuario_id })))
-          if (envError) console.error('Erro ao salvar envolvidos da tarefa:', envError)
+          if (envError) {
+            console.error('Erro ao salvar envolvidos da tarefa:', envError)
+            alert('Tarefa criada, mas falhou ao salvar os envolvidos: ' + envError.message + '. Adicione novamente editando a tarefa.')
+          }
+
+          const notificarEnvolvidos = envError ? [] : envolvidosFinal.filter((id) => id !== criadoPor)
+          if (notificarEnvolvidos.length > 0) {
+            const { error: notifEnvError } = await supabase.from('tarefas_notificacoes').insert(
+              notificarEnvolvidos.map((usuario_id) => ({
+                tarefa_id: novaTarefa.id,
+                usuario_id,
+                tipo: 'envolvido_adicionado',
+                mensagem: null,
+                criado_por: criadoPorNome,
+              }))
+            )
+            if (notifEnvError) console.error('Erro ao notificar envolvidos da nova tarefa:', notifEnvError)
+          }
         }
 
         if (novaTarefa && form.responsavel_id !== criadoPor) {

@@ -150,6 +150,20 @@ WITH CHECK (
   criado_por = auth.uid()
 );
 
+-- UPDATE: envolvido cancela a própria tarefa (não edita campos), mesma
+-- trava do criador (pendente + sem evidência). Escopo estreito de propósito:
+-- só a transição pendente -> cancelada.
+CREATE POLICY tarefas_update_envolvido_cancelar ON tarefas FOR UPDATE
+USING (
+  status = 'pendente'
+  AND tarefa_sem_evidencia(id)
+  AND EXISTS (SELECT 1 FROM tarefas_envolvidos WHERE tarefa_id = tarefas.id AND usuario_id = auth.uid())
+)
+WITH CHECK (
+  status = 'cancelada'
+  AND EXISTS (SELECT 1 FROM tarefas_envolvidos WHERE tarefa_id = tarefas.id AND usuario_id = auth.uid())
+);
+
 -- INSERT: admin em qualquer setor; colaborador só no próprio setor, criando em seu próprio nome
 CREATE POLICY tarefas_insert_admin ON tarefas
 FOR INSERT WITH CHECK (

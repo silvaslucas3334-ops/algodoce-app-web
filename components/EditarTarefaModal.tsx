@@ -147,11 +147,35 @@ export default function EditarTarefaModal({
 
       if (envolvidosMudou) {
         await supabase.from('tarefas_envolvidos').delete().eq('tarefa_id', tarefa.id)
+        let envolvidosSalvos = true
         if (envolvidosFinal.length > 0) {
           const { error: envError } = await supabase
             .from('tarefas_envolvidos')
             .insert(envolvidosFinal.map((usuario_id) => ({ tarefa_id: tarefa.id, usuario_id })))
-          if (envError) logErro('Erro ao salvar envolvidos:', envError)
+          if (envError) {
+            envolvidosSalvos = false
+            logErro('Erro ao salvar envolvidos:', envError)
+            alert('Tarefa salva, mas falhou ao salvar os envolvidos: ' + envError.message + '. Tente editar novamente.')
+          }
+        }
+
+        // Só avisa quem foi ADICIONADO agora — quem já estava envolvido não
+        // precisa ser renotificado.
+        const novosEnvolvidos = envolvidosSalvos
+          ? envolvidosFinal.filter((id) => !envolvidoIdsOriginais.includes(id) && id !== usuarioAtualId)
+          : []
+        if (novosEnvolvidos.length > 0) {
+          const nomeAtor = usuariosDoSetor.find((u) => u.id === usuarioAtualId)?.nome || 'Alguém'
+          const { error: notifEnvError } = await supabase.from('tarefas_notificacoes').insert(
+            novosEnvolvidos.map((usuario_id) => ({
+              tarefa_id: tarefa.id,
+              usuario_id,
+              tipo: 'envolvido_adicionado',
+              mensagem: null,
+              criado_por: nomeAtor,
+            }))
+          )
+          if (notifEnvError) logErro('Erro ao notificar novos envolvidos:', notifEnvError)
         }
       }
 
