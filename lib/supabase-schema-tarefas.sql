@@ -105,6 +105,18 @@ FOR SELECT USING (
   setor_id IN (SELECT setor_id FROM usuarios WHERE id = auth.uid() AND setor_id IS NOT NULL)
 );
 
+-- Evita recursão de RLS ao consultar tarefas_envolvidos dentro de uma policy
+-- de UPDATE em tarefas: sem isso, a policy de SELECT de tarefas_envolvidos
+-- consulta tarefas de volta (pra checar setor_id), fechando um ciclo que o
+-- Postgres recusa como "infinite recursion detected in policy for relation
+-- tarefas" — mesmo policies de OUTRAS tabelas (ex: admin) sendo afetadas,
+-- porque todas as policies de UPDATE de tarefas são avaliadas juntas (OR).
+CREATE OR REPLACE FUNCTION usuario_envolvido_na_tarefa(p_tarefa_id UUID) RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM tarefas_envolvidos WHERE tarefa_id = p_tarefa_id AND usuario_id = auth.uid()
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
 -- UPDATE status: colaborador (responsável OU envolvido) onde status IN ('pendente', 'refazer_pendente')
 CREATE POLICY tarefas_update_status_colaborador ON tarefas
 FOR UPDATE
@@ -112,14 +124,14 @@ USING (
   status IN ('pendente', 'refazer_pendente')
   AND (
     responsavel_atual_id = auth.uid()
-    OR EXISTS (SELECT 1 FROM tarefas_envolvidos WHERE tarefa_id = tarefas.id AND usuario_id = auth.uid())
+    OR usuario_envolvido_na_tarefa(id)
   )
 )
 WITH CHECK (
   status IN ('pronta_revisao')
   AND (
     responsavel_atual_id = auth.uid()
-    OR EXISTS (SELECT 1 FROM tarefas_envolvidos WHERE tarefa_id = tarefas.id AND usuario_id = auth.uid())
+    OR usuario_envolvido_na_tarefa(id)
   )
 );
 
@@ -157,11 +169,11 @@ CREATE POLICY tarefas_update_envolvido_cancelar ON tarefas FOR UPDATE
 USING (
   status = 'pendente'
   AND tarefa_sem_evidencia(id)
-  AND EXISTS (SELECT 1 FROM tarefas_envolvidos WHERE tarefa_id = tarefas.id AND usuario_id = auth.uid())
+  AND usuario_envolvido_na_tarefa(id)
 )
 WITH CHECK (
   status = 'cancelada'
-  AND EXISTS (SELECT 1 FROM tarefas_envolvidos WHERE tarefa_id = tarefas.id AND usuario_id = auth.uid())
+  AND usuario_envolvido_na_tarefa(id)
 );
 
 -- INSERT: admin em qualquer setor; colaborador só no próprio setor, criando em seu próprio nome
