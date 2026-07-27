@@ -2,8 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
-import { useRouter } from 'next/navigation'
-import { ArrowLeft } from 'lucide-react'
+import PageHeader from '@/components/PageHeader'
 import { FinanceiroConta, FinanceiroCentroCusto } from '@/lib/types'
 
 const APLICAVEL_LABEL: Record<string, string> = {
@@ -13,7 +12,6 @@ const APLICAVEL_LABEL: Record<string, string> = {
 }
 
 export default function ContasPage() {
-  const router = useRouter()
   const [centros, setCentros] = useState<FinanceiroCentroCusto[]>([])
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [loading, setLoading] = useState(true)
@@ -32,14 +30,7 @@ export default function ContasPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.push('/financeiro')} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <h1 className="text-xl font-bold text-gray-800">Plano de Contas</h1>
-          </div>
-        </div>
+        <PageHeader title="Plano de Contas" backHref="/financeiro" maxWidth="max-w-3xl" />
 
         <div className="max-w-3xl mx-auto px-4 py-6">
           <p className="text-sm text-gray-500 mb-4">

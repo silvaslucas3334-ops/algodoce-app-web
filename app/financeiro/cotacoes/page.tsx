@@ -3,8 +3,9 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
+import PageHeader from '@/components/PageHeader'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { FinanceiroCotacao, StatusCotacao } from '@/lib/types'
 import { UNIDADE_LABEL } from '@/lib/constants'
 
@@ -48,22 +49,19 @@ export default function CotacoesPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <button onClick={() => router.push('/financeiro')} className="text-gray-500 hover:text-gray-700">
-                <ArrowLeft size={22} />
-              </button>
-              <h1 className="text-xl font-bold text-gray-800">Cotações</h1>
-            </div>
+        <PageHeader
+          title="Cotações"
+          backHref="/financeiro"
+          maxWidth="max-w-3xl"
+          actions={
             <button
               onClick={() => router.push('/financeiro/cotacoes/nova')}
               className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800"
             >
               <Plus size={18} /> Nova Cotação
             </button>
-          </div>
-        </div>
+          }
+        />
 
         <div className="max-w-3xl mx-auto px-4 py-6">
           {loading ? (

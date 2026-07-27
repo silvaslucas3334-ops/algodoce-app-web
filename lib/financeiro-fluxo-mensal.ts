@@ -707,6 +707,52 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
   }
 }
 
+/**
+ * Saldo acumulado no último dia de um mês específico, pra uma loja — usado
+ * como SUGESTÃO (nunca preenchimento automático) de saldo inicial do mês
+ * seguinte no wizard de Orçamento. Reaproveita buscarFluxoMensal em vez de
+ * duplicar o cálculo; não tenta ratear custos de rateio/cozinha por loja
+ * (mesma simplificação que o resto da visão por loja já assume).
+ */
+export async function buscarSaldoFinalDoMes(unidade: 'loja1' | 'loja2', ano: number, mes: number): Promise<number | null> {
+  const dados = await buscarFluxoMensal(unidade, ano, mes)
+  return dados.saldoAcumuladoPorDia.length > 0 ? dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1] : null
+}
+
+export interface ResumoHubFinanceiro {
+  saldoAtual: number | null // saldo acumulado de hoje; null = sem saldo inicial informado
+  faturamentoRealizado: number // soma do faturamento já realizado (não-forecast) do mês até hoje
+  metaAteHoje: number // soma da meta diária dos mesmos dias (comparável com faturamentoRealizado)
+}
+
+/**
+ * Resumo pro card "Fluxo de Caixa" do hub — reaproveita buscarFluxoMensal
+ * (consolidado, mês corrente) em vez de duplicar a lógica de faturamento
+ * x meta x saldo num cálculo paralelo; só extrai os 3 números que cabem
+ * num card pequeno.
+ */
+export async function buscarResumoHubFinanceiro(): Promise<ResumoHubFinanceiro> {
+  const hoje = hojeISO()
+  const [ano, mes] = hoje.split('-').map(Number)
+  const dados = await buscarFluxoMensal('consolidado', ano, mes)
+
+  // dados.saldoInicial (bruto) é o único jeito de saber se foi informado —
+  // saldoAcumuladoPorDia trata ausência como 0 internamente (soma corrida),
+  // então nunca vem null só por falta de saldo inicial.
+  const indiceHoje = dados.dias.indexOf(hoje)
+  const saldoAtual = dados.saldoInicial == null ? null : indiceHoje >= 0 ? dados.saldoAcumuladoPorDia[indiceHoje] : null
+
+  let faturamentoRealizado = 0
+  let metaAteHoje = 0
+  dados.dias.forEach((d, i) => {
+    if (dados.faturamentoEhForecastPorDia[i]) return
+    faturamentoRealizado += dados.faturamentoPorDia[i] || 0
+    metaAteHoje += dados.metaDiariaPorDia[i] || 0
+  })
+
+  return { saldoAtual, faturamentoRealizado, metaAteHoje }
+}
+
 // --- Atrasados (retrato de hoje, independente do mês navegado) --------------
 
 export interface FluxoMensalAtrasadoItem {

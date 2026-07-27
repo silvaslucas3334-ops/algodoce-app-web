@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { FinanceiroMateriaPrima } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
+import NovaMateriaPrimaRapidaModal from '@/components/NovaMateriaPrimaRapidaModal'
 import { X, Search, ArrowLeft, Plus } from 'lucide-react'
 
 export interface ItemNota {
@@ -21,11 +22,15 @@ interface Props {
   itemInicial?: ItemNota // presente = editar item já existente, pula a busca e pré-popula os valores
   onAdd: (item: ItemNota) => void
   onClose: () => void
+  // Opcional: quando presente, mostra "+ Cadastrar matéria-prima" na busca —
+  // sem essa prop, comportamento idêntico ao de antes (nenhum caller quebra).
+  onMateriaPrimaCriada?: (m: FinanceiroMateriaPrima) => void
 }
 
-export default function SelecionarMateriaPrimaModal({ materias, itemInicial, onAdd, onClose }: Props) {
+export default function SelecionarMateriaPrimaModal({ materias, itemInicial, onAdd, onClose, onMateriaPrimaCriada }: Props) {
   const editando = !!itemInicial
   const [busca, setBusca] = useState('')
+  const [modalNovaMateria, setModalNovaMateria] = useState(false)
   const [selecionada, setSelecionada] = useState<FinanceiroMateriaPrima | null>(
     itemInicial ? materias.find((m) => m.id === itemInicial.materia_prima_id) || null : null
   )
@@ -119,10 +124,19 @@ export default function SelecionarMateriaPrimaModal({ materias, itemInicial, onA
                 className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2.5 text-sm"
               />
             </div>
+            {onMateriaPrimaCriada && (
+              <button
+                type="button"
+                onClick={() => setModalNovaMateria(true)}
+                className="text-xs font-medium text-pink-700 hover:text-pink-800 mb-2"
+              >
+                + Cadastrar matéria-prima
+              </button>
+            )}
             <div className="space-y-1 max-h-96 overflow-y-auto">
               {filtradas.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-6">
-                  Nenhuma matéria-prima encontrada{busca ? ` para "${busca}"` : ''} — peça ao admin para cadastrar.
+                  Nenhuma matéria-prima encontrada{busca ? ` para "${busca}"` : ''}.
                 </p>
               ) : (
                 filtradas.map((m) => (
@@ -235,6 +249,16 @@ export default function SelecionarMateriaPrimaModal({ materias, itemInicial, onA
           </div>
         )}
       </div>
+
+      {modalNovaMateria && (
+        <NovaMateriaPrimaRapidaModal
+          onClose={() => setModalNovaMateria(false)}
+          onCreated={(nova) => {
+            onMateriaPrimaCriada?.(nova)
+            escolher(nova)
+          }}
+        />
+      )}
     </div>
   )
 }

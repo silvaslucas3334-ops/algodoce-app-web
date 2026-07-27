@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
 import SelecionarInsumoReceitaModal, { ItemReceitaForm } from '@/components/SelecionarInsumoReceitaModal'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { FinanceiroMateriaPrima } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { criarPrePreparo, salvarItensPrePreparo, buscarCustosAtuaisMateriasPrimas } from '@/lib/financeiro-cmv'
@@ -91,14 +92,7 @@ export default function NovoPrePreparoPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <h1 className="text-xl font-bold text-gray-800">Novo Pré-Preparado</h1>
-          </div>
-        </div>
+        <PageHeader title="Novo Pré-Preparado" onBack={() => router.back()} />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}

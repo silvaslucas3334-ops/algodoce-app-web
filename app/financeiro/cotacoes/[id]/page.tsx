@@ -2,10 +2,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
+import NotFoundState from '@/components/NotFoundState'
 import ResponderCotacaoModal from '@/components/ResponderCotacaoModal'
 import { fecharCotacao } from '@/lib/financeiro-cotacoes'
 import { useRouter, useParams } from 'next/navigation'
-import { ArrowLeft, Loader, FileText, CheckCircle, AlertCircle } from 'lucide-react'
+import { Loader, FileText, CheckCircle, AlertCircle } from 'lucide-react'
 import { FinanceiroCotacao, FinanceiroCotacaoItem, FinanceiroCotacaoFornecedor, FinanceiroCotacaoPreco } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
@@ -105,7 +107,7 @@ export default function DetalheCotacaoPage() {
   if (!cotacao) {
     return (
       <ProtectedRoute allowedRoles={['admin']}>
-        <div className="flex items-center justify-center min-h-screen text-gray-400">Cotação não encontrada</div>
+        <NotFoundState title="Cotação não encontrada" backHref="/financeiro/cotacoes" />
       </ProtectedRoute>
     )
   }
@@ -113,20 +115,17 @@ export default function DetalheCotacaoPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-4xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.push('/financeiro/cotacoes')} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-gray-800">{cotacao.titulo}</h1>
-              <p className="text-xs text-gray-500">
-                {UNIDADE_LABEL[cotacao.unidade]}
-                {cotacao.status === 'fechada' && cotacao.fornecedor_vencedor?.nome && ` · Fechada com ${cotacao.fornecedor_vencedor.nome}`}
-              </p>
-            </div>
-          </div>
-        </div>
+        <PageHeader
+          title={cotacao.titulo}
+          subtitle={
+            <>
+              {UNIDADE_LABEL[cotacao.unidade]}
+              {cotacao.status === 'fechada' && cotacao.fornecedor_vencedor?.nome && ` · Fechada com ${cotacao.fornecedor_vencedor.nome}`}
+            </>
+          }
+          backHref="/financeiro/cotacoes"
+          maxWidth="max-w-4xl"
+        />
 
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}

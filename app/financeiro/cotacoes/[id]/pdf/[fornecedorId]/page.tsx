@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import NotFoundState from '@/components/NotFoundState'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Printer } from 'lucide-react'
 
@@ -55,7 +56,7 @@ export default function CotacaoPdfPage() {
   if (!cotacao || !fornecedor) {
     return (
       <ProtectedRoute allowedRoles={['admin']}>
-        <div className="flex items-center justify-center min-h-screen text-gray-400">Cotação ou fornecedor não encontrado</div>
+        <NotFoundState title="Cotação ou fornecedor não encontrado" backHref={`/financeiro/cotacoes/${cotacaoId}`} />
       </ProtectedRoute>
     )
   }

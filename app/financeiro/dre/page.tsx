@@ -2,11 +2,11 @@
 import { useEffect, useState } from 'react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import DreDetalheModal from '@/components/DreDetalheModal'
+import PageHeader from '@/components/PageHeader'
 import { buscarDre, DreResultado, VisaoDre } from '@/lib/financeiro-dre'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
-import { useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader, AlertCircle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader, AlertCircle } from 'lucide-react'
 import { CategoriaReceita } from '@/lib/types'
 
 const MESES = [
@@ -26,7 +26,6 @@ type ModalDetalhe =
   | { tipo: 'despesa'; titulo: string; grupoDre: string }
 
 export default function DrePage() {
-  const router = useRouter()
   const hoje = new Date()
 
   const [unidade, setUnidade] = useState<VisaoDre>('loja1')
@@ -66,14 +65,7 @@ export default function DrePage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-3xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.push('/financeiro')} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <h1 className="text-xl font-bold text-gray-800">DRE</h1>
-          </div>
-        </div>
+        <PageHeader title="DRE" backHref="/financeiro" maxWidth="max-w-3xl" />
 
         <div className="max-w-3xl mx-auto px-4 py-6">
           <div className="flex gap-2 mb-4">

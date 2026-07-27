@@ -2,11 +2,20 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
+import NotFoundState from '@/components/NotFoundState'
 import { useRouter, useParams } from 'next/navigation'
-import { ArrowLeft, Loader } from 'lucide-react'
+import { Loader } from 'lucide-react'
 import { FinanceiroParte, FormaPagamento, CondicaoPagamento } from '@/lib/types'
 import { FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { validarDocumento } from '@/lib/financeiro-utils'
+import { formatBRL } from '@/lib/ofx'
+
+interface ResumoParte {
+  pagoNoAno: number
+  emAberto: number
+  atrasado: number
+}
 
 export default function DetalheParteePage() {
   const router = useRouter()
@@ -14,12 +23,14 @@ export default function DetalheParteePage() {
   const parteId = params.id as string
 
   const [parte, setParte] = useState<FinanceiroParte | null>(null)
+  const [resumo, setResumo] = useState<ResumoParte | null>(null)
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
   useEffect(() => {
     carregar()
+    carregarResumo()
   }, [parteId])
 
   async function carregar() {
@@ -27,6 +38,32 @@ export default function DetalheParteePage() {
     const { data } = await supabase.from('financeiro_partes').select('*').eq('id', parteId).single()
     setParte(data)
     setLoading(false)
+  }
+
+  // Resumo pra responder "quanto gastei com esse fornecedor" sem precisar
+  // cruzar a lista de Despesas manualmente — total pago no ano corrente,
+  // em aberto e atrasado, sempre com base em hoje/ano atual.
+  async function carregarResumo() {
+    const hoje = new Date().toISOString().slice(0, 10)
+    const inicioAno = `${new Date().getFullYear()}-01-01`
+    const { data, error } = await supabase
+      .from('financeiro_lancamentos')
+      .select('valor_total, status, data_pagamento, data_vencimento')
+      .eq('parte_id', parteId)
+      .neq('status', 'cancelado')
+    if (error) {
+      console.error('Erro ao carregar resumo do fornecedor:', error)
+      return
+    }
+    const linhas = data || []
+    const pagoNoAno = linhas
+      .filter((l) => l.status === 'pago' && l.data_pagamento && l.data_pagamento >= inicioAno)
+      .reduce((s, l) => s + l.valor_total, 0)
+    const emAberto = linhas.filter((l) => l.status === 'aberto').reduce((s, l) => s + l.valor_total, 0)
+    const atrasado = linhas
+      .filter((l) => l.status === 'aberto' && l.data_vencimento < hoje)
+      .reduce((s, l) => s + l.valor_total, 0)
+    setResumo({ pagoNoAno, emAberto, atrasado })
   }
 
   const documentoValido = parte ? validarDocumento(parte.documento || '') : false
@@ -80,7 +117,7 @@ export default function DetalheParteePage() {
   if (!parte) {
     return (
       <ProtectedRoute allowedRoles={['admin']}>
-        <div className="flex items-center justify-center min-h-screen text-gray-400">Não encontrado</div>
+        <NotFoundState backHref="/financeiro/partes" />
       </ProtectedRoute>
     )
   }
@@ -88,16 +125,26 @@ export default function DetalheParteePage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <h1 className="text-xl font-bold text-gray-800">Editar Cadastro</h1>
-          </div>
-        </div>
+        <PageHeader title="Editar Cadastro" onBack={() => router.back()} />
 
         <div className="max-w-2xl mx-auto px-4 py-6">
+          {resumo && (
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-white rounded-xl p-4 border border-gray-100">
+                <p className="text-xs text-gray-500 uppercase font-semibold">Pago em {new Date().getFullYear()}</p>
+                <p className="text-lg font-bold text-gray-800 mt-1">{formatBRL(resumo.pagoNoAno)}</p>
+              </div>
+              <div className="bg-white rounded-xl p-4 border border-gray-100">
+                <p className="text-xs text-gray-500 uppercase font-semibold">Em aberto</p>
+                <p className="text-lg font-bold text-gray-800 mt-1">{formatBRL(resumo.emAberto)}</p>
+              </div>
+              <div className="bg-white rounded-xl p-4 border border-gray-100">
+                <p className="text-xs text-gray-500 uppercase font-semibold">Atrasado</p>
+                <p className={`text-lg font-bold mt-1 ${resumo.atrasado > 0 ? 'text-red-600' : 'text-gray-800'}`}>{formatBRL(resumo.atrasado)}</p>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
             {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}
 

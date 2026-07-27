@@ -2,8 +2,9 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Upload, Loader, AlertTriangle, CheckCircle } from 'lucide-react'
+import { Upload, Loader, AlertTriangle, CheckCircle } from 'lucide-react'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import {
   parseHistoricoItens,
@@ -139,14 +140,7 @@ export default function ImportarPdvPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.push('/financeiro/pdv')} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <h1 className="text-xl font-bold text-gray-800">Importar Vendas do PDV</h1>
-          </div>
-        </div>
+        <PageHeader title="Importar Vendas do PDV" backHref="/financeiro/pdv" />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}

@@ -3,10 +3,12 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
-import { useRouter, useParams } from 'next/navigation'
-import { ArrowLeft, Loader, CheckCircle, XCircle, ShoppingCart, ReceiptText, Pencil, Plus, Trash2 } from 'lucide-react'
+import PageHeader from '@/components/PageHeader'
+import NotFoundState from '@/components/NotFoundState'
+import { useParams } from 'next/navigation'
+import { Loader, CheckCircle, XCircle, ShoppingCart, ReceiptText, Pencil, Plus, Trash2 } from 'lucide-react'
 import { FinanceiroConta, FinanceiroLancamentoItem, FinanceiroParte, FinanceiroMateriaPrima } from '@/lib/types'
-import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL, CONDICAO_PAGAMENTO_LABEL, TIPO_LANCAMENTO_LABEL } from '@/lib/constants'
+import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL, CONDICAO_PAGAMENTO_LABEL, TIPO_LANCAMENTO_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { formatarDocumento, hojeISO, statusExibicao } from '@/lib/financeiro-utils'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
@@ -27,7 +29,6 @@ function itemParaItemNota(item: FinanceiroLancamentoItem): ItemNota {
 
 export default function DetalheDespesaPage() {
   const { usuario } = useAuth()
-  const router = useRouter()
   const params = useParams()
   const lancamentoId = params.id as string
 
@@ -87,7 +88,9 @@ export default function DetalheDespesaPage() {
     setLoading(true)
     const { data, error } = await supabase
       .from('financeiro_lancamentos')
-      .select('*, parte:financeiro_partes!parte_id(nome, documento), conta:financeiro_contas(codigo, nome)')
+      .select(
+        '*, parte:financeiro_partes!parte_id(nome, documento), conta:financeiro_contas(codigo, nome), extrato_transacao:financeiro_extrato_transacoes!extrato_transacao_id(status_conciliacao)'
+      )
       .eq('id', lancamentoId)
       .single()
     if (error) console.error('Erro:', error)
@@ -304,7 +307,7 @@ export default function DetalheDespesaPage() {
   if (!lancamento) {
     return (
       <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
-        <div className="flex items-center justify-center min-h-screen text-gray-400">Lançamento não encontrado</div>
+        <NotFoundState title="Lançamento não encontrado" backHref="/financeiro/despesas" />
       </ProtectedRoute>
     )
   }
@@ -314,27 +317,27 @@ export default function DetalheDespesaPage() {
   return (
     <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.push('/financeiro/despesas')} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <div className="flex-1">
-              <h1 className="text-xl font-bold text-gray-800">{lancamento.descricao}</h1>
-              <p className="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
-                {lancamento.tipo === 'compra_insumos' ? <ShoppingCart size={12} /> : <ReceiptText size={12} />}
-                {TIPO_LANCAMENTO_LABEL[lancamento.tipo]}
-                {lancamento.parcela_num && lancamento.parcela_total && ` · parcela ${lancamento.parcela_num}/${lancamento.parcela_total}`}
-              </p>
-            </div>
-            {ehAdmin && !editando && (
-              <button onClick={iniciarEdicao} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500" title="Editar lançamento">
-                <Pencil size={18} />
-              </button>
-            )}
-            <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
-          </div>
-        </div>
+        <PageHeader
+          title={lancamento.descricao}
+          subtitle={
+            <span className="flex items-center gap-1.5">
+              {lancamento.tipo === 'compra_insumos' ? <ShoppingCart size={12} /> : <ReceiptText size={12} />}
+              {TIPO_LANCAMENTO_LABEL[lancamento.tipo]}
+              {lancamento.parcela_num && lancamento.parcela_total && ` · parcela ${lancamento.parcela_num}/${lancamento.parcela_total}`}
+            </span>
+          }
+          backHref="/financeiro/despesas"
+          actions={
+            <>
+              {ehAdmin && !editando && (
+                <button onClick={iniciarEdicao} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500" title="Editar lançamento">
+                  <Pencil size={18} />
+                </button>
+              )}
+              <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
+            </>
+          }
+        />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}
@@ -356,6 +359,20 @@ export default function DetalheDespesaPage() {
                 <div className="flex justify-between"><span className="text-gray-500">Vencimento</span><span className="text-gray-800">{new Date(lancamento.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
                 {lancamento.data_pagamento && (
                   <div className="flex justify-between"><span className="text-gray-500">Paga em</span><span className="text-gray-800">{new Date(lancamento.data_pagamento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
+                )}
+                {lancamento.extrato_transacao_id && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500">Conciliação bancária</span>
+                    {lancamento.extrato_transacao ? (
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CONCILIACAO_COLOR[lancamento.extrato_transacao.status_conciliacao]}`}
+                      >
+                        {STATUS_CONCILIACAO_LABEL[lancamento.extrato_transacao.status_conciliacao]}
+                      </span>
+                    ) : (
+                      <span className="text-gray-800">Vinculada ao extrato</span>
+                    )}
+                  </div>
                 )}
                 {lancamento.forma_pagamento && (
                   <div className="flex justify-between"><span className="text-gray-500">Forma de pagamento</span><span className="text-gray-800">{FORMA_PAGAMENTO_LABEL[lancamento.forma_pagamento]}</span></div>
@@ -597,6 +614,7 @@ export default function DetalheDespesaPage() {
           materias={materias}
           onAdd={salvarItem}
           onClose={() => setAdicionandoItem(false)}
+          onMateriaPrimaCriada={(nova) => setMaterias((prev) => [...prev, nova].sort((a, b) => a.nome.localeCompare(b.nome)))}
         />
       )}
     </ProtectedRoute>

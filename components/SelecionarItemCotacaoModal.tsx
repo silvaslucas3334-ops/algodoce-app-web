@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { FinanceiroMateriaPrima } from '@/lib/types'
+import NovaMateriaPrimaRapidaModal from '@/components/NovaMateriaPrimaRapidaModal'
 import { X, Search, ArrowLeft, Plus } from 'lucide-react'
 
 export interface ItemCotacaoForm {
@@ -15,13 +16,17 @@ interface Props {
   materias: FinanceiroMateriaPrima[]
   onAdd: (item: ItemCotacaoForm) => void
   onClose: () => void
+  // Opcional: mesma convenção de SelecionarMateriaPrimaModal — sem essa
+  // prop, comportamento idêntico ao de antes.
+  onMateriaPrimaCriada?: (m: FinanceiroMateriaPrima) => void
 }
 
 // Versão simplificada de SelecionarMateriaPrimaModal — sem preço, sem
 // fator de conversão da nota: nesse momento ainda não existe preço
 // nenhum, só a lista do que vai ser cotado.
-export default function SelecionarItemCotacaoModal({ materias, onAdd, onClose }: Props) {
+export default function SelecionarItemCotacaoModal({ materias, onAdd, onClose, onMateriaPrimaCriada }: Props) {
   const [busca, setBusca] = useState('')
+  const [modalNovaMateria, setModalNovaMateria] = useState(false)
   const [selecionada, setSelecionada] = useState<FinanceiroMateriaPrima | null>(null)
   const [quantidade, setQuantidade] = useState('')
   const [observacao, setObservacao] = useState('')
@@ -81,10 +86,19 @@ export default function SelecionarItemCotacaoModal({ materias, onAdd, onClose }:
                 className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2.5 text-sm"
               />
             </div>
+            {onMateriaPrimaCriada && (
+              <button
+                type="button"
+                onClick={() => setModalNovaMateria(true)}
+                className="text-xs font-medium text-pink-700 hover:text-pink-800 mb-2"
+              >
+                + Cadastrar matéria-prima
+              </button>
+            )}
             <div className="space-y-1 max-h-96 overflow-y-auto">
               {filtradas.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-6">
-                  Nenhuma matéria-prima encontrada{busca ? ` para "${busca}"` : ''} — peça ao admin para cadastrar.
+                  Nenhuma matéria-prima encontrada{busca ? ` para "${busca}"` : ''}.
                 </p>
               ) : (
                 filtradas.map((m) => (
@@ -137,6 +151,16 @@ export default function SelecionarItemCotacaoModal({ materias, onAdd, onClose }:
           </div>
         )}
       </div>
+
+      {modalNovaMateria && (
+        <NovaMateriaPrimaRapidaModal
+          onClose={() => setModalNovaMateria(false)}
+          onCreated={(nova) => {
+            onMateriaPrimaCriada?.(nova)
+            escolher(nova)
+          }}
+        />
+      )}
     </div>
   )
 }

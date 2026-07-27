@@ -2,15 +2,16 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
 import ConciliarExtratoTab from '@/components/ConciliarExtratoTab'
 import FluxoMensalTabela from '@/components/FluxoMensalTabela'
 import FluxoMensalDrilldownModal, { LinhaDrilldown } from '@/components/FluxoMensalDrilldownModal'
 import NovaReceitaDinheiroModal from '@/components/NovaReceitaDinheiroModal'
 import { buscarFluxoMensal, buscarAtrasados, FluxoMensalResultado, FluxoMensalAtrasados } from '@/lib/financeiro-fluxo-mensal'
 import { formatBRL } from '@/lib/ofx'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark, AlertTriangle } from 'lucide-react'
 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -21,7 +22,6 @@ type Aba = 'mensal' | 'extrato'
 
 function FluxoCaixaContent() {
   const { usuario } = useAuth()
-  const router = useRouter()
   const params = useSearchParams()
   const hoje = new Date()
 
@@ -70,15 +70,12 @@ function FluxoCaixaContent() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <button onClick={() => router.push('/financeiro')} className="text-gray-500 hover:text-gray-700">
-                <ArrowLeft size={22} />
-              </button>
-              <h1 className="text-xl font-bold text-gray-800">Fluxo de Caixa</h1>
-            </div>
-            {aba === 'mensal' ? (
+        <PageHeader
+          title="Fluxo de Caixa"
+          backHref="/financeiro"
+          maxWidth="max-w-5xl"
+          actions={
+            aba === 'mensal' ? (
               <div className="flex gap-2">
                 <button
                   onClick={() => setModalNovaReceita(true)}
@@ -106,9 +103,9 @@ function FluxoCaixaContent() {
               >
                 <ArrowLeft size={16} /> Voltar à Visão Mensal
               </button>
-            )}
-          </div>
-        </div>
+            )
+          }
+        />
 
         <div className="max-w-5xl mx-auto px-4 py-6">
           {aba === 'extrato' ? (
@@ -126,6 +123,21 @@ function FluxoCaixaContent() {
               </div>
 
               {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">{erro}</div>}
+
+              {!loading && dados && dados.saldoInicial == null && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 flex items-center justify-between gap-3 text-sm text-amber-800">
+                  <span className="flex items-center gap-2">
+                    <AlertTriangle size={16} className="flex-shrink-0" />
+                    Saldo inicial do mês não informado — o saldo acumulado fica incompleto até você preencher.
+                  </span>
+                  <Link
+                    href={`/financeiro/fluxo-caixa/orcamento?ano=${ano}&mes=${mes}&step=2`}
+                    className="whitespace-nowrap font-semibold underline hover:text-amber-900"
+                  >
+                    Definir agora
+                  </Link>
+                </div>
+              )}
 
               {loading ? (
                 <div className="flex items-center justify-center py-12 gap-2 text-gray-400">

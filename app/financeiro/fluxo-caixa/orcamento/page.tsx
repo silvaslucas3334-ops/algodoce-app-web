@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
 import { supabase } from '@/lib/supabase'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
@@ -12,6 +13,7 @@ import { hojeISO, mesEncerrado } from '@/lib/financeiro-utils'
 import {
   buscarFluxoMensal,
   buscarDespesasFixasFuturas,
+  buscarSaldoFinalDoMes,
   metaDiariaDeWeekdays,
   entradaPrevistaDeWeekdays,
   calcularDeltaEGap,
@@ -26,7 +28,7 @@ import {
 import { buscarOrcamento, salvarOrcamento, salvarItensOrcamento, buscarRecorrenciasAtivas, ItemOrcamentoPayload } from '@/lib/financeiro-orcamento'
 import OrcamentoGradeSemanal from '@/components/OrcamentoGradeSemanal'
 import OrcamentoItensVariaveis, { ItemOrcamentoVariavel } from '@/components/OrcamentoItensVariaveis'
-import { ArrowLeft, Check, Plus } from 'lucide-react'
+import { Check, Plus } from 'lucide-react'
 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -66,11 +68,16 @@ function OrcamentoWizardContent() {
   const ano = Number(params.get('ano')) || hoje.getFullYear()
   const mes = Number(params.get('mes')) || hoje.getMonth() + 1
   const bloqueado = mesEncerrado(ano, mes)
+  const stepInicial = Number(params.get('step'))
 
-  const [step, setStep] = useState<Step>(1)
+  const [step, setStep] = useState<Step>(stepInicial >= 1 && stepInicial <= 5 ? (stepInicial as Step) : 1)
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+  // Marca qualquer edição não salva — usado só pra avisar antes de sair
+  // (botão voltar / fechar aba), não impede trocar de step (nada se perde
+  // ao trocar, tudo fica no estado do componente pai).
+  const [alterado, setAlterado] = useState(false)
 
   const [metaVenda, setMetaVenda] = useState<Record<string, (number | null)[]>>({ loja1: vazioSemana(), loja2: vazioSemana() })
   const [entradaPrevista, setEntradaPrevista] = useState<Record<string, (number | null)[]>>({ loja1: vazioSemana(), loja2: vazioSemana() })
@@ -82,6 +89,24 @@ function OrcamentoWizardContent() {
   const [despesasFixas, setDespesasFixas] = useState<{ itens: LinhaDespesaFixaFutura[]; total: number } | null>(null)
   const [recorrencias, setRecorrencias] = useState<{ nome: string; valor: number; diaVencimento: number }[]>([])
   const [dadosFluxo, setDadosFluxo] = useState<FluxoMensalResultado | null>(null)
+  // Sugestão (nunca preenchimento automático) do saldo inicial deste mês —
+  // saldo final calculado do mês anterior, por loja.
+  const [sugestaoSaldoAnterior, setSugestaoSaldoAnterior] = useState<Record<string, number | null>>({ loja1: null, loja2: null })
+
+  useEffect(() => {
+    function handler(e: BeforeUnloadEvent) {
+      if (!alterado) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [alterado])
+
+  function voltar() {
+    if (alterado && !window.confirm('Você tem alterações não salvas neste orçamento. Sair mesmo assim?')) return
+    router.push(`/financeiro/fluxo-caixa?ano=${ano}&mes=${mes}`)
+  }
 
   useEffect(() => {
     supabase.from('financeiro_partes').select('*').eq('papel_fornecedor', true).eq('ativo', true).order('nome').then(({ data }) => setFornecedores(data || []))
@@ -97,14 +122,19 @@ function OrcamentoWizardContent() {
     setLoading(true)
     setErro('')
     try {
-      const [orcLoja1, orcLoja2, orcGeral, recs, fixas, fluxo] = await Promise.all([
+      const anoAnterior = mes === 1 ? ano - 1 : ano
+      const mesAnterior = mes === 1 ? 12 : mes - 1
+      const [orcLoja1, orcLoja2, orcGeral, recs, fixas, fluxo, saldoAnteriorLoja1, saldoAnteriorLoja2] = await Promise.all([
         buscarOrcamento(ano, mes, 'loja1'),
         buscarOrcamento(ano, mes, 'loja2'),
         buscarOrcamento(ano, mes, 'geral'),
         buscarRecorrenciasAtivas(),
         buscarDespesasFixasFuturas('consolidado', ano, mes),
         buscarFluxoMensal('consolidado', ano, mes),
+        buscarSaldoFinalDoMes('loja1', anoAnterior, mesAnterior),
+        buscarSaldoFinalDoMes('loja2', anoAnterior, mesAnterior),
       ])
+      setSugestaoSaldoAnterior({ loja1: saldoAnteriorLoja1, loja2: saldoAnteriorLoja2 })
       setMetaVenda({
         loja1: orcLoja1?.metaVendaPorDiaSemana || vazioSemana(),
         loja2: orcLoja2?.metaVendaPorDiaSemana || vazioSemana(),
@@ -130,6 +160,7 @@ function OrcamentoWizardContent() {
       setRecorrencias((recs || []).map((r) => ({ nome: r.parte?.nome || r.descricao, valor: r.valor, diaVencimento: r.dia_vencimento })))
       setDespesasFixas(fixas)
       setDadosFluxo(fluxo)
+      setAlterado(false)
     } catch (err: any) {
       setErro('Erro ao carregar: ' + (err?.message || 'desconhecido'))
     } finally {
@@ -138,10 +169,16 @@ function OrcamentoWizardContent() {
   }
 
   function mudarMeta(lojaId: string, diaSemana: number, valor: number | null) {
+    setAlterado(true)
     setMetaVenda((prev) => ({ ...prev, [lojaId]: prev[lojaId].map((v, i) => (i === diaSemana ? valor : v)) }))
   }
   function mudarEntrada(lojaId: string, diaSemana: number, valor: number | null) {
+    setAlterado(true)
     setEntradaPrevista((prev) => ({ ...prev, [lojaId]: prev[lojaId].map((v, i) => (i === diaSemana ? valor : v)) }))
+  }
+  function usarSaldoSugerido(lojaId: string, valor: number) {
+    setAlterado(true)
+    setSaldoInicial((prev) => ({ ...prev, [lojaId]: String(valor) }))
   }
 
   // --- Prévia ao vivo (Revisão) — reaproveita as MESMAS funções puras que
@@ -230,6 +267,7 @@ function OrcamentoWizardContent() {
         observacao: null,
       }))
       await salvarItensOrcamento(geralId, payload)
+      setAlterado(false)
       router.push(`/financeiro/fluxo-caixa?ano=${ano}&mes=${mes}`)
     } catch (err: any) {
       setErro('Erro ao salvar: ' + (err?.message || 'desconhecido'))
@@ -240,28 +278,32 @@ function OrcamentoWizardContent() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
-          <div className="max-w-4xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.push(`/financeiro/fluxo-caixa?ano=${ano}&mes=${mes}`)} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-gray-800">Orçamento — {MESES[mes - 1]} de {ano}</h1>
-              {bloqueado && <p className="text-xs text-amber-600 font-medium">Mês encerrado — somente leitura</p>}
+        <div className="sticky top-0 z-10">
+          <PageHeader
+            title={`Orçamento — ${MESES[mes - 1]} de ${ano}`}
+            subtitle={
+              <>
+                <span className="text-gray-400">Financeiro / Fluxo de Caixa / Orçamento</span>
+                {bloqueado && <span className="text-amber-600 font-medium ml-2">· Mês encerrado — somente leitura</span>}
+              </>
+            }
+            onBack={voltar}
+            maxWidth="max-w-4xl"
+          />
+          <div className="bg-white border-b border-gray-200 px-4 pb-3">
+            <div className="max-w-4xl mx-auto flex gap-2 flex-wrap">
+              {STEPS.map((s) => (
+                <button
+                  key={s.num}
+                  onClick={() => setStep(s.num)}
+                  className={`px-3 py-2 rounded-lg font-medium text-sm transition-all ${
+                    step === s.num ? 'bg-pink-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {s.icon} {s.label}
+                </button>
+              ))}
             </div>
-          </div>
-          <div className="max-w-4xl mx-auto px-4 pb-3 flex gap-2 flex-wrap">
-            {STEPS.map((s) => (
-              <button
-                key={s.num}
-                onClick={() => setStep(s.num)}
-                className={`px-3 py-2 rounded-lg font-medium text-sm transition-all ${
-                  step === s.num ? 'bg-pink-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {s.icon} {s.label}
-              </button>
-            ))}
           </div>
         </div>
 
@@ -301,11 +343,22 @@ function OrcamentoWizardContent() {
                         {bloqueado ? (
                           <p className="text-sm text-gray-800">{saldoInicial[loja.id] ? formatBRL(Number(saldoInicial[loja.id])) : '—'}</p>
                         ) : (
-                          <input
-                            type="number" step="0.01" value={saldoInicial[loja.id]}
-                            onChange={(e) => setSaldoInicial((prev) => ({ ...prev, [loja.id]: e.target.value }))}
-                            placeholder="Opcional" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                          />
+                          <>
+                            <input
+                              type="number" step="0.01" value={saldoInicial[loja.id]}
+                              onChange={(e) => { setAlterado(true); setSaldoInicial((prev) => ({ ...prev, [loja.id]: e.target.value })) }}
+                              placeholder="Opcional" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            />
+                            {!saldoInicial[loja.id] && sugestaoSaldoAnterior[loja.id] != null && (
+                              <button
+                                type="button"
+                                onClick={() => usarSaldoSugerido(loja.id, sugestaoSaldoAnterior[loja.id]!)}
+                                className="text-xs text-pink-700 hover:text-pink-800 font-medium mt-1"
+                              >
+                                Usar {formatBRL(sugestaoSaldoAnterior[loja.id]!)} do mês anterior
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     ))}
@@ -380,7 +433,14 @@ function OrcamentoWizardContent() {
                       Com dia da semana ou data marcada, a previsão também aparece nos dias futuros do calendário do Fluxo de Caixa — e some sozinha quando o dia passa ou quando a despesa real for lançada.
                     </p>
                   </div>
-                  <OrcamentoItensVariaveis itens={itensVariaveis} onChange={setItensVariaveis} fornecedores={fornecedores} contas={contas} dias={dias} readOnly={bloqueado} />
+                  <OrcamentoItensVariaveis
+                    itens={itensVariaveis}
+                    onChange={(itens) => { setAlterado(true); setItensVariaveis(itens) }}
+                    fornecedores={fornecedores}
+                    contas={contas}
+                    dias={dias}
+                    readOnly={bloqueado}
+                  />
                 </div>
               )}
 

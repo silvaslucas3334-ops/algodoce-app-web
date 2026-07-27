@@ -4,11 +4,11 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
+import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Search, ReceiptText, ShoppingCart, CheckCircle } from 'lucide-react'
+import { Plus, Search, ReceiptText, ShoppingCart, CheckCircle } from 'lucide-react'
 import { FinanceiroLancamento } from '@/lib/types'
-import { UNIDADE_LABEL } from '@/lib/constants'
+import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { hojeISO, somarDias, statusExibicao } from '@/lib/financeiro-utils'
 
@@ -24,7 +24,6 @@ const FILTROS: { key: Filtro; label: string }[] = [
 
 export default function DespesasPage() {
   const { usuario } = useAuth()
-  const router = useRouter()
   const [lancamentos, setLancamentos] = useState<FinanceiroLancamento[]>([])
   const [loading, setLoading] = useState(true)
   const [filtro, setFiltro] = useState<Filtro>('aberto')
@@ -40,7 +39,9 @@ export default function DespesasPage() {
     const hoje = hojeISO()
     let query = supabase
       .from('financeiro_lancamentos')
-      .select('*, parte:financeiro_partes!parte_id(nome, documento), conta:financeiro_contas(codigo, nome)')
+      .select(
+        '*, parte:financeiro_partes!parte_id(nome, documento), conta:financeiro_contas(codigo, nome), extrato_transacao:financeiro_extrato_transacoes!extrato_transacao_id(status_conciliacao)'
+      )
 
     if (filtro === 'atrasadas') {
       query = query.eq('status', 'aberto').lt('data_vencimento', hoje).order('data_vencimento')
@@ -92,15 +93,12 @@ export default function DespesasPage() {
   return (
     <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-3">
-              <button onClick={() => router.push('/financeiro')} className="text-gray-500 hover:text-gray-700">
-                <ArrowLeft size={22} />
-              </button>
-              <h1 className="text-xl font-bold text-gray-800">Despesas</h1>
-            </div>
-            <div className="flex gap-2">
+        <PageHeader
+          title="Despesas"
+          backHref="/financeiro"
+          maxWidth="max-w-4xl"
+          actions={
+            <>
               <Link
                 href="/financeiro/compras/nova"
                 className="border border-pink-700 text-pink-700 rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-1.5 hover:bg-pink-50"
@@ -113,9 +111,9 @@ export default function DespesasPage() {
               >
                 <Plus size={16} /> Nova Despesa
               </Link>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         <div className="max-w-4xl mx-auto px-4 py-6">
           <div className="relative mb-3">
@@ -188,6 +186,13 @@ export default function DespesasPage() {
                       <div className="text-right flex flex-col items-end gap-1.5">
                         <p className="font-semibold text-gray-800">{formatBRL(l.valor_total)}</p>
                         <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
+                        {l.extrato_transacao && (
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap font-medium ${STATUS_CONCILIACAO_COLOR[l.extrato_transacao.status_conciliacao]}`}
+                          >
+                            {STATUS_CONCILIACAO_LABEL[l.extrato_transacao.status_conciliacao]}
+                          </span>
+                        )}
                         {l.status === 'aberto' && (
                           <button
                             onClick={() => marcarPago(l)}

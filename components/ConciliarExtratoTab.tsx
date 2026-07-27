@@ -13,7 +13,7 @@ import { importarTransacoesOFX, buscarContaAprendida, aprenderContaOFX } from '@
 import { formatBRL, parseOFXConta, fingerprintOFX, OFXConta } from '@/lib/ofx'
 import { Upload, Loader, Link2, Tag, Layers, Receipt, History, AlertTriangle } from 'lucide-react'
 import { FinanceiroExtratoTransacao, StatusConciliacao } from '@/lib/types'
-import { UNIDADE_LABEL } from '@/lib/constants'
+import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL as STATUS_LABEL, STATUS_CONCILIACAO_COLOR as STATUS_COLOR } from '@/lib/constants'
 
 // Cada loja tem sua própria conta bancária — conta_bancaria vira literalmente
 // 'loja1'/'loja2' na importação, sem precisar classificar transação por
@@ -22,17 +22,6 @@ const CONTAS = [
   { id: 'loja1' as const, label: UNIDADE_LABEL.loja1 },
   { id: 'loja2' as const, label: UNIDADE_LABEL.loja2 },
 ]
-
-const STATUS_LABEL: Record<StatusConciliacao, string> = {
-  pendente: 'Pendente',
-  conciliado: 'Conciliado',
-  ignorado: 'Ignorado',
-}
-const STATUS_COLOR: Record<StatusConciliacao, string> = {
-  pendente: 'bg-amber-100 text-amber-700',
-  conciliado: 'bg-green-100 text-green-700',
-  ignorado: 'bg-gray-100 text-gray-500',
-}
 
 // Antiga /financeiro/extrato — fundida pra dentro do Fluxo de Caixa como
 // aba, sem mudança de comportamento (só a casca de página/header some,

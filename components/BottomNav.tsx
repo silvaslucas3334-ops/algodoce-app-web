@@ -32,7 +32,7 @@ export default function BottomNav() {
         <div className="overflow-x-auto scrollbar-hide scroll-smooth mx-auto">
           <div className="flex gap-1 px-2 h-full items-center">
             {links.map(({ href, label, icon: Icon }) => {
-              const active = path === href
+              const active = href === '/' ? path === '/' : path === href || path.startsWith(href + '/')
               return (
                 <Link
                   key={href}

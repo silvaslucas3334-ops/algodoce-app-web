@@ -2,9 +2,11 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
+import NotFoundState from '@/components/NotFoundState'
 import SelecionarInsumoReceitaModal, { ItemReceitaForm } from '@/components/SelecionarInsumoReceitaModal'
 import { useRouter, useParams } from 'next/navigation'
-import { ArrowLeft, Loader, Plus, Trash2 } from 'lucide-react'
+import { Loader, Plus, Trash2 } from 'lucide-react'
 import { FinanceiroProdutoFinal, FinanceiroMateriaPrima, FinanceiroPrePreparo } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import {
@@ -161,7 +163,7 @@ export default function DetalheProdutoFinalPage() {
   if (!produtoFinal) {
     return (
       <ProtectedRoute allowedRoles={['admin']}>
-        <div className="flex items-center justify-center min-h-screen text-gray-400">Não encontrado</div>
+        <NotFoundState backHref="/financeiro/produtos-finais" />
       </ProtectedRoute>
     )
   }
@@ -169,14 +171,7 @@ export default function DetalheProdutoFinalPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <h1 className="text-xl font-bold text-gray-800">{produtoFinal.nome}</h1>
-          </div>
-        </div>
+        <PageHeader title={produtoFinal.nome} onBack={() => router.back()} />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}

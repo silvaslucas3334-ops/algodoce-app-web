@@ -3,8 +3,9 @@ import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
+import NovaParteRapidaModal from '@/components/NovaParteRapidaModal'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft } from 'lucide-react'
 import { FinanceiroParte, FinanceiroConta, UnidadeFinanceiro, FormaPagamento, CondicaoPagamento } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
@@ -17,6 +18,7 @@ function NovaDespesaForm() {
   const params = useSearchParams()
   const [partes, setPartes] = useState<FinanceiroParte[]>([])
   const [contas, setContas] = useState<FinanceiroConta[]>([])
+  const [modalNovaParte, setModalNovaParte] = useState(false)
 
   // Vindo da conciliação do extrato: valor e pagamento já são ditados pela
   // transação bancária, não podem divergir do que já saiu do banco.
@@ -194,19 +196,11 @@ function NovaDespesaForm() {
   return (
     <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-gray-800">Nova Despesa</h1>
-              <p className="text-xs text-gray-500">
-                {extratoTransacaoId ? 'Criando a partir de uma transação do extrato' : 'Para compras de insumo com nota, use "Lançar Nota"'}
-              </p>
-            </div>
-          </div>
-        </div>
+        <PageHeader
+          title="Nova Despesa"
+          subtitle={extratoTransacaoId ? 'Criando a partir de uma transação do extrato' : 'Para compras de insumo com nota, use "Lançar Nota"'}
+          onBack={() => router.back()}
+        />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}
@@ -216,14 +210,19 @@ function NovaDespesaForm() {
             <h2 className="font-semibold text-gray-800">Dados da despesa</h2>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Beneficiário</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700">Beneficiário</label>
+                <button type="button" onClick={() => setModalNovaParte(true)} className="text-xs font-medium text-pink-700 hover:text-pink-800">
+                  + Cadastrar novo
+                </button>
+              </div>
               <select value={parteId} onChange={(e) => setParteId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white">
                 <option value="">Selecione...</option>
                 {partes.map((p) => (
                   <option key={p.id} value={p.id}>{p.nome}</option>
                 ))}
               </select>
-              {partes.length === 0 && <p className="text-xs text-amber-600 mt-1">Nenhum beneficiário cadastrado — peça ao admin para cadastrar.</p>}
+              {partes.length === 0 && <p className="text-xs text-amber-600 mt-1">Nenhum beneficiário cadastrado ainda.</p>}
             </div>
 
             {parte && (
@@ -448,6 +447,17 @@ function NovaDespesaForm() {
           </button>
         </div>
       </div>
+
+      {modalNovaParte && (
+        <NovaParteRapidaModal
+          papelPadrao="beneficiario"
+          onClose={() => setModalNovaParte(false)}
+          onCreated={(nova) => {
+            setPartes((prev) => [...prev, nova].sort((a, b) => a.nome.localeCompare(b.nome)))
+            setParteId(nova.id)
+          }}
+        />
+      )}
     </ProtectedRoute>
   )
 }

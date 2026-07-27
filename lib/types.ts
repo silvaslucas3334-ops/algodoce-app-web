@@ -316,6 +316,7 @@ export interface FinanceiroLancamento {
   conta_id?: string // obrigatória quando tipo='despesa' (CHECK no banco)
   conta?: FinanceiroConta
   extrato_transacao_id?: string
+  extrato_transacao?: { status_conciliacao: StatusConciliacao }
   observacoes?: string
   criado_por: string
   created_at: string

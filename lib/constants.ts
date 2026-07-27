@@ -33,6 +33,20 @@ export const UNIDADE_LABEL: Record<string, string> = {
   rateio: 'Rateio (Cozinha)',
 }
 
+// Status de conciliação bancária (financeiro_extrato_transacoes) — usado no
+// selo de Despesas além da própria aba Conciliar Extrato, daí ficar aqui em
+// vez de local a um componente só.
+export const STATUS_CONCILIACAO_LABEL: Record<string, string> = {
+  pendente: 'Pendente',
+  conciliado: 'Conciliado',
+  ignorado: 'Ignorado',
+}
+export const STATUS_CONCILIACAO_COLOR: Record<string, string> = {
+  pendente: 'bg-amber-100 text-amber-700',
+  conciliado: 'bg-green-100 text-green-700',
+  ignorado: 'bg-gray-100 text-gray-500',
+}
+
 export const FORMA_PAGAMENTO_LABEL: Record<string, string> = {
   boleto: 'Boleto',
   pix: 'PIX',

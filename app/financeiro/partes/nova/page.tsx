@@ -2,8 +2,8 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft } from 'lucide-react'
 import { FormaPagamento, CondicaoPagamento } from '@/lib/types'
 import { FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { validarDocumento } from '@/lib/financeiro-utils'
@@ -64,14 +64,7 @@ export default function NovaPartePage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <h1 className="text-xl font-bold text-gray-800">Novo Fornecedor/Beneficiário</h1>
-          </div>
-        </div>
+        <PageHeader title="Novo Fornecedor/Beneficiário" onBack={() => router.back()} />
 
         <div className="max-w-2xl mx-auto px-4 py-6">
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">

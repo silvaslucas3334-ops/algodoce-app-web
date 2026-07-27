@@ -3,9 +3,11 @@ import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
+import NovaParteRapidaModal from '@/components/NovaParteRapidaModal'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { FinanceiroParte, FinanceiroMateriaPrima, UnidadeFinanceiro, FormaPagamento, CondicaoPagamento } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
@@ -20,6 +22,7 @@ function LancarNotaForm() {
   const params = useSearchParams()
   const [materias, setMaterias] = useState<FinanceiroMateriaPrima[]>([])
   const [fornecedores, setFornecedores] = useState<FinanceiroParte[]>([])
+  const [modalNovoFornecedor, setModalNovoFornecedor] = useState(false)
 
   // Vindo da conciliação do extrato: a nota precisa bater com o valor da
   // transação bancária para poder ser conciliada automaticamente.
@@ -266,23 +269,17 @@ function LancarNotaForm() {
   return (
     <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold text-gray-800">Lançar Nota de Insumos</h1>
-              <p className="text-xs text-gray-500">
-                {extratoTransacaoId
-                  ? 'Criando a partir de uma transação do extrato'
-                  : cotacaoId && cotacaoTitulo
-                    ? `Itens e preços vindos da cotação "${cotacaoTitulo}" — confira e ajuste se necessário`
-                    : 'A nota gera automaticamente a despesa correspondente'}
-              </p>
-            </div>
-          </div>
-        </div>
+        <PageHeader
+          title="Lançar Nota de Insumos"
+          subtitle={
+            extratoTransacaoId
+              ? 'Criando a partir de uma transação do extrato'
+              : cotacaoId && cotacaoTitulo
+                ? `Itens e preços vindos da cotação "${cotacaoTitulo}" — confira e ajuste se necessário`
+                : 'A nota gera automaticamente a despesa correspondente'
+          }
+          onBack={() => router.back()}
+        />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}
@@ -292,14 +289,19 @@ function LancarNotaForm() {
             <h2 className="font-semibold text-gray-800">Dados da nota</h2>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Fornecedor</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700">Fornecedor</label>
+                <button type="button" onClick={() => setModalNovoFornecedor(true)} className="text-xs font-medium text-pink-700 hover:text-pink-800">
+                  + Cadastrar novo
+                </button>
+              </div>
               <select value={fornecedorId} onChange={(e) => setFornecedorId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white">
                 <option value="">Selecione...</option>
                 {fornecedores.map((f) => (
                   <option key={f.id} value={f.id}>{f.nome}</option>
                 ))}
               </select>
-              {fornecedores.length === 0 && <p className="text-xs text-amber-600 mt-1">Nenhum fornecedor cadastrado — peça ao admin para cadastrar antes de lançar.</p>}
+              {fornecedores.length === 0 && <p className="text-xs text-amber-600 mt-1">Nenhum fornecedor cadastrado ainda.</p>}
             </div>
 
             {fornecedor && (
@@ -493,6 +495,18 @@ function LancarNotaForm() {
           materias={materias}
           onAdd={(item) => setItens((prev) => [...prev, item])}
           onClose={() => setModalAberto(false)}
+          onMateriaPrimaCriada={(nova) => setMaterias((prev) => [...prev, nova].sort((a, b) => a.nome.localeCompare(b.nome)))}
+        />
+      )}
+
+      {modalNovoFornecedor && (
+        <NovaParteRapidaModal
+          papelPadrao="fornecedor"
+          onClose={() => setModalNovoFornecedor(false)}
+          onCreated={(novo) => {
+            setFornecedores((prev) => [...prev, novo].sort((a, b) => a.nome.localeCompare(b.nome)))
+            setFornecedorId(novo.id)
+          }}
         />
       )}
     </ProtectedRoute>

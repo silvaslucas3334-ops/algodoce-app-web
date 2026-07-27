@@ -3,10 +3,12 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
 import SelecionarItemCotacaoModal, { ItemCotacaoForm } from '@/components/SelecionarItemCotacaoModal'
+import NovaParteRapidaModal from '@/components/NovaParteRapidaModal'
 import { criarCotacao } from '@/lib/financeiro-cotacoes'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { FinanceiroParte, FinanceiroMateriaPrima, UnidadeFinanceiro } from '@/lib/types'
 import { UNIDADE_LABEL } from '@/lib/constants'
 
@@ -20,6 +22,7 @@ export default function NovaCotacaoPage() {
   const [unidade, setUnidade] = useState<UnidadeFinanceiro>('loja1')
   const [itens, setItens] = useState<ItemCotacaoForm[]>([])
   const [modalAberto, setModalAberto] = useState(false)
+  const [modalNovoFornecedor, setModalNovoFornecedor] = useState(false)
   const [fornecedoresSelecionados, setFornecedoresSelecionados] = useState<Set<string>>(new Set())
 
   const [salvando, setSalvando] = useState(false)
@@ -87,14 +90,7 @@ export default function NovaCotacaoPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
-            <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">
-              <ArrowLeft size={22} />
-            </button>
-            <h1 className="text-xl font-bold text-gray-800">Nova Cotação</h1>
-          </div>
-        </div>
+        <PageHeader title="Nova Cotação" onBack={() => router.back()} />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}
@@ -166,9 +162,14 @@ export default function NovaCotacaoPage() {
           </div>
 
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
-            <h2 className="font-semibold text-gray-800">Fornecedores convidados</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-800">Fornecedores convidados</h2>
+              <button type="button" onClick={() => setModalNovoFornecedor(true)} className="text-xs font-medium text-pink-700 hover:text-pink-800">
+                + Cadastrar novo
+              </button>
+            </div>
             {fornecedores.length === 0 ? (
-              <p className="text-xs text-amber-600">Nenhum fornecedor cadastrado — peça ao admin para cadastrar antes de cotar.</p>
+              <p className="text-xs text-amber-600">Nenhum fornecedor cadastrado ainda.</p>
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 {fornecedores.map((f) => {
@@ -206,6 +207,18 @@ export default function NovaCotacaoPage() {
           materias={materias}
           onAdd={(item) => setItens((prev) => [...prev, item])}
           onClose={() => setModalAberto(false)}
+          onMateriaPrimaCriada={(nova) => setMaterias((prev) => [...prev, nova].sort((a, b) => a.nome.localeCompare(b.nome)))}
+        />
+      )}
+
+      {modalNovoFornecedor && (
+        <NovaParteRapidaModal
+          papelPadrao="fornecedor"
+          onClose={() => setModalNovoFornecedor(false)}
+          onCreated={(novo) => {
+            setFornecedores((prev) => [...prev, novo].sort((a, b) => a.nome.localeCompare(b.nome)))
+            setFornecedoresSelecionados((prev) => new Set(prev).add(novo.id))
+          }}
         />
       )}
     </ProtectedRoute>

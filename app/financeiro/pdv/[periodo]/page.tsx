@@ -2,8 +2,10 @@
 import { useEffect, useState } from 'react'
 import * as XLSX from 'xlsx'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import PageHeader from '@/components/PageHeader'
+import NotFoundState from '@/components/NotFoundState'
 import { useRouter, useParams } from 'next/navigation'
-import { ArrowLeft, Loader, Download, Trash2 } from 'lucide-react'
+import { Loader, Download, Trash2 } from 'lucide-react'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { excluirPeriodoPDV } from '@/lib/pdv-import'
@@ -137,7 +139,7 @@ export default function RelatorioPdvPeriodoPage() {
   if (!match) {
     return (
       <ProtectedRoute allowedRoles={['admin']}>
-        <div className="flex items-center justify-center min-h-screen text-gray-400">Período inválido</div>
+        <NotFoundState title="Período inválido" backHref="/financeiro/pdv" />
       </ProtectedRoute>
     )
   }
@@ -145,17 +147,12 @@ export default function RelatorioPdvPeriodoPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <button onClick={() => router.push('/financeiro/pdv')} className="text-gray-500 hover:text-gray-700">
-                <ArrowLeft size={22} />
-              </button>
-              <div>
-                <h1 className="text-xl font-bold text-gray-800">{MESES[mes - 1]} de {ano}</h1>
-                <p className="text-sm text-gray-600">{UNIDADE_LABEL[unidade!]}</p>
-              </div>
-            </div>
+        <PageHeader
+          title={`${MESES[mes - 1]} de ${ano}`}
+          subtitle={UNIDADE_LABEL[unidade!]}
+          backHref="/financeiro/pdv"
+          maxWidth="max-w-5xl"
+          actions={
             <button
               onClick={excluirPeriodo}
               disabled={excluindo || loading}
@@ -163,8 +160,8 @@ export default function RelatorioPdvPeriodoPage() {
             >
               {excluindo ? <Loader size={14} className="animate-spin" /> : <Trash2 size={14} />} Excluir período
             </button>
-          </div>
-        </div>
+          }
+        />
 
         <div className="max-w-5xl mx-auto px-4 py-6">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4">{erro}</div>}

@@ -3,15 +3,14 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
+import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Search } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import { FinanceiroPrePreparo } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { buscarCustosAtuaisMateriasPrimas, calcularCustoPrePreparo } from '@/lib/financeiro-cmv'
 
 export default function PrePreparosPage() {
-  const router = useRouter()
   const [prePreparos, setPrePreparos] = useState<FinanceiroPrePreparo[]>([])
   const [custos, setCustos] = useState<Record<string, ReturnType<typeof calcularCustoPrePreparo>>>({})
   const [loading, setLoading] = useState(true)
@@ -49,22 +48,19 @@ export default function PrePreparosPage() {
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <div className="bg-white border-b border-gray-200">
-          <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <button onClick={() => router.push('/financeiro/ficha-tecnica')} className="text-gray-500 hover:text-gray-700">
-                <ArrowLeft size={22} />
-              </button>
-              <h1 className="text-xl font-bold text-gray-800">Pré-Preparados</h1>
-            </div>
+        <PageHeader
+          title="Pré-Preparados"
+          backHref="/financeiro"
+          maxWidth="max-w-4xl"
+          actions={
             <Link
               href="/financeiro/pre-preparos/nova"
               className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800"
             >
               <Plus size={18} /> Novo
             </Link>
-          </div>
-        </div>
+          }
+        />
 
         <div className="max-w-4xl mx-auto px-4 py-6">
           <div className="relative mb-4">
