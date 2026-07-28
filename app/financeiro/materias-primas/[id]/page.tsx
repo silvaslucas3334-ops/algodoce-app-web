@@ -74,12 +74,17 @@ export default function DetalheMateriaPrimaPage() {
     setSalvando(true)
     setErro('')
     try {
+      // Par opcional — só grava se os dois vierem preenchidos juntos (uma
+      // unidade sem fator, ou vice-versa, não serve pra calcular nada).
+      const fornecedorCompleto = !!materia.unidade_fornecedor?.trim() && (materia.fator_unidade_fornecedor || 0) > 0
       const { error } = await supabase
         .from('financeiro_materias_primas')
         .update({
           unidade_medida: materia.unidade_medida,
           unidade_compra: materia.unidade_compra,
           fator_conversao: materia.fator_conversao,
+          unidade_fornecedor: fornecedorCompleto ? materia.unidade_fornecedor!.trim() : null,
+          fator_unidade_fornecedor: fornecedorCompleto ? materia.fator_unidade_fornecedor : null,
           conta_id: materia.conta_id || null,
           descricao: materia.descricao || null,
           ativo: materia.ativo,
@@ -163,6 +168,33 @@ export default function DetalheMateriaPrimaPage() {
                 onChange={(e) => setMateria({ ...materia, fator_conversao: Number(e.target.value) })}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
               />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Unidade do fornecedor (opcional)</label>
+                <input
+                  type="text"
+                  value={materia.unidade_fornecedor || ''}
+                  onChange={(e) => setMateria({ ...materia, unidade_fornecedor: e.target.value || undefined })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                  placeholder="pct, fardo..."
+                />
+                <p className="text-xs text-gray-400 mt-1">Como o fornecedor vende, se for diferente da unidade de compra</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Fator do fornecedor</label>
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={materia.fator_unidade_fornecedor ?? ''}
+                  onChange={(e) => setMateria({ ...materia, fator_unidade_fornecedor: e.target.value ? Number(e.target.value) : undefined })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Quantas "{materia.unidade_compra}" tem em 1 "{materia.unidade_fornecedor || 'fornecedor'}". Ex: 1 pacote = 5 kg → 5.
+                </p>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Conta contábil do item</label>

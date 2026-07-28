@@ -12,6 +12,8 @@ export default function NovaMateriaPrimaPage() {
   const [unidadeMedida, setUnidadeMedida] = useState('g')
   const [unidadeCompra, setUnidadeCompra] = useState('kg')
   const [fatorConversao, setFatorConversao] = useState('1000')
+  const [unidadeFornecedor, setUnidadeFornecedor] = useState('')
+  const [fatorUnidadeFornecedor, setFatorUnidadeFornecedor] = useState('')
   const [contaId, setContaId] = useState('')
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [descricao, setDescricao] = useState('')
@@ -38,11 +40,16 @@ export default function NovaMateriaPrimaPage() {
     setSalvando(true)
     setErro('')
     try {
+      // Par opcional — só grava se os dois vierem preenchidos juntos (uma
+      // unidade sem fator, ou vice-versa, não serve pra calcular nada).
+      const fornecedorCompleto = unidadeFornecedor.trim() && Number(fatorUnidadeFornecedor) > 0
       const { error } = await supabase.from('financeiro_materias_primas').insert({
         nome: nome.trim(),
         unidade_medida: unidadeMedida.trim(),
         unidade_compra: unidadeCompra.trim(),
         fator_conversao: Number(fatorConversao),
+        unidade_fornecedor: fornecedorCompleto ? unidadeFornecedor.trim() : null,
+        fator_unidade_fornecedor: fornecedorCompleto ? Number(fatorUnidadeFornecedor) : null,
         conta_id: contaId || null,
         descricao: descricao.trim() || null,
       })
@@ -115,6 +122,34 @@ export default function NovaMateriaPrimaPage() {
               <p className="text-xs text-gray-400 mt-1">
                 Quantas unidades de "{unidadeMedida || 'medida'}" tem em 1 "{unidadeCompra || 'compra'}". Ex: 1 kg = 1000 g → 1000.
               </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Unidade do fornecedor (opcional)</label>
+                <input
+                  type="text"
+                  value={unidadeFornecedor}
+                  onChange={(e) => setUnidadeFornecedor(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                  placeholder="pct, fardo..."
+                />
+                <p className="text-xs text-gray-400 mt-1">Como o fornecedor vende, se for diferente da unidade de compra</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Fator do fornecedor</label>
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={fatorUnidadeFornecedor}
+                  onChange={(e) => setFatorUnidadeFornecedor(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Quantas "{unidadeCompra || 'compra'}" tem em 1 "{unidadeFornecedor || 'fornecedor'}". Ex: 1 pacote = 5 kg → 5.
+                </p>
+              </div>
             </div>
 
             <div>

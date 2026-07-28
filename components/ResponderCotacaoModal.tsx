@@ -14,10 +14,20 @@ interface Props {
 }
 
 interface LinhaResposta {
-  valorUnitario: string
+  // O que o usuário digita — no mesmo formato que o fornecedor cotou de
+  // volta. Por unidade_fornecedor quando o item tem uma cadastrada (ex:
+  // "R$ por pacote"), senão por unidade_cotacao (comportamento de sempre).
+  valorDigitado: string
   valorTotal: string
   valorTotalEditado: boolean
   disponivel: boolean
+}
+
+// unidade_compra por 1 unidade_fornecedor (ex: 1 pacote = 5kg -> 5). Sem
+// isso cadastrado no item, não há conversão — valorDigitado já É o valor
+// por unidade_cotacao, igual ao comportamento anterior.
+function fatorFornecedor(item: FinanceiroCotacaoItem): number | undefined {
+  return item.materia_prima?.unidade_fornecedor ? item.materia_prima.fator_unidade_fornecedor : undefined
 }
 
 export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precosExistentes, onClose, onResolvido }: Props) {
@@ -25,12 +35,20 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
     const inicial: Record<string, LinhaResposta> = {}
     for (const item of itens) {
       const existente = precosExistentes.find((p) => p.cotacao_item_id === item.id)
+      const fator = fatorFornecedor(item)
+      // valor_unitario salvo é sempre por unidade_compra — pra reabrir e
+      // mostrar de novo no formato do fornecedor (por pacote), multiplica
+      // pelo fator (inverso do que confirmar() faz ao salvar).
+      const valorDigitado =
+        existente?.valor_unitario != null
+          ? String(fator ? existente.valor_unitario * fator : existente.valor_unitario)
+          : ''
       inicial[item.id] = {
-        valorUnitario: existente?.valor_unitario != null ? String(existente.valor_unitario) : '',
+        valorDigitado,
         valorTotal: existente?.valor_total != null ? String(existente.valor_total) : '',
-        // Só trava o auto-cálculo (linha 44-49) quando já existe uma resposta
-        // salva sendo reaberta pra edição — numa resposta nova, valor total
-        // deve seguir calculando sozinho a partir do valor unitário.
+        // Só trava o auto-cálculo (ver atualizarLinha) quando já existe uma
+        // resposta salva sendo reaberta pra edição — numa resposta nova,
+        // valor total deve seguir calculando sozinho a partir do unitário.
         valorTotalEditado: existente?.valor_total != null,
         disponivel: existente?.disponivel ?? true,
       }
@@ -44,11 +62,13 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
     setLinhas((prev) => {
       const atual = prev[itemId]
       const nova = { ...atual, ...patch }
-      if (patch.valorUnitario !== undefined && !atual.valorTotalEditado) {
+      if (patch.valorDigitado !== undefined && !atual.valorTotalEditado) {
         const item = itens.find((i) => i.id === itemId)
         const qtd = item?.quantidade || 0
-        const unit = Number(patch.valorUnitario)
-        if (qtd > 0 && unit > 0) nova.valorTotal = (qtd * unit).toFixed(2)
+        const fator = item ? fatorFornecedor(item) : undefined
+        const digitado = Number(patch.valorDigitado)
+        const valorUnitario = fator ? digitado / fator : digitado
+        if (qtd > 0 && valorUnitario > 0) nova.valorTotal = (qtd * valorUnitario).toFixed(2)
       }
       return { ...prev, [itemId]: nova }
     })
@@ -58,7 +78,7 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
     const l = linhas[item.id]
     if (!l) return false
     if (!l.disponivel) return true
-    return Number(l.valorUnitario) > 0 && Number(l.valorTotal) > 0
+    return Number(l.valorDigitado) > 0 && Number(l.valorTotal) > 0
   })
 
   async function confirmar() {
@@ -71,9 +91,12 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
     try {
       const precos: RespostaItemCotacao[] = itens.map((item) => {
         const l = linhas[item.id]
+        const fator = fatorFornecedor(item)
+        const digitado = Number(l.valorDigitado)
+        const valorUnitario = fator ? digitado / fator : digitado
         return {
           cotacao_item_id: item.id,
-          valor_unitario: l.disponivel ? Number(l.valorUnitario) : null,
+          valor_unitario: l.disponivel ? valorUnitario : null,
           valor_total: l.disponivel ? Number(l.valorTotal) : null,
           disponivel: l.disponivel,
         }
@@ -101,6 +124,8 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
           {itens.map((item) => {
             const l = linhas[item.id]
             if (!l) return null
+            const fator = fatorFornecedor(item)
+            const unidadePreco = item.materia_prima?.unidade_fornecedor || item.unidade_cotacao
             return (
               <div key={item.id} className="border border-gray-200 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
@@ -121,16 +146,21 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">
-                        Valor unitário (R$/{item.unidade_cotacao})
+                        Valor por {unidadePreco} (R$)
                       </label>
                       <input
                         type="number"
                         step="0.01"
                         min={0}
-                        value={l.valorUnitario}
-                        onChange={(e) => atualizarLinha(item.id, { valorUnitario: e.target.value })}
+                        value={l.valorDigitado}
+                        onChange={(e) => atualizarLinha(item.id, { valorDigitado: e.target.value })}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
+                      {fator && Number(l.valorDigitado) > 0 && (
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          ≈ {formatBRL(Number(l.valorDigitado) / fator)}/{item.unidade_cotacao}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Valor total (R$)</label>

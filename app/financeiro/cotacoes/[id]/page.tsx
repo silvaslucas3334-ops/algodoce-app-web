@@ -42,7 +42,7 @@ export default function DetalheCotacaoPage() {
         .single(),
       supabase
         .from('financeiro_cotacao_itens')
-        .select('*, materia_prima:financeiro_materias_primas(nome, unidade_medida)')
+        .select('*, materia_prima:financeiro_materias_primas(nome, unidade_medida, unidade_fornecedor, fator_unidade_fornecedor)')
         .eq('cotacao_id', cotacaoId),
       supabase
         .from('financeiro_cotacao_fornecedores')

@@ -107,6 +107,12 @@ CREATE TABLE IF NOT EXISTS financeiro_materias_primas (
   unidade_medida TEXT NOT NULL,  -- unidade da ficha técnica (financeiro_pre_preparo_itens/financeiro_produto_final_itens), ex: 'g', 'ml', 'un'
   unidade_compra TEXT NOT NULL,  -- unidade usual de compra, ex: 'kg', 'caixa', 'un'
   fator_conversao NUMERIC NOT NULL CHECK (fator_conversao > 0), -- unidade_medida por 1 unidade_compra (1kg=1000g -> 1000)
+  -- Unidade em que o fornecedor vende (ex: pacote de 5kg) — só usada pra
+  -- calcular quantos pacotes pedir no PDF da cotação e pro preço digitado
+  -- no mesmo formato do fornecedor; nunca entra em custo/CMV (isso
+  -- continua só via unidade_compra/fator_conversao). Ambos opcionais.
+  unidade_fornecedor TEXT,
+  fator_unidade_fornecedor NUMERIC CHECK (fator_unidade_fornecedor IS NULL OR fator_unidade_fornecedor > 0), -- unidade_compra por 1 unidade_fornecedor (1 pacote=5kg -> 5)
   conta_id UUID REFERENCES financeiro_contas(id), -- classificação contábil padrão do item; itens da nota herdam
   descricao TEXT,
   ativo BOOLEAN NOT NULL DEFAULT true,
