@@ -6,6 +6,7 @@ import {
   confirmarConciliacaoManual,
 } from '@/lib/financeiro-reconciliacao'
 import { formatBRL } from '@/lib/ofx'
+import { normalizarTitulo } from '@/lib/tarefas-utils'
 import { FinanceiroExtratoTransacao, FinanceiroLancamento } from '@/lib/types'
 import { X, Search, Loader, CheckCircle } from 'lucide-react'
 
@@ -24,6 +25,7 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
   const [candidatos, setCandidatos] = useState<FinanceiroLancamento[]>([])
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
+  const [filtroParteId, setFiltroParteId] = useState('')
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [aplicarJuros, setAplicarJuros] = useState(true)
   const [processando, setProcessando] = useState(false)
@@ -37,13 +39,33 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
         setCandidatos(lista)
         const sugestao = sugerirCombinacaoDespesas(lista, valorTransacao)
         if (sugestao.length > 0) setSelecionados(new Set(sugestao))
+
+        // Documento raramente vem completo em PIX pra pessoa física (banco
+        // mascara o CPF) — como segundo palpite, tenta achar o nome do
+        // beneficiário dentro da descrição da transação. Só pré-seleciona o
+        // filtro; o usuário sempre pode trocar pra "Todos" na mão.
+        const descNorm = normalizarTitulo(transacao.descricao_original)
+        const partesUnicas = new Map(lista.filter((l) => l.parte).map((l) => [l.parte_id, l.parte!.nome]))
+        for (const [parteId, nome] of partesUnicas) {
+          if (nome.trim().length >= 4 && descNorm.includes(normalizarTitulo(nome))) {
+            setFiltroParteId(parteId)
+            break
+          }
+        }
       })
       .catch((err) => setErro('Erro ao buscar despesas: ' + err.message))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transacao.id])
 
+  const beneficiarios = Array.from(
+    new Map(candidatos.filter((l) => l.parte).map((l) => [l.parte_id, l.parte!.nome])).entries()
+  )
+    .map(([id, nome]) => ({ id, nome }))
+    .sort((a, b) => a.nome.localeCompare(b.nome))
+
   const filtrados = candidatos.filter((l) => {
+    if (filtroParteId && l.parte_id !== filtroParteId) return false
     const termo = busca.trim().toLowerCase()
     if (!termo) return true
     return l.descricao.toLowerCase().includes(termo) || (l.parte?.nome || '').toLowerCase().includes(termo)
@@ -99,15 +121,29 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
 
         {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-sm text-red-700">{erro}</div>}
 
-        <div className="relative mb-2">
-          <Search size={18} className="absolute left-3 top-3 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Pesquisar por fornecedor ou descrição..."
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2.5 text-sm"
-          />
+        <div className="flex gap-2 mb-2">
+          <div className="relative flex-1">
+            <Search size={18} className="absolute left-3 top-3 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Pesquisar por fornecedor ou descrição..."
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2.5 text-sm"
+            />
+          </div>
+          {beneficiarios.length > 0 && (
+            <select
+              value={filtroParteId}
+              onChange={(e) => setFiltroParteId(e.target.value)}
+              className="border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white max-w-[45%]"
+            >
+              <option value="">Todos os beneficiários</option>
+              {beneficiarios.map((b) => (
+                <option key={b.id} value={b.id}>{b.nome}</option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-1 mb-3 min-h-[120px]">
@@ -117,7 +153,8 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
             </div>
           ) : filtrados.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-6">
-              Nenhuma despesa sem vínculo encontrada{busca ? ` para "${busca}"` : ''}.
+              Nenhuma despesa sem vínculo encontrada{busca ? ` para "${busca}"` : ''}
+              {filtroParteId ? ' para este beneficiário' : ''}.
             </p>
           ) : (
             filtrados.map((l) => (
