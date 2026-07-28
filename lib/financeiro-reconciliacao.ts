@@ -500,9 +500,11 @@ export async function criarDespesasEmLote(
  * manual (várias despesas somando 1 transação, ou 1 despesa com diferença de
  * juros/multa). Sem filtro por texto aqui — a busca por nome/descrição é
  * feita no cliente sobre esta lista, mesmo padrão já usado em outras listas
- * do módulo (ex: Despesas). Ordena com o fornecedor do documento extraído
- * primeiro quando disponível, mas nunca esconde o resto — o usuário pode
- * escolher qualquer despesa, não só as sugeridas.
+ * do módulo (ex: Despesas). Ordena por data_lancamento (data da compra/
+ * entrega), não por vencimento — é essa a data que o usuário reconhece
+ * quando junta várias entregas pagas de uma vez só (vencimento pode nem
+ * fazer sentido pra quem já está pago). Fornecedor do documento extraído
+ * fica primeiro quando disponível, mas nunca esconde o resto.
  */
 export async function buscarDespesasParaVinculoManual(
   documentoExtraido: string | null
@@ -512,7 +514,7 @@ export async function buscarDespesasParaVinculoManual(
     .select('*, parte:financeiro_partes!parte_id(*), conta:financeiro_contas(codigo, nome)')
     .in('status', ['aberto', 'pago'])
     .is('extrato_transacao_id', null)
-    .order('data_vencimento', { ascending: false })
+    .order('data_lancamento', { ascending: true })
     .limit(300)
   if (error) throw new Error(error.message)
 

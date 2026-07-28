@@ -173,7 +173,7 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{l.descricao}</p>
                   <p className="text-xs text-gray-500">
-                    {l.parte?.nome} · venc. {new Date(l.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}
+                    {l.parte?.nome} · lançada em {new Date(l.data_lancamento + 'T00:00:00').toLocaleDateString('pt-BR')}
                     {l.status === 'pago' ? ' · já pago' : ''}
                   </p>
                 </div>
