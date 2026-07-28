@@ -5,7 +5,8 @@ import { sugerirCorrespondencias, confirmarConciliacao, confirmarConciliacaoJaPa
 import { formatBRL } from '@/lib/ofx'
 import { CandidatoConciliacao, FinanceiroExtratoTransacao } from '@/lib/types'
 import { TIPO_LANCAMENTO_LABEL } from '@/lib/constants'
-import { X, Loader, CheckCircle, Receipt, ShoppingCart } from 'lucide-react'
+import ConciliarManualModal from './ConciliarManualModal'
+import { X, Loader, CheckCircle, Receipt, ShoppingCart, ListChecks } from 'lucide-react'
 
 interface Props {
   transacao: FinanceiroExtratoTransacao
@@ -25,6 +26,7 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
   const [loading, setLoading] = useState(true)
   const [processando, setProcessando] = useState(false)
   const [erro, setErro] = useState('')
+  const [modalManual, setModalManual] = useState(false)
 
   useEffect(() => {
     sugerirCorrespondencias(transacao.valor, transacao.data, transacao.documento_extraido || null)
@@ -140,6 +142,14 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
           </div>
         )}
 
+        <button
+          onClick={() => setModalManual(true)}
+          disabled={processando}
+          className="w-full border-2 border-gray-200 text-gray-700 rounded-lg py-2.5 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 flex items-center justify-center gap-1.5 mb-3"
+        >
+          <ListChecks size={16} /> Selecionar despesas manualmente
+        </button>
+
         <p className="text-xs text-gray-400 text-center mb-2">ou lance um novo registro:</p>
         <div className="grid grid-cols-2 gap-2 mb-2">
           <button
@@ -166,6 +176,17 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
           Ignorar esta transação
         </button>
       </div>
+
+      {modalManual && (
+        <ConciliarManualModal
+          transacao={transacao}
+          onClose={() => setModalManual(false)}
+          onResolvido={() => {
+            onResolvido()
+            onClose()
+          }}
+        />
+      )}
     </div>
   )
 }

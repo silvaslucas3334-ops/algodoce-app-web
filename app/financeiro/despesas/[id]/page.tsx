@@ -354,6 +354,12 @@ export default function DetalheDespesaPage() {
                     )}
                   </span>
                 </div>
+                {!!lancamento.valor_juros_multa && lancamento.valor_juros_multa > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-red-600 text-xs">Juros/multa por atraso</span>
+                    <span className="text-red-600 text-xs font-medium">+ {formatBRL(lancamento.valor_juros_multa)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between"><span className="text-gray-500">Valor</span><span className="font-semibold text-gray-800">{formatBRL(lancamento.valor_total)}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Data do lançamento</span><span className="text-gray-800">{new Date(lancamento.data_lancamento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Vencimento</span><span className="text-gray-800">{new Date(lancamento.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>

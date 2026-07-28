@@ -20,6 +20,7 @@ export default function NovaCotacaoPage() {
 
   const [titulo, setTitulo] = useState('')
   const [unidade, setUnidade] = useState<UnidadeFinanceiro>('loja1')
+  const [dataEntregaPlanejada, setDataEntregaPlanejada] = useState('')
   const [itens, setItens] = useState<ItemCotacaoForm[]>([])
   const [modalAberto, setModalAberto] = useState(false)
   const [modalNovoFornecedor, setModalNovoFornecedor] = useState(false)
@@ -77,7 +78,8 @@ export default function NovaCotacaoPage() {
           observacao: i.observacao,
         })),
         Array.from(fornecedoresSelecionados),
-        usuario.id
+        usuario.id,
+        dataEntregaPlanejada || undefined
       )
       router.push(`/financeiro/cotacoes/${id}`)
     } catch (err: any) {
@@ -123,6 +125,16 @@ export default function NovaCotacaoPage() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Data de entrega planejada (opcional)</label>
+              <input
+                type="date"
+                value={dataEntregaPlanejada}
+                onChange={(e) => setDataEntregaPlanejada(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+              />
+              <p className="text-xs text-gray-400 mt-1">Prazo pedido ao fornecedor — sai impresso no PDF da cotação.</p>
             </div>
           </div>
 

@@ -3,8 +3,10 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import NotFoundState from '@/components/NotFoundState'
+import OluquinhasLogo from '@/components/OluquinhasLogo'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Printer } from 'lucide-react'
+import { UNIDADE_LABEL } from '@/lib/constants'
 
 export default function CotacaoPdfPage() {
   const router = useRouter()
@@ -27,7 +29,11 @@ export default function CotacaoPdfPage() {
   async function carregar() {
     setLoading(true)
     const [{ data: cot }, { data: forn }, { data: itensData }] = await Promise.all([
-      supabase.from('financeiro_cotacoes').select('titulo, criado_em').eq('id', cotacaoId).single(),
+      supabase
+        .from('financeiro_cotacoes')
+        .select('titulo, criado_em, unidade, data_entrega_planejada')
+        .eq('id', cotacaoId)
+        .single(),
       supabase
         .from('financeiro_cotacao_fornecedores')
         .select('id, parte:financeiro_partes!parte_id(nome)')
@@ -81,15 +87,22 @@ export default function CotacaoPdfPage() {
         </div>
 
         <div className="max-w-2xl mx-auto p-8">
-          <div className="text-center mb-6 pb-4 border-b-2 border-gray-800">
-            <h1 className="text-2xl font-bold text-gray-800">AlgoDoce</h1>
-            <p className="text-sm text-gray-600">Solicitação de Cotação</p>
+          <div className="flex items-center justify-center gap-3 mb-6 pb-4 border-b-2 border-gray-800">
+            <OluquinhasLogo variant="rosto" color="marrom" size="sm" />
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-gray-800">AlgoDoce</h1>
+              <p className="text-sm text-gray-600">Solicitação de Cotação</p>
+            </div>
           </div>
 
           <div className="mb-6 text-sm text-gray-700 space-y-1">
             <p><strong>Cotação:</strong> {cotacao.titulo}</p>
             <p><strong>Fornecedor:</strong> {fornecedor.parte?.nome}</p>
             <p><strong>Data:</strong> {new Date(cotacao.criado_em).toLocaleDateString('pt-BR')}</p>
+            <p><strong>Unidade de entrega:</strong> {UNIDADE_LABEL[cotacao.unidade as keyof typeof UNIDADE_LABEL] || cotacao.unidade}</p>
+            {cotacao.data_entrega_planejada && (
+              <p><strong>Entrega planejada:</strong> {new Date(cotacao.data_entrega_planejada + 'T00:00:00').toLocaleDateString('pt-BR')}</p>
+            )}
           </div>
 
           <table className="w-full text-sm border-collapse">

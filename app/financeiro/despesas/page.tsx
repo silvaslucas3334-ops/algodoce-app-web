@@ -184,6 +184,11 @@ export default function DespesasPage() {
                         </p>
                       </Link>
                       <div className="text-right flex flex-col items-end gap-1.5">
+                        {!!l.valor_juros_multa && l.valor_juros_multa > 0 && (
+                          <p className="text-[11px] text-red-600 font-medium">
+                            + {formatBRL(l.valor_juros_multa)} juros/multa
+                          </p>
+                        )}
                         <p className="font-semibold text-gray-800">{formatBRL(l.valor_total)}</p>
                         <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
                         {l.extrato_transacao && (

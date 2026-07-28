@@ -28,7 +28,10 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
       inicial[item.id] = {
         valorUnitario: existente?.valor_unitario != null ? String(existente.valor_unitario) : '',
         valorTotal: existente?.valor_total != null ? String(existente.valor_total) : '',
-        valorTotalEditado: true,
+        // Só trava o auto-cálculo (linha 44-49) quando já existe uma resposta
+        // salva sendo reaberta pra edição — numa resposta nova, valor total
+        // deve seguir calculando sozinho a partir do valor unitário.
+        valorTotalEditado: existente?.valor_total != null,
         disponivel: existente?.disponivel ?? true,
       }
     }
@@ -117,7 +120,9 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
                 {l.disponivel && (
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Valor unitário (R$)</label>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Valor unitário (R$/{item.unidade_cotacao})
+                      </label>
                       <input
                         type="number"
                         step="0.01"

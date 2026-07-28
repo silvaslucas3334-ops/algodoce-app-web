@@ -120,6 +120,8 @@ export default function DetalheCotacaoPage() {
           subtitle={
             <>
               {UNIDADE_LABEL[cotacao.unidade]}
+              {cotacao.data_entrega_planejada &&
+                ` · Entrega planejada: ${new Date(cotacao.data_entrega_planejada + 'T00:00:00').toLocaleDateString('pt-BR')}`}
               {cotacao.status === 'fechada' && cotacao.fornecedor_vencedor?.nome && ` · Fechada com ${cotacao.fornecedor_vencedor.nome}`}
             </>
           }

@@ -20,11 +20,12 @@ export async function criarCotacao(
   unidade: UnidadeFinanceiro,
   itens: NovoItemCotacao[],
   fornecedorIds: string[],
-  usuarioId: string
+  usuarioId: string,
+  dataEntregaPlanejada?: string
 ): Promise<string> {
   const { data: cotacao, error: erroCotacao } = await supabase
     .from('financeiro_cotacoes')
-    .insert({ titulo, unidade, criado_por: usuarioId })
+    .insert({ titulo, unidade, criado_por: usuarioId, data_entrega_planejada: dataEntregaPlanejada || null })
     .select('id')
     .single()
   if (erroCotacao) throw new Error(erroCotacao.message)

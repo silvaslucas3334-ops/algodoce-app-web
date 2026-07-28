@@ -317,6 +317,7 @@ export interface FinanceiroLancamento {
   conta?: FinanceiroConta
   extrato_transacao_id?: string
   extrato_transacao?: { status_conciliacao: StatusConciliacao }
+  valor_juros_multa?: number // diferença entre valor lançado e valor pago (atraso), aplicada na conciliação manual
   observacoes?: string
   criado_por: string
   created_at: string
@@ -468,6 +469,7 @@ export interface FinanceiroCotacao {
   status: StatusCotacao
   fornecedor_vencedor_id?: string
   fornecedor_vencedor?: FinanceiroParte
+  data_entrega_planejada?: string // prazo pedido ao fornecedor, impresso no PDF
   observacoes?: string
   criado_por: string
   criado_em: string

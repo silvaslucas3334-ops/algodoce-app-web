@@ -495,6 +495,161 @@ export async function criarDespesasEmLote(
   return { sucesso, falhas }
 }
 
+/**
+ * Busca despesas ainda sem vínculo de extrato pra montar uma conciliação
+ * manual (várias despesas somando 1 transação, ou 1 despesa com diferença de
+ * juros/multa). Sem filtro por texto aqui — a busca por nome/descrição é
+ * feita no cliente sobre esta lista, mesmo padrão já usado em outras listas
+ * do módulo (ex: Despesas). Ordena com o fornecedor do documento extraído
+ * primeiro quando disponível, mas nunca esconde o resto — o usuário pode
+ * escolher qualquer despesa, não só as sugeridas.
+ */
+export async function buscarDespesasParaVinculoManual(
+  documentoExtraido: string | null
+): Promise<FinanceiroLancamento[]> {
+  const { data, error } = await supabase
+    .from('financeiro_lancamentos')
+    .select('*, parte:financeiro_partes!parte_id(*), conta:financeiro_contas(codigo, nome)')
+    .in('status', ['aberto', 'pago'])
+    .is('extrato_transacao_id', null)
+    .order('data_vencimento', { ascending: false })
+    .limit(300)
+  if (error) throw new Error(error.message)
+
+  const lista = (data || []) as FinanceiroLancamento[]
+  if (!documentoExtraido) return lista
+  return [...lista].sort((a, b) => {
+    const aMatch = a.parte?.documento === documentoExtraido ? 0 : 1
+    const bMatch = b.parte?.documento === documentoExtraido ? 0 : 1
+    return aMatch - bMatch
+  })
+}
+
+const MAX_CANDIDATOS_COMBINACAO = 25
+const MAX_ITENS_COMBINACAO = 6
+
+/**
+ * Sugere (sem aplicar) um subconjunto de candidatos cuja soma bate exato com
+ * o valor alvo — busca local, força bruta com poda, limitada a poucos
+ * candidatos/itens porque o caso real é "poucas entregas da mesma semana",
+ * não um extrato inteiro. Só um atalho editável: o usuário sempre pode
+ * marcar/desmarcar despesas na mão, sugestão nenhuma é obrigatória.
+ */
+export function sugerirCombinacaoDespesas(candidatos: FinanceiroLancamento[], valorAlvo: number): string[] {
+  const pool = candidatos.slice(0, MAX_CANDIDATOS_COMBINACAO)
+  const bater = (soma: number) => Math.abs(soma - valorAlvo) < 0.01
+
+  for (let tamanho = 2; tamanho <= Math.min(MAX_ITENS_COMBINACAO, pool.length); tamanho++) {
+    const combo = buscarCombo(pool, tamanho, valorAlvo, bater)
+    if (combo) return combo.map((l) => l.id)
+  }
+  return []
+}
+
+function buscarCombo(
+  pool: FinanceiroLancamento[],
+  tamanho: number,
+  valorAlvo: number,
+  bater: (soma: number) => boolean
+): FinanceiroLancamento[] | null {
+  const atual: FinanceiroLancamento[] = []
+  function backtrack(inicio: number, soma: number): FinanceiroLancamento[] | null {
+    if (atual.length === tamanho) return bater(soma) ? [...atual] : null
+    if (soma > valorAlvo + 0.01) return null // valores são positivos — já passou do alvo, poda
+    for (let i = inicio; i < pool.length; i++) {
+      atual.push(pool[i])
+      const achado = backtrack(i + 1, soma + pool[i].valor_total)
+      atual.pop()
+      if (achado) return achado
+    }
+    return null
+  }
+  return backtrack(0, 0)
+}
+
+/**
+ * Confirma a conciliação manual: uma transação pode ser vinculada a N
+ * despesas (fornecedor com várias entregas pagas de uma vez só) ou a 1
+ * despesa com ajuste de juros/multa (boleto pago com atraso). Entrada
+ * alternativa a confirmarConciliacao/confirmarConciliacaoGrupo pra quando
+ * não há match automático, ou quando o usuário prefere montar a combinação
+ * na mão.
+ *
+ * financeiro_extrato_transacoes.lancamento_id (campo escalar) fica sem
+ * setar aqui, mesma decisão de confirmarConciliacaoGrupo — não representa
+ * bem N despesas. financeiro_lancamentos.extrato_transacao_id (sem índice
+ * único desde a migration financeiro-conciliacao-manual.sql) é a fonte da
+ * verdade dessa direção.
+ */
+export async function confirmarConciliacaoManual(
+  transacaoId: string,
+  lancamentoIds: string[],
+  dataPagamento: string,
+  ajusteJurosMulta?: { lancamentoId: string; valor: number }
+): Promise<void> {
+  if (lancamentoIds.length === 0) throw new Error('Selecione ao menos uma despesa.')
+
+  const { data: partesLancamentos, error: erroPartes } = await supabase
+    .from('financeiro_lancamentos')
+    .select('parte_id')
+    .in('id', lancamentoIds)
+  if (erroPartes) throw new Error(erroPartes.message)
+  const partesUnicas = new Set((partesLancamentos || []).map((l) => l.parte_id))
+
+  const { data: transacaoAtualizada, error: erroTransacao } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .update({
+      status_conciliacao: 'conciliado',
+      parte_id: partesUnicas.size === 1 ? partesLancamentos![0].parte_id : null,
+    })
+    .eq('id', transacaoId)
+    .eq('status_conciliacao', 'pendente')
+    .select('id')
+  if (erroTransacao) throw new Error(erroTransacao.message)
+  if (!transacaoAtualizada || transacaoAtualizada.length === 0) {
+    throw new Error('Transação já foi conciliada em outra sessão.')
+  }
+
+  const { data: lancamentosVinculados, error: erroVinculo } = await supabase
+    .from('financeiro_lancamentos')
+    .update({ extrato_transacao_id: transacaoId, updated_at: new Date().toISOString() })
+    .in('id', lancamentoIds)
+    .is('extrato_transacao_id', null)
+    .select('id, status')
+  if (erroVinculo) throw new Error(erroVinculo.message)
+  if (!lancamentosVinculados || lancamentosVinculados.length !== lancamentoIds.length) {
+    throw new Error('Uma ou mais despesas já foram vinculadas a outra transação — atualize a tela e tente de novo.')
+  }
+
+  const idsParaPagar = lancamentosVinculados.filter((l) => l.status === 'aberto').map((l) => l.id)
+  if (idsParaPagar.length > 0) {
+    const { error: erroPagar } = await supabase
+      .from('financeiro_lancamentos')
+      .update({ status: 'pago', data_pagamento: dataPagamento, updated_at: new Date().toISOString() })
+      .in('id', idsParaPagar)
+      .eq('status', 'aberto')
+    if (erroPagar) throw new Error(erroPagar.message)
+  }
+
+  if (ajusteJurosMulta && ajusteJurosMulta.valor > 0) {
+    const { data: lancamentoAtual, error: erroBusca } = await supabase
+      .from('financeiro_lancamentos')
+      .select('valor_total, valor_juros_multa')
+      .eq('id', ajusteJurosMulta.lancamentoId)
+      .single()
+    if (erroBusca) throw new Error(erroBusca.message)
+    const { error: erroAjuste } = await supabase
+      .from('financeiro_lancamentos')
+      .update({
+        valor_total: Number(lancamentoAtual.valor_total || 0) + ajusteJurosMulta.valor,
+        valor_juros_multa: Number(lancamentoAtual.valor_juros_multa || 0) + ajusteJurosMulta.valor,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', ajusteJurosMulta.lancamentoId)
+    if (erroAjuste) throw new Error(erroAjuste.message)
+  }
+}
+
 export async function ignorarTransacao(transacaoId: string): Promise<void> {
   const { error } = await supabase
     .from('financeiro_extrato_transacoes')

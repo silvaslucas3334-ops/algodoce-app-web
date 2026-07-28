@@ -5,9 +5,10 @@ import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
+import SelecionarCotacaoModal from '@/components/SelecionarCotacaoModal'
 import NovaParteRapidaModal from '@/components/NovaParteRapidaModal'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, ClipboardList } from 'lucide-react'
 import { FinanceiroParte, FinanceiroMateriaPrima, UnidadeFinanceiro, FormaPagamento, CondicaoPagamento } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
@@ -34,10 +35,15 @@ function LancarNotaForm() {
 
   // Vindo do fechamento de uma cotação: diferente do extrato, aqui NÃO é um
   // pagamento já feito — é uma decisão. Os campos vêm pré-preenchidos mas
-  // editáveis, e "já foi paga" não é forçado (a NF real chega depois).
+  // editáveis, e "já foi paga" não é forçado (a NF real chega depois). Mais
+  // de uma cotação pode ser importada na mesma nota (fornecedor que
+  // consolida vários pedidos numa NF só) — cada importação SOMA itens ao
+  // carrinho, nunca substitui.
   const cotacaoId = params.get('cotacaoId')
-  const [cotacaoTitulo, setCotacaoTitulo] = useState('')
+  const [cotacoesImportadas, setCotacoesImportadas] = useState<{ id: string; titulo: string }[]>([])
   const [cotacaoUnidade, setCotacaoUnidade] = useState<UnidadeFinanceiro | null>(null)
+  const [avisoCotacao, setAvisoCotacao] = useState('')
+  const [modalCotacao, setModalCotacao] = useState(false)
 
   // Cozinha não é uma entidade própria — seus custos entram como rateio (0001).
   const unidadeTravada: UnidadeFinanceiro | null =
@@ -69,62 +75,72 @@ function LancarNotaForm() {
     else if (cotacaoUnidade) setUnidade(cotacaoUnidade)
   }, [unidadeTravada, cotacaoUnidade])
 
-  // Busca a cotação fechada + itens + preços do fornecedor vencedor, e
-  // pré-popula o array de itens (que só existe em memória até salvar — a
-  // cotação já está persistida, então dá pra buscar de novo por id em vez
-  // de serializar um array inteiro na querystring).
-  useEffect(() => {
-    if (!cotacaoId) return
-    async function carregarCotacao() {
-      const { data: cot, error: erroCot } = await supabase
-        .from('financeiro_cotacoes')
-        .select('titulo, unidade, fornecedor_vencedor_id')
-        .eq('id', cotacaoId)
-        .single()
-      if (erroCot || !cot?.fornecedor_vencedor_id) {
-        setErro('Cotação não encontrada ou ainda não fechada com um fornecedor vencedor.')
-        return
-      }
-      setCotacaoTitulo(cot.titulo)
+  // Busca uma cotação fechada + itens + preços do fornecedor vencedor, e
+  // SOMA ao array de itens já no carrinho (nunca substitui — permite
+  // importar mais de uma cotação na mesma nota). A cotação já está
+  // persistida, então dá pra buscar de novo por id em vez de serializar um
+  // array inteiro na querystring.
+  async function importarCotacao(idCotacao: string) {
+    setAvisoCotacao('')
+    const { data: cot, error: erroCot } = await supabase
+      .from('financeiro_cotacoes')
+      .select('titulo, unidade, fornecedor_vencedor_id')
+      .eq('id', idCotacao)
+      .single()
+    if (erroCot || !cot?.fornecedor_vencedor_id) {
+      setErro('Cotação não encontrada ou ainda não fechada com um fornecedor vencedor.')
+      return
+    }
+
+    // Só a 1ª cotação importada decide fornecedor/unidade — importações
+    // seguintes só somam itens, sem sobrescrever o que o usuário já ajustou.
+    if (cotacoesImportadas.length === 0) {
       setCotacaoUnidade(cot.unidade)
       setFornecedorId(cot.fornecedor_vencedor_id)
-
-      const { data: cotacaoFornecedor } = await supabase
-        .from('financeiro_cotacao_fornecedores')
-        .select('id')
-        .eq('cotacao_id', cotacaoId)
-        .eq('parte_id', cot.fornecedor_vencedor_id)
-        .single()
-      if (!cotacaoFornecedor) return
-
-      const [{ data: itensCotacao }, { data: precos }] = await Promise.all([
-        supabase
-          .from('financeiro_cotacao_itens')
-          .select('*, materia_prima:financeiro_materias_primas(nome, conta_id, unidade_compra, fator_conversao, conta:financeiro_contas(codigo, nome))')
-          .eq('cotacao_id', cotacaoId),
-        supabase.from('financeiro_cotacao_precos').select('*').eq('cotacao_fornecedor_id', cotacaoFornecedor.id),
-      ])
-
-      const itensPreenchidos: ItemNota[] = (itensCotacao || [])
-        .map((item: any) => {
-          const preco = (precos || []).find((p: any) => p.cotacao_item_id === item.id)
-          if (!preco || !preco.disponivel) return null
-          return {
-            materia_prima_id: item.materia_prima_id,
-            materia_prima_nome: item.materia_prima?.nome || '',
-            quantidade: item.quantidade,
-            unidade_nota: item.unidade_cotacao,
-            fator_conversao: item.materia_prima?.fator_conversao || 1,
-            valor_unitario: preco.valor_unitario || 0,
-            valor_total: preco.valor_total || 0,
-            conta_id: item.materia_prima?.conta_id || null,
-            conta_label: item.materia_prima?.conta ? `${item.materia_prima.conta.codigo} — ${item.materia_prima.conta.nome}` : null,
-          }
-        })
-        .filter((i: ItemNota | null): i is ItemNota => i !== null)
-      setItens(itensPreenchidos)
+    } else if (cot.fornecedor_vencedor_id !== fornecedorId) {
+      setAvisoCotacao(`Atenção: o vencedor desta cotação é diferente do fornecedor já selecionado na nota.`)
     }
-    carregarCotacao()
+
+    const { data: cotacaoFornecedor } = await supabase
+      .from('financeiro_cotacao_fornecedores')
+      .select('id')
+      .eq('cotacao_id', idCotacao)
+      .eq('parte_id', cot.fornecedor_vencedor_id)
+      .single()
+    if (!cotacaoFornecedor) return
+
+    const [{ data: itensCotacao }, { data: precos }] = await Promise.all([
+      supabase
+        .from('financeiro_cotacao_itens')
+        .select('*, materia_prima:financeiro_materias_primas(nome, conta_id, unidade_compra, fator_conversao, conta:financeiro_contas(codigo, nome))')
+        .eq('cotacao_id', idCotacao),
+      supabase.from('financeiro_cotacao_precos').select('*').eq('cotacao_fornecedor_id', cotacaoFornecedor.id),
+    ])
+
+    const itensPreenchidos: ItemNota[] = (itensCotacao || [])
+      .map((item: any) => {
+        const preco = (precos || []).find((p: any) => p.cotacao_item_id === item.id)
+        if (!preco || !preco.disponivel) return null
+        return {
+          materia_prima_id: item.materia_prima_id,
+          materia_prima_nome: item.materia_prima?.nome || '',
+          quantidade: item.quantidade,
+          unidade_nota: item.unidade_cotacao,
+          fator_conversao: item.materia_prima?.fator_conversao || 1,
+          valor_unitario: preco.valor_unitario || 0,
+          valor_total: preco.valor_total || 0,
+          conta_id: item.materia_prima?.conta_id || null,
+          conta_label: item.materia_prima?.conta ? `${item.materia_prima.conta.codigo} — ${item.materia_prima.conta.nome}` : null,
+        }
+      })
+      .filter((i: ItemNota | null): i is ItemNota => i !== null)
+    setItens((prev) => [...prev, ...itensPreenchidos])
+    setCotacoesImportadas((prev) => [...prev, { id: idCotacao, titulo: cot.titulo }])
+  }
+
+  useEffect(() => {
+    if (cotacaoId) importarCotacao(cotacaoId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cotacaoId])
 
   useEffect(() => {
@@ -274,8 +290,8 @@ function LancarNotaForm() {
           subtitle={
             extratoTransacaoId
               ? 'Criando a partir de uma transação do extrato'
-              : cotacaoId && cotacaoTitulo
-                ? `Itens e preços vindos da cotação "${cotacaoTitulo}" — confira e ajuste se necessário`
+              : cotacoesImportadas.length > 0
+                ? `Itens e preços vindos de ${cotacoesImportadas.length > 1 ? 'cotações' : 'cotação'} "${cotacoesImportadas.map((c) => c.titulo).join('", "')}" — confira e ajuste se necessário`
                 : 'A nota gera automaticamente a despesa correspondente'
           }
           onBack={() => router.back()}
@@ -345,13 +361,25 @@ function LancarNotaForm() {
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-gray-800">Itens da nota</h2>
-              <button
-                onClick={() => setModalAberto(true)}
-                className="bg-pink-700 text-white rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-1.5 hover:bg-pink-800"
-              >
-                <Plus size={16} /> Adicionar item
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setModalCotacao(true)}
+                  className="border-2 border-gray-200 text-gray-700 rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-1.5 hover:bg-gray-50"
+                >
+                  <ClipboardList size={16} /> Importar cotação
+                </button>
+                <button
+                  onClick={() => setModalAberto(true)}
+                  className="bg-pink-700 text-white rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-1.5 hover:bg-pink-800"
+                >
+                  <Plus size={16} /> Adicionar item
+                </button>
+              </div>
             </div>
+
+            {avisoCotacao && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-700">{avisoCotacao}</div>
+            )}
 
             {itens.length === 0 ? (
               <div className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center text-sm text-gray-400">
@@ -507,6 +535,17 @@ function LancarNotaForm() {
             setFornecedores((prev) => [...prev, novo].sort((a, b) => a.nome.localeCompare(b.nome)))
             setFornecedorId(novo.id)
           }}
+        />
+      )}
+
+      {modalCotacao && (
+        <SelecionarCotacaoModal
+          jaImportadasIds={cotacoesImportadas.map((c) => c.id)}
+          onSelect={(id) => {
+            importarCotacao(id)
+            setModalCotacao(false)
+          }}
+          onClose={() => setModalCotacao(false)}
         />
       )}
     </ProtectedRoute>

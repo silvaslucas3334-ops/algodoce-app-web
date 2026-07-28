@@ -205,6 +205,10 @@ CREATE TABLE IF NOT EXISTS financeiro_lancamentos (
   unidade TEXT NOT NULL CHECK (unidade IN ('loja1', 'loja2', 'rateio')), -- cozinha entra como rateio (0001), não é entidade própria
   conta_id UUID REFERENCES financeiro_contas(id),
   extrato_transacao_id UUID REFERENCES financeiro_extrato_transacoes(id),
+  -- Diferença entre o valor lançado e o valor realmente pago (juros/multa
+  -- por atraso), aplicada via conciliação manual — nunca embutida em
+  -- silêncio dentro de valor_total. Ver lib/migrations/financeiro-conciliacao-manual.sql.
+  valor_juros_multa NUMERIC DEFAULT 0,
   observacoes TEXT,
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -216,11 +220,14 @@ CREATE INDEX IF NOT EXISTS idx_fl_vencimento ON financeiro_lancamentos(data_venc
 CREATE INDEX IF NOT EXISTS idx_fl_parte ON financeiro_lancamentos(parte_id);
 CREATE INDEX IF NOT EXISTS idx_fl_unidade ON financeiro_lancamentos(unidade);
 CREATE INDEX IF NOT EXISTS idx_fl_grupo_parcelamento ON financeiro_lancamentos(grupo_parcelamento) WHERE grupo_parcelamento IS NOT NULL;
--- Evita duas despesas apontando pra mesma transação de extrato (ex: INSERT
--- do lançamento sucede mas o vínculo seguinte falha, e uma retentativa
--- criaria duplicata). Mesmo padrão de idx_fr_extrato_transacao_unico em
--- financeiro_receitas. Ver lib/migrations/add-indice-unico-extrato-lancamento.sql.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_fl_extrato_transacao_unico
+-- Índice NÃO-único de propósito: várias despesas podem apontar pra mesma
+-- transação de extrato (ex: fornecedor com várias entregas pagas de uma vez
+-- só — conciliação manual, ver lib/financeiro-reconciliacao.ts). A proteção
+-- original contra vínculo duplicado por race condition (INSERT do
+-- lançamento sucede, UPDATE de vínculo seguinte falha, retry duplica) agora
+-- é responsabilidade da aplicação (guarda por estado esperado + contagem de
+-- linhas afetadas). Ver lib/migrations/financeiro-conciliacao-manual.sql.
+CREATE INDEX IF NOT EXISTS idx_fl_extrato_transacao_id
   ON financeiro_lancamentos(extrato_transacao_id) WHERE extrato_transacao_id IS NOT NULL;
 
 -- ============================================================
@@ -752,6 +759,9 @@ CREATE TABLE IF NOT EXISTS financeiro_cotacoes (
   unidade TEXT NOT NULL CHECK (unidade IN ('loja1', 'loja2', 'rateio')),
   status TEXT NOT NULL DEFAULT 'aberta' CHECK (status IN ('aberta', 'fechada', 'cancelada')),
   fornecedor_vencedor_id UUID REFERENCES financeiro_partes(id),
+  -- Prazo pedido ao fornecedor (não é uma promessa dele) — definido na
+  -- criação, impresso no PDF que sai antes de qualquer resposta.
+  data_entrega_planejada DATE,
   observacoes TEXT,
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   criado_em TIMESTAMPTZ DEFAULT now(),
