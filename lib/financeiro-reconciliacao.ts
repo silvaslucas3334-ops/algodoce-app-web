@@ -260,6 +260,10 @@ const TOLERANCIA_JUROS = 50
  * uma vez. Busca por SOMA (com tolerância de juros/correção, não só
  * centavos), não por valor exato — e nunca por CNPJ/CPF, já que essas
  * descrições de amortização não trazem documento.
+ * Também casa despesas já pagas por outro caminho (ex: fornecedor com
+ * várias entregas, cada uma paga na hora, mas o banco só registra o
+ * extrato depois) — mesmo espírito de sugerirCorrespondencias, que já
+ * inclui 'pago' no match único.
  */
 export async function sugerirCorrespondenciasPorSoma(
   somaAbs: number,
@@ -268,7 +272,8 @@ export async function sugerirCorrespondenciasPorSoma(
   const { data: lancamentos, error } = await supabase
     .from('financeiro_lancamentos')
     .select('*, parte:financeiro_partes!parte_id(*), conta:financeiro_contas(codigo, nome)')
-    .eq('status', 'aberto')
+    .in('status', ['aberto', 'pago'])
+    .is('extrato_transacao_id', null)
     .gte('valor_total', somaAbs - TOLERANCIA_JUROS)
     .lte('valor_total', somaAbs + TOLERANCIA_JUROS)
 
@@ -277,7 +282,7 @@ export async function sugerirCorrespondenciasPorSoma(
   const candidatos: CandidatoConciliacao[] = (lancamentos || []).map((l: FinanceiroLancamento) => ({
     lancamento: l,
     confianca: classificarConfianca(dataReferencia, null, l),
-    jaPago: false, // esta variante (soma/grupo) continua só 'aberto' nesta rodada
+    jaPago: l.status === 'pago',
   }))
 
   // Dentro de cada nível de confiança, prioriza o candidato cujo valor mais
@@ -372,6 +377,11 @@ export async function confirmarConciliacaoJaPago(
  * relação inversa (financeiro_extrato_transacoes.lancamento_id, que várias
  * linhas podem compartilhar) é a fonte da verdade de quais transações
  * pagaram este lançamento.
+ *
+ * candidato.jaPago (lançamento pago por outro caminho, ver
+ * sugerirCorrespondenciasPorSoma) só vincula as transações — nunca mexe em
+ * status/data_pagamento do lançamento, que já estão corretos. Mesma regra
+ * de confirmarConciliacaoJaPago, aplicada aqui pro caso de grupo.
  */
 export async function confirmarConciliacaoGrupo(
   transacaoIds: string[],
@@ -392,6 +402,8 @@ export async function confirmarConciliacaoGrupo(
   if (!atualizadas || atualizadas.length !== transacaoIds.length) {
     throw new Error('Uma ou mais transações já foram conciliadas em outra sessão — atualize a tela e tente de novo.')
   }
+
+  if (candidato.jaPago) return
 
   const { data: lancAtualizado, error: erroLancamento } = await supabase
     .from('financeiro_lancamentos')

@@ -85,7 +85,7 @@ export default function ConciliarGrupoModal({ transacoes, onClose, onResolvido }
           </div>
         ) : candidatos.length === 0 ? (
           <p className="text-sm text-gray-500 py-4">
-            Nenhuma despesa em aberto bate com essa soma. Confira se selecionou todas as parcelas do lançamento, ou ajuste a seleção.
+            Nenhuma despesa (aberta ou já paga) bate com essa soma. Confira se selecionou todas as parcelas do lançamento, ou ajuste a seleção.
           </p>
         ) : (
           <div className="space-y-2">
@@ -106,6 +106,11 @@ export default function ConciliarGrupoModal({ transacoes, onClose, onResolvido }
                         {TIPO_LANCAMENTO_LABEL[l.tipo]}
                         {l.parcela_num && l.parcela_total ? ` · parcela ${l.parcela_num}/${l.parcela_total}` : ''}
                       </span>
+                      {c.jaPago && (
+                        <span className="inline-block mt-1 ml-1 text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-semibold">
+                          Já pago no sistema — só vincular
+                        </span>
+                      )}
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${conf.color}`}>{conf.label}</span>
                   </div>
@@ -121,7 +126,7 @@ export default function ConciliarGrupoModal({ transacoes, onClose, onResolvido }
                     disabled={processando}
                     className="w-full bg-green-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    <CheckCircle size={16} /> Confirmar este
+                    <CheckCircle size={16} /> {c.jaPago ? 'Vincular a este' : 'Confirmar este'}
                   </button>
                 </div>
               )

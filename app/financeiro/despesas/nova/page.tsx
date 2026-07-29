@@ -9,7 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { FinanceiroParte, FinanceiroConta, UnidadeFinanceiro, FormaPagamento, CondicaoPagamento } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
-import { calcularVencimento, formatarDocumento, hojeISO, somarMeses } from '@/lib/financeiro-utils'
+import { calcularVencimento, diferencaEmMeses, formatarDocumento, hojeISO, somarMeses } from '@/lib/financeiro-utils'
 import { vincularTransacaoCriada } from '@/lib/financeiro-reconciliacao'
 
 function NovaDespesaForm() {
@@ -48,7 +48,7 @@ function NovaDespesaForm() {
   const [dataVencimento, setDataVencimento] = useState(hojeISO())
   const [parcelas, setParcelas] = useState(1)
   const [recorrente, setRecorrente] = useState(false)
-  const [competenciaDeslocamentoMeses, setCompetenciaDeslocamentoMeses] = useState(0)
+  const [dataFimRecorrencia, setDataFimRecorrencia] = useState('')
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -116,6 +116,10 @@ function NovaDespesaForm() {
       if (recorrente && podeRecorrencia) {
         const [anoV, mesV, diaV] = dataVencimento.split('-').map(Number)
         const diaVencimento = Math.min(diaV, 28)
+        // Competência deriva das duas datas já preenchidas, não é mais
+        // escolhida à parte — ex: lançamento 30/06, vencimento 05/07 -> 1
+        // ("mês anterior"), igual ao que antes era um seletor manual.
+        const competenciaDeslocamentoMeses = Math.max(0, Math.min(2, diferencaEmMeses(dataLancamento, dataVencimento)))
         const { data: rec, error: erroRec } = await supabase
           .from('financeiro_recorrencias')
           .insert({
@@ -128,6 +132,8 @@ function NovaDespesaForm() {
             conta_id: contaId,
             ativa: true,
             competencia_deslocamento_meses: competenciaDeslocamentoMeses,
+            data_inicio: dataVencimento,
+            data_fim: dataFimRecorrencia || null,
             // O lançamento deste mês é criado abaixo; a recorrência começa no mês seguinte.
             proxima_data: `${mesV === 12 ? anoV + 1 : anoV}-${String((mesV % 12) + 1).padStart(2, '0')}-${String(diaVencimento).padStart(2, '0')}`,
             criado_por: usuario.id,
@@ -414,29 +420,15 @@ function NovaDespesaForm() {
 
             {podeRecorrencia && recorrente && (
               <div className="pl-3">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Competência</label>
-                <div className="flex gap-2">
-                  {[
-                    { valor: 0, label: 'Mesmo mês' },
-                    { valor: 1, label: 'Mês anterior' },
-                    { valor: 2, label: '2 meses antes' },
-                  ].map((op) => (
-                    <button
-                      key={op.valor}
-                      type="button"
-                      onClick={() => setCompetenciaDeslocamentoMeses(op.valor)}
-                      className={`flex-1 px-3 py-2 rounded-lg border-2 text-xs font-semibold ${
-                        competenciaDeslocamentoMeses === op.valor
-                          ? 'border-purple-500 bg-purple-500 text-white'
-                          : 'border-gray-200 bg-white text-gray-700'
-                      }`}
-                    >
-                      {op.label}
-                    </button>
-                  ))}
-                </div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Repetir até (opcional)</label>
+                <input
+                  type="date"
+                  value={dataFimRecorrencia}
+                  onChange={(e) => setDataFimRecorrencia(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                />
                 <p className="text-xs text-gray-400 mt-1">
-                  Ex: salário/aluguel de julho pago em agosto = "Mês anterior". Afeta só o DRE, não o fluxo de caixa.
+                  Deixe vazio pra repetir indefinidamente. A competência (pro DRE) é calculada sozinha a partir da Data da despesa e do Vencimento.
                 </p>
               </div>
             )}

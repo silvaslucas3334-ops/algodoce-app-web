@@ -10,7 +10,7 @@ import { Loader, CheckCircle, XCircle, ShoppingCart, ReceiptText, Pencil, Plus, 
 import { FinanceiroConta, FinanceiroLancamentoItem, FinanceiroParte, FinanceiroMateriaPrima } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL, CONDICAO_PAGAMENTO_LABEL, TIPO_LANCAMENTO_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
-import { formatarDocumento, hojeISO, statusExibicao } from '@/lib/financeiro-utils'
+import { formatarDocumento, hojeISO, statusExibicao, somarMeses } from '@/lib/financeiro-utils'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
 
 function itemParaItemNota(item: FinanceiroLancamentoItem): ItemNota {
@@ -48,6 +48,15 @@ export default function DetalheDespesaPage() {
   // Edição/adição de item da nota (admin)
   const [itemEditando, setItemEditando] = useState<FinanceiroLancamentoItem | null>(null)
   const [adicionandoItem, setAdicionandoItem] = useState(false)
+
+  // Transformar lançamento único em N parcelas (admin)
+  const [parcelando, setParcelando] = useState(false)
+  const [novasParcelas, setNovasParcelas] = useState(2)
+  const [salvandoParcelas, setSalvandoParcelas] = useState(false)
+
+  // Posição deste lançamento entre as ocorrências já geradas da mesma
+  // recorrência (ex: 2/3) — o total cresce com o tempo, não é um total fixo.
+  const [posicaoRecorrencia, setPosicaoRecorrencia] = useState<{ atual: number; total: number } | null>(null)
 
   useEffect(() => {
     carregar()
@@ -95,6 +104,18 @@ export default function DetalheDespesaPage() {
       .single()
     if (error) console.error('Erro:', error)
     setLancamento(data)
+
+    if (data?.recorrencia_id) {
+      const { data: ocorrencias } = await supabase
+        .from('financeiro_lancamentos')
+        .select('id')
+        .eq('recorrencia_id', data.recorrencia_id)
+        .order('data_vencimento')
+      const indice = (ocorrencias || []).findIndex((o: any) => o.id === lancamentoId)
+      setPosicaoRecorrencia(indice >= 0 ? { atual: indice + 1, total: (ocorrencias || []).length } : null)
+    } else {
+      setPosicaoRecorrencia(null)
+    }
 
     if (data?.tipo === 'compra_insumos') {
       const { data: itensData } = await supabase
@@ -185,10 +206,15 @@ export default function DetalheDespesaPage() {
       condicao_pagamento: lancamento.condicao_pagamento || 'a_vista',
       unidade: lancamento.unidade,
       valor_total: lancamento.valor_total,
+      ja_pago: lancamento.status === 'pago',
     })
     setErro('')
     setEditando(true)
   }
+
+  // Status (pago/aberto) só é controlado aqui quando o lançamento não está
+  // cancelado — registro cancelado é congelado, edição só mexe no cabeçalho.
+  const podeControlarStatusNaEdicao = lancamento?.status !== 'cancelado'
 
   async function salvarEdicao() {
     if (!lancamento || !formEdicao) return
@@ -196,6 +222,18 @@ export default function DetalheDespesaPage() {
       setErro('Preencha fornecedor/beneficiário, data de lançamento e vencimento.')
       return
     }
+
+    const statusEraPago = lancamento.status === 'pago'
+    const novoJaPago = podeControlarStatusNaEdicao ? !!formEdicao.ja_pago : statusEraPago
+    if (podeControlarStatusNaEdicao && novoJaPago && !formEdicao.data_pagamento) {
+      setErro('Informe a data de pagamento.')
+      return
+    }
+    if (podeControlarStatusNaEdicao && statusEraPago && !novoJaPago && lancamento.extrato_transacao_id) {
+      setErro('Esta despesa já está vinculada a uma transação do extrato — desfaça a conciliação antes de marcar como aberta de novo.')
+      return
+    }
+
     setProcessando(true)
     setErro('')
     try {
@@ -204,11 +242,14 @@ export default function DetalheDespesaPage() {
         numero_documento: formEdicao.numero_documento.trim() || null,
         data_lancamento: formEdicao.data_lancamento,
         data_vencimento: formEdicao.data_vencimento,
-        data_pagamento: formEdicao.data_pagamento || null,
         forma_pagamento: formEdicao.forma_pagamento || null,
         condicao_pagamento: formEdicao.condicao_pagamento || null,
         unidade: formEdicao.unidade,
         updated_at: new Date().toISOString(),
+      }
+      if (podeControlarStatusNaEdicao) {
+        payload.status = novoJaPago ? 'pago' : 'aberto'
+        payload.data_pagamento = novoJaPago ? formEdicao.data_pagamento : null
       }
       // Em compra_insumos o total é sempre a soma dos itens — nunca editável direto aqui.
       if (lancamento.tipo === 'despesa') payload.valor_total = Number(formEdicao.valor_total)
@@ -221,6 +262,80 @@ export default function DetalheDespesaPage() {
       setErro('Erro ao salvar: ' + (err?.message || 'desconhecido'))
     } finally {
       setProcessando(false)
+    }
+  }
+
+  // Escopo restrito de propósito: só 1x -> Nx. Reparcelar um grupo que já é
+  // parcelado fica de fora — a lógica de "achar as outras parcelas e
+  // renumerar" é bem mais arriscada e não é o caso pedido.
+  const podeParcelar =
+    ehAdmin &&
+    lancamento?.status === 'aberto' &&
+    !lancamento?.extrato_transacao_id &&
+    (!lancamento?.parcela_total || lancamento.parcela_total === 1)
+
+  async function confirmarParcelamento() {
+    if (!lancamento || !usuario) return
+    setSalvandoParcelas(true)
+    setErro('')
+    try {
+      const n = novasParcelas
+      const valorParcela = Math.round((lancamento.valor_total / n) * 100) / 100
+      const valorUltima = Math.round((lancamento.valor_total - valorParcela * (n - 1)) * 100) / 100
+      const grupo = crypto.randomUUID()
+      const descricaoBase = lancamento.descricao
+
+      // Vira parcela 1/N no mesmo id — itens da nota (se houver) continuam
+      // apontando pra cá, sem efeito colateral no CMV/DRE.
+      const { data: atualizado, error: erroAtual } = await supabase
+        .from('financeiro_lancamentos')
+        .update({
+          descricao: `${descricaoBase} (1/${n})`,
+          valor_total: valorParcela,
+          parcela_num: 1,
+          parcela_total: n,
+          grupo_parcelamento: grupo,
+          condicao_pagamento: 'a_prazo',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', lancamentoId)
+        .eq('status', 'aberto')
+        .select('id')
+      if (erroAtual) throw erroAtual
+      if (!atualizado || atualizado.length === 0) throw new Error('Este lançamento mudou de status em outra sessão — atualize a tela.')
+
+      // data_competencia igual em todas as parcelas (mesmo padrão da criação
+      // em despesas/nova e compras/nova) — parcelar não pode espalhar o
+      // reconhecimento da despesa no DRE por vários meses, só o pagamento.
+      const linhas = Array.from({ length: n - 1 }, (_, i) => ({
+        tipo: lancamento.tipo,
+        parte_id: lancamento.parte_id,
+        descricao: `${descricaoBase} (${i + 2}/${n})`,
+        valor_total: i === n - 2 ? valorUltima : valorParcela,
+        numero_documento: lancamento.numero_documento || null,
+        data_lancamento: lancamento.data_lancamento,
+        data_competencia: lancamento.data_competencia,
+        data_vencimento: somarMeses(lancamento.data_vencimento, i + 1),
+        data_pagamento: null,
+        status: 'aberto',
+        forma_pagamento: lancamento.forma_pagamento || null,
+        condicao_pagamento: 'a_prazo',
+        parcela_num: i + 2,
+        parcela_total: n,
+        grupo_parcelamento: grupo,
+        unidade: lancamento.unidade,
+        conta_id: lancamento.tipo === 'despesa' ? lancamento.conta_id : null,
+        criado_por: usuario.id,
+      }))
+      const { error: erroNovas } = await supabase.from('financeiro_lancamentos').insert(linhas)
+      if (erroNovas) throw erroNovas
+
+      setParcelando(false)
+      await carregar()
+    } catch (err: any) {
+      setErro('Erro ao parcelar: ' + (err?.message || 'desconhecido'))
+    } finally {
+      setSalvandoParcelas(false)
     }
   }
 
@@ -392,7 +507,17 @@ export default function DetalheDespesaPage() {
                   <div className="flex justify-between"><span className="text-gray-500">Documento</span><span className="text-gray-800">{lancamento.numero_documento}</span></div>
                 )}
                 {lancamento.recorrencia_id && (
-                  <div className="flex justify-between"><span className="text-gray-500">Origem</span><span className="text-purple-700">🔄 Despesa recorrente</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Origem</span>
+                    <span className="text-purple-700">
+                      🔄 Despesa recorrente{posicaoRecorrencia && ` · ${posicaoRecorrencia.atual}/${posicaoRecorrencia.total}`}
+                    </span>
+                  </div>
+                )}
+                {lancamento.recorrencia_id && posicaoRecorrencia && posicaoRecorrencia.total > 1 && (
+                  <p className="text-[11px] text-amber-600 -mt-1.5">
+                    Editar este lançamento não afeta as outras {posicaoRecorrencia.total - 1} ocorrência(s) desta recorrência.
+                  </p>
                 )}
               </>
             ) : (
@@ -448,15 +573,48 @@ export default function DetalheDespesaPage() {
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Pago em (vazio = ainda não pagou)</label>
-                  <input
-                    type="date"
-                    value={formEdicao.data_pagamento}
-                    onChange={(e) => setFormEdicao({ ...formEdicao, data_pagamento: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
-                  />
-                </div>
+                {podeControlarStatusNaEdicao && (
+                  <div>
+                    <div className="flex gap-2 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => setFormEdicao({ ...formEdicao, ja_pago: false })}
+                        className={`flex-1 px-3 py-2 rounded-lg border-2 text-xs font-semibold ${
+                          !formEdicao.ja_pago ? 'border-amber-500 bg-amber-500 text-white' : 'border-gray-200 bg-white text-gray-700'
+                        }`}
+                      >
+                        Em aberto
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormEdicao({ ...formEdicao, ja_pago: true, data_pagamento: formEdicao.data_pagamento || hojeISO() })
+                        }
+                        className={`flex-1 px-3 py-2 rounded-lg border-2 text-xs font-semibold ${
+                          formEdicao.ja_pago ? 'border-green-600 bg-green-600 text-white' : 'border-gray-200 bg-white text-gray-700'
+                        }`}
+                      >
+                        Já foi paga
+                      </button>
+                    </div>
+                    {formEdicao.ja_pago && (
+                      <>
+                        <label className="block text-xs text-gray-500 mb-1">Pago em</label>
+                        <input
+                          type="date"
+                          value={formEdicao.data_pagamento}
+                          onChange={(e) => setFormEdicao({ ...formEdicao, data_pagamento: e.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                        />
+                      </>
+                    )}
+                    {lancamento.status === 'pago' && !formEdicao.ja_pago && lancamento.extrato_transacao_id && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        Vinculada a uma transação do extrato — desfaça a conciliação antes de reabrir.
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Forma de pagamento</label>
@@ -531,6 +689,54 @@ export default function DetalheDespesaPage() {
               </div>
             )}
           </div>
+
+          {podeParcelar && (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+              {!parcelando ? (
+                <button
+                  onClick={() => setParcelando(true)}
+                  className="text-sm font-semibold text-pink-700 hover:text-pink-800"
+                >
+                  Alterar parcelamento
+                </button>
+              ) : (
+                <div className="space-y-3">
+                  <h2 className="font-semibold text-gray-800">Alterar parcelamento</h2>
+                  <p className="text-xs text-gray-500">
+                    Transforma este lançamento único em parcelas — o valor total é dividido igualmente (a última parcela absorve o arredondamento).
+                  </p>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Nº de parcelas</label>
+                    <select
+                      value={novasParcelas}
+                      onChange={(e) => setNovasParcelas(Number(e.target.value))}
+                      className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white"
+                    >
+                      {[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
+                        <option key={n} value={n}>{n}x de {formatBRL(lancamento.valor_total / n)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={confirmarParcelamento}
+                      disabled={salvandoParcelas}
+                      className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50"
+                    >
+                      {salvandoParcelas ? 'Salvando...' : `Confirmar ${novasParcelas}x`}
+                    </button>
+                    <button
+                      onClick={() => setParcelando(false)}
+                      disabled={salvandoParcelas}
+                      className="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2 text-sm font-semibold disabled:opacity-50"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {lancamento.tipo === 'compra_insumos' && (
             <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">

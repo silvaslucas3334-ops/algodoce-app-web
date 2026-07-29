@@ -356,6 +356,8 @@ export interface FinanceiroRecorrencia {
   competencia_deslocamento_meses: number // 0..2 — meses que a competência fica atrás do mês gerado (salário/aluguel pagos depois de usados = 1)
   ativa: boolean
   proxima_data: string
+  data_inicio: string
+  data_fim?: string // null = sem fim definido
   criado_por: string
   created_at: string
   updated_at: string

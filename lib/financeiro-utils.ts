@@ -67,6 +67,18 @@ export function somarMeses(dataISO: string, meses: number): string {
 }
 
 /**
+ * Diferença em meses entre dois ISO dates (mês de b - mês de a), ignorando o
+ * dia. Usada pra derivar a competência de uma recorrência a partir das datas
+ * de lançamento/vencimento já preenchidas, em vez de pedir pro usuário
+ * escolher à parte (ex: lançamento 30/06, vencimento 05/07 -> 1).
+ */
+export function diferencaEmMeses(dataA: string, dataB: string): number {
+  const [anoA, mesA] = dataA.split('-').map(Number)
+  const [anoB, mesB] = dataB.split('-').map(Number)
+  return (anoB - anoA) * 12 + (mesB - mesA)
+}
+
+/**
  * Vencimento a partir da condição de pagamento do cadastro:
  * à vista = a própria data da compra; a prazo = data + prazo em dias (7/15/30).
  */

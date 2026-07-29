@@ -177,6 +177,11 @@ CREATE TABLE IF NOT EXISTS financeiro_recorrencias (
   competencia_deslocamento_meses INT NOT NULL DEFAULT 0 CHECK (competencia_deslocamento_meses BETWEEN 0 AND 2),
   ativa BOOLEAN NOT NULL DEFAULT true,
   proxima_data DATE NOT NULL,
+  -- Início/fim da recorrência: fim opcional (NULL = sem fim definido, gera
+  -- indefinidamente enquanto ativa). Guiam gerar_lancamentos_recorrentes()
+  -- pra nunca gerar além do previsto.
+  data_inicio DATE NOT NULL DEFAULT CURRENT_DATE,
+  data_fim DATE,
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -486,31 +491,55 @@ CREATE POLICY financeiro_ofx_contas_conhecidas_delete_blocked ON financeiro_ofx_
 -- ============================================================
 -- 10. Geração automática das despesas recorrentes (pg_cron)
 -- ============================================================
-CREATE OR REPLACE FUNCTION gerar_lancamentos_recorrentes() RETURNS void AS $$
+-- Mudou de RETURNS void pra RETURNS INT (quantas despesas foram criadas) —
+-- exige DROP antes do CREATE (Postgres não deixa REPLACE mudar tipo de retorno).
+DROP FUNCTION IF EXISTS gerar_lancamentos_recorrentes();
+CREATE FUNCTION gerar_lancamentos_recorrentes() RETURNS INT AS $$
 DECLARE
   rec RECORD;
   hoje_sp DATE;
+  prox DATE;
+  guarda INT;
+  criadas INT := 0;
 BEGIN
   hoje_sp := (now() AT TIME ZONE 'America/Sao_Paulo')::date;
   FOR rec IN
     SELECT * FROM financeiro_recorrencias WHERE ativa AND proxima_data <= hoje_sp
   LOOP
-    INSERT INTO financeiro_lancamentos (
-      tipo, parte_id, descricao, valor_total, data_lancamento, data_vencimento, data_competencia,
-      status, forma_pagamento, condicao_pagamento, unidade, conta_id,
-      recorrencia_id, criado_por
-    ) VALUES (
-      'despesa', rec.parte_id, rec.descricao, rec.valor, rec.proxima_data, rec.proxima_data,
-      (date_trunc('month', rec.proxima_data) - (rec.competencia_deslocamento_meses || ' months')::interval)::date,
-      'aberto', rec.forma_pagamento, 'a_vista', rec.unidade, rec.conta_id,
-      rec.id, rec.criado_por
-    );
+    prox := rec.proxima_data;
+    guarda := 0;
+
+    -- Laço com trava (guarda < 60 = 5 anos de teto): sem isso, uma
+    -- recorrência esquecida por meses só alcançaria o mês atual rodando o
+    -- cron um dia de cada vez. Com o laço, uma chamada só já coloca em dia
+    -- (respeitando data_fim, nunca gera além do previsto).
+    WHILE prox <= hoje_sp AND (rec.data_fim IS NULL OR prox <= rec.data_fim) AND guarda < 60 LOOP
+      guarda := guarda + 1;
+
+      INSERT INTO financeiro_lancamentos (
+        tipo, parte_id, descricao, valor_total, data_lancamento, data_vencimento, data_competencia,
+        status, forma_pagamento, condicao_pagamento, unidade, conta_id,
+        recorrencia_id, criado_por
+      ) VALUES (
+        'despesa', rec.parte_id, rec.descricao, rec.valor, prox, prox,
+        (date_trunc('month', prox) - (rec.competencia_deslocamento_meses || ' months')::interval)::date,
+        'aberto', rec.forma_pagamento, 'a_vista', rec.unidade, rec.conta_id,
+        rec.id, rec.criado_por
+      );
+      criadas := criadas + 1;
+
+      prox := (date_trunc('month', prox) + INTERVAL '1 month' + (rec.dia_vencimento - 1) * INTERVAL '1 day')::date;
+    END LOOP;
 
     UPDATE financeiro_recorrencias
-    SET proxima_data = (date_trunc('month', rec.proxima_data) + INTERVAL '1 month' + (rec.dia_vencimento - 1) * INTERVAL '1 day')::date,
+    SET proxima_data = prox,
+        -- Desativa sozinha quando passa do fim definido — não fica gerando pra sempre por engano.
+        ativa = NOT (rec.data_fim IS NOT NULL AND prox > rec.data_fim),
         updated_at = now()
     WHERE id = rec.id;
   END LOOP;
+
+  RETURN criadas;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
