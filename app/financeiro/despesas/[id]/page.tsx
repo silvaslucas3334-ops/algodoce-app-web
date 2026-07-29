@@ -117,6 +117,7 @@ export default function DetalheDespesaPage() {
 
   async function marcarPago() {
     if (!lancamento) return
+    if (!window.confirm(`Marcar "${lancamento.descricao}" como paga hoje?`)) return
     setProcessando(true)
     setErro('')
     try {
@@ -584,7 +585,7 @@ export default function DetalheDespesaPage() {
             </div>
           )}
 
-          {podeEditar && lancamento.status !== 'cancelado' && (
+          {podeEditar && !editando && lancamento.status !== 'cancelado' && (
             <div className="flex gap-3">
               <button
                 onClick={cancelar}
