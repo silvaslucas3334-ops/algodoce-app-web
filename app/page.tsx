@@ -95,6 +95,32 @@ function DashboardContent() {
           setTarefasCozinha(tarefasData || [])
         }
 
+        // Estoque para COZINHA (o que está na própria cozinha, aguardando expedição)
+        if (usuario?.role === 'cozinha') {
+          const [{ count: totalEstoque }, { count: vencendo }] = await Promise.all([
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .eq('status', 'na_cozinha'),
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .eq('status', 'na_cozinha')
+              .lte('data_validade', em7dias)
+              .gte('data_validade', hoje),
+          ])
+          setStats((prev: any) => ({ ...prev, totalEstoque: totalEstoque || 0, vencendo: vencendo || 0 }))
+        }
+
+        // Estoque para ADMIN (visão geral, cozinha + todas as lojas)
+        if (usuario?.role === 'admin') {
+          const [{ count: totalEstoque }, { count: vencendo }] = await Promise.all([
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .in('status', ['na_loja', 'na_cozinha']),
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .in('status', ['na_loja', 'na_cozinha'])
+              .lte('data_validade', em7dias)
+              .gte('data_validade', hoje),
+          ])
+          setStats((prev: any) => ({ ...prev, totalEstoque: totalEstoque || 0, vencendo: vencendo || 0 }))
+        }
+
         setLoading(false)
       } catch (err) {
         console.error('Erro ao carregar dashboard:', err)
@@ -203,6 +229,32 @@ function DashboardContent() {
             setTarefasCozinha(tarefasRes.data || [])
           })
         }
+
+        if (usuario?.role === 'cozinha') {
+          Promise.all([
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .eq('status', 'na_cozinha'),
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .eq('status', 'na_cozinha')
+              .lte('data_validade', em7dias)
+              .gte('data_validade', hoje),
+          ]).then(([e1, e2]) => {
+            setStats((prev: any) => ({ ...prev, totalEstoque: e1.count || 0, vencendo: e2.count || 0 }))
+          })
+        }
+
+        if (usuario?.role === 'admin') {
+          Promise.all([
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .in('status', ['na_loja', 'na_cozinha']),
+            supabase.from('lotes_producao').select('id', { count: 'exact', head: true })
+              .in('status', ['na_loja', 'na_cozinha'])
+              .lte('data_validade', em7dias)
+              .gte('data_validade', hoje),
+          ]).then(([e1, e2]) => {
+            setStats((prev: any) => ({ ...prev, totalEstoque: e1.count || 0, vencendo: e2.count || 0 }))
+          })
+        }
       }
     }
 
@@ -274,8 +326,8 @@ function DashboardContent() {
             </div>
           </div>
 
-          {/* Indicadores Críticos (Atrasados) */}
-          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0) && (
+          {/* Indicadores Críticos (Atrasados/Vencendo) */}
+          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0 || stats.vencendo > 0) && (
             <div className="mb-8 space-y-3">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Atenção Necessária</h2>
 
@@ -303,6 +355,20 @@ function DashboardContent() {
                       <p className="text-sm text-orange-600 mt-1">Tarefas vencidas</p>
                     </div>
                     <span className="bg-orange-200 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">{tarefasAtrasadas.length}</span>
+                  </div>
+                </Link>
+              )}
+
+              {stats.vencendo > 0 && (
+                <Link href="/estoque" className="bg-orange-50 border border-orange-200 rounded-lg p-4 hover:bg-orange-100 transition-all block">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-orange-700 flex items-center gap-2">
+                        <AlertTriangle size={18} /> Vencimento Próximo
+                      </p>
+                      <p className="text-sm text-orange-600 mt-1">Itens com validade em 7 dias</p>
+                    </div>
+                    <span className="bg-orange-200 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">{stats.vencendo}</span>
                   </div>
                 </Link>
               )}
@@ -353,16 +419,26 @@ function DashboardContent() {
                 <p className="text-2xl font-bold text-gray-800">{tarefasHoje.length}</p>
                 <p className="text-xs text-gray-600 mt-1">Tarefa(s) do dia</p>
               </Link>
-            </div>
 
-            {/* Total de Ordens */}
-            <div className="bg-white border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <AlertTriangle size={20} className="text-purple-600" />
-                <span className="text-xs text-gray-500">Total</span>
+              {/* Estoque Total */}
+              <Link href="/estoque" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <Package size={20} className="text-green-600" />
+                  <span className="text-xs text-gray-500">Total</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{stats.totalEstoque || 0}</p>
+                <p className="text-xs text-gray-600 mt-1">Itens em estoque</p>
+              </Link>
+
+              {/* Total de Ordens */}
+              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <AlertTriangle size={20} className="text-purple-600" />
+                  <span className="text-xs text-gray-500">Total</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{ordens.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Ordem(ns) no sistema</p>
               </div>
-              <p className="text-2xl font-bold text-gray-800">{ordens.length}</p>
-              <p className="text-xs text-gray-600 mt-1">Ordem(ns) no sistema</p>
             </div>
           </div>
 
@@ -435,8 +511,8 @@ function DashboardContent() {
             </div>
           </div>
 
-          {/* Indicadores Críticos (Atrasados) */}
-          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0) && (
+          {/* Indicadores Críticos (Atrasados/Vencendo) */}
+          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0 || stats.vencendo > 0) && (
             <div className="mb-8 space-y-3">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Atenção Necessária</h2>
 
@@ -464,6 +540,20 @@ function DashboardContent() {
                       <p className="text-sm text-orange-600 mt-1">Tarefas vencidas</p>
                     </div>
                     <span className="bg-orange-200 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">{tarefasAtrasadas.length}</span>
+                  </div>
+                </Link>
+              )}
+
+              {stats.vencendo > 0 && (
+                <Link href="/estoque" className="bg-orange-50 border border-orange-200 rounded-lg p-4 hover:bg-orange-100 transition-all block">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-orange-700 flex items-center gap-2">
+                        <AlertTriangle size={18} /> Vencimento Próximo
+                      </p>
+                      <p className="text-sm text-orange-600 mt-1">Itens com validade em 7 dias</p>
+                    </div>
+                    <span className="bg-orange-200 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">{stats.vencendo}</span>
                   </div>
                 </Link>
               )}
@@ -514,16 +604,26 @@ function DashboardContent() {
                 <p className="text-2xl font-bold text-gray-800">{tarefasHoje.length}</p>
                 <p className="text-xs text-gray-600 mt-1">Tarefa(s) do dia</p>
               </Link>
-            </div>
 
-            {/* Total de Ordens */}
-            <div className="bg-white border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <TrendingUp size={20} className="text-purple-600" />
-                <span className="text-xs text-gray-500">Total</span>
+              {/* Estoque na Cozinha */}
+              <Link href="/estoque" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <Package size={20} className="text-cyan-600" />
+                  <span className="text-xs text-gray-500">Total</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{stats.totalEstoque || 0}</p>
+                <p className="text-xs text-gray-600 mt-1">Itens em estoque</p>
+              </Link>
+
+              {/* Total de Ordens */}
+              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <TrendingUp size={20} className="text-purple-600" />
+                  <span className="text-xs text-gray-500">Total</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">{ordens.length}</p>
+                <p className="text-xs text-gray-600 mt-1">Ordem(ns) no sistema</p>
               </div>
-              <p className="text-2xl font-bold text-gray-800">{ordens.length}</p>
-              <p className="text-xs text-gray-600 mt-1">Ordem(ns) no sistema</p>
             </div>
           </div>
 

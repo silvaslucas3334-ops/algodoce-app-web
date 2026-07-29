@@ -43,6 +43,14 @@ export default function EstoquePage() {
   const [buscaEtiqueta, setBuscaEtiqueta] = useState('')
   const [resultadoBusca, setResultadoBusca] = useState<any[] | null>(null)
   const [buscandoEtiqueta, setBuscandoEtiqueta] = useState(false)
+  const [mostrarCiclo, setMostrarCiclo] = useState(false)
+  const [cicloInicio, setCicloInicio] = useState(() => {
+    const d = new Date()
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]
+  })
+  const [cicloFim, setCicloFim] = useState(() => new Date().toISOString().split('T')[0])
+  const [cicloData, setCicloData] = useState<any[]>([])
+  const [carregandoCiclo, setCarregandoCiclo] = useState(false)
 
   // Sincronizar local quando usuário muda
   useEffect(() => {
@@ -68,6 +76,11 @@ export default function EstoquePage() {
     return () => { channel.unsubscribe() }
   }, [local])
 
+  useEffect(() => {
+    if (mostrarCiclo) carregarCicloEstoque()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mostrarCiclo, local, cicloInicio, cicloFim])
+
   async function carregarEstoque() {
     setLoading(true)
     setCarrinho([])
@@ -87,10 +100,7 @@ export default function EstoquePage() {
 
     const { data, error } = await query.order('data_validade')
 
-    console.log('Estoque carregado:', { local, quantidade: data?.length, error })
-    if (data && data.length > 0) {
-      console.log('Lotes recebidos:', JSON.stringify(data.map(l => ({ id: l.id, status: l.status, destino: l.destino }))))
-    }
+    if (error) console.error('Erro ao carregar estoque:', error)
     setLotes(data || [])
 
     // Para usuários de loja, carregar pendentes de recebimento
@@ -147,7 +157,6 @@ export default function EstoquePage() {
   }, {} as Record<string, any>)
 
   const lotesAgrupList = Object.values(lotesAgrupados)
-  console.log('Lotes agrupados:', lotesAgrupList)
 
   function toggleCarrinho(loteId: string) {
     setCarrinho(prev => {
@@ -365,6 +374,74 @@ export default function EstoquePage() {
     reversoes?.forEach((r: any) => revertidoPorBaixa.set(r.estornado_de, r))
 
     return baixas.map((b) => ({ ...b, reversao: revertidoPorBaixa.get(b.id) || null }))
+  }
+
+  // Ciclo de estoque (entrada×saída) da própria unidade, no período — sem somar entre unidades
+  async function carregarCicloEstoque() {
+    setCarregandoCiclo(true)
+    try {
+      const inicioIso = `${cicloInicio}T00:00:00`
+      const fimIso = `${cicloFim}T23:59:59`
+
+      const [{ data: produzidos }, { data: consumidos }] = await Promise.all([
+        supabase
+          .from('lotes_producao')
+          .select('quantidade, peso_gramas, produto:produtos(nome, unidade_medida)')
+          .eq('destino', local)
+          .gte('created_at', inicioIso)
+          .lte('created_at', fimIso),
+        supabase
+          .from('movimentacoes_estoque')
+          .select('id, quantidade, estornado_de, lote:lotes_producao(produto:produtos(nome, unidade_medida))')
+          .eq('tipo', 'saida')
+          .eq('local_origem', local)
+          .gte('created_at', inicioIso)
+          .lte('created_at', fimIso),
+      ])
+
+      // Baixas revertidas não contam como consumo real
+      const idsConsumidos = (consumidos || []).map((c: any) => c.id)
+      const revertidas = new Set<string>()
+      if (idsConsumidos.length > 0) {
+        const { data: reversoes } = await supabase
+          .from('movimentacoes_estoque')
+          .select('estornado_de')
+          .in('estornado_de', idsConsumidos)
+        reversoes?.forEach((r: any) => revertidas.add(r.estornado_de))
+      }
+
+      const porProduto = new Map<string, any>()
+      const getOrCriar = (nome: string, unidade_medida: string) => {
+        if (!porProduto.has(nome)) {
+          porProduto.set(nome, { produto: nome, unidade_medida, produzido: 0, consumido: 0 })
+        }
+        return porProduto.get(nome)
+      }
+
+      ;(produzidos || []).forEach((l: any) => {
+        const nome = l.produto?.nome || 'Desconhecido'
+        const item = getOrCriar(nome, l.produto?.unidade_medida || 'un')
+        item.produzido += l.quantidade || l.peso_gramas || 0
+      })
+
+      ;(consumidos || [])
+        .filter((c: any) => !revertidas.has(c.id))
+        .forEach((c: any) => {
+          const nome = c.lote?.produto?.nome || 'Desconhecido'
+          const item = getOrCriar(nome, c.lote?.produto?.unidade_medida || 'un')
+          item.consumido += c.quantidade || 0
+        })
+
+      const resultado = Array.from(porProduto.values())
+        .map((c) => ({ ...c, diferenca: c.produzido - c.consumido }))
+        .sort((a, b) => a.produto.localeCompare(b.produto))
+
+      setCicloData(resultado)
+    } catch (err) {
+      console.error('Erro ao carregar ciclo de estoque:', err)
+    } finally {
+      setCarregandoCiclo(false)
+    }
   }
 
   async function buscarPorEtiqueta() {
@@ -733,6 +810,79 @@ export default function EstoquePage() {
             </div>
           </div>
 
+          {/* CICLO DE ESTOQUE (entrada x saída) por período, só da unidade atual */}
+          <div className="mb-6">
+            <div className="bg-white rounded-lg border border-gray-200">
+              <button
+                onClick={() => setMostrarCiclo(!mostrarCiclo)}
+                className="w-full flex items-center justify-between gap-2 p-4 hover:bg-gray-50"
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                  🔄 Ciclo de estoque (entrada × saída) — {LOCAL_LABEL[local]}
+                </span>
+                <span className="text-xs text-gray-500">{mostrarCiclo ? 'Ocultar' : 'Ver'}</span>
+              </button>
+
+              {mostrarCiclo && (
+                <div className="border-t border-gray-200 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="date"
+                      value={cicloInicio}
+                      onChange={(e) => setCicloInicio(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                    />
+                    <span className="text-gray-400 text-sm">até</span>
+                    <input
+                      type="date"
+                      value={cicloFim}
+                      onChange={(e) => setCicloFim(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Produzido = lotes gerados para {LOCAL_LABEL[local]} no período. Consumido = baixas não revertidas. Diferença negativa indica que se consumiu mais do que foi produzido no recorte (pode ter vindo de estoque anterior).
+                  </p>
+
+                  {carregandoCiclo ? (
+                    <p className="text-sm text-gray-400 text-center py-4">Carregando...</p>
+                  ) : cicloData.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-4">Nenhum dado no período</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Produto</th>
+                            <th className="px-3 py-2 text-center">Produzido</th>
+                            <th className="px-3 py-2 text-center">Consumido</th>
+                            <th className="px-3 py-2 text-center">Diferença</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cicloData.map((c, idx) => (
+                            <tr key={idx} className="border-b hover:bg-gray-50">
+                              <td className="px-3 py-2 font-medium">{c.produto}</td>
+                              <td className="px-3 py-2 text-center text-blue-600 font-semibold">
+                                {c.produzido} {c.unidade_medida}
+                              </td>
+                              <td className="px-3 py-2 text-center text-red-600 font-semibold">
+                                {c.consumido} {c.unidade_medida}
+                              </td>
+                              <td className={`px-3 py-2 text-center font-semibold ${c.diferenca < 0 ? 'text-red-700' : 'text-green-700'}`}>
+                                {c.diferenca > 0 ? '+' : ''}{c.diferenca}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* NOTE: Recebimentos agora aparecem apenas na aba Expedição > Recebimentos */}
 
           {/* MODAL DE DUPLA CONFIRMAÇÃO */}
@@ -892,7 +1042,7 @@ export default function EstoquePage() {
                     // Agrupar lotes por categoria e depois por produto
                     const lotesPorCategoria: Record<string, Record<string, any[]>> = {}
                     lotesDisponiveis.forEach((lote: any) => {
-                      const categoria = lote.produto?.categoria?.nome || 'Outros'
+                      const categoria = lote.produto?.categoria?.nome || 'Sem categoria'
                       const produtoId = lote.produto_id
                       if (!lotesPorCategoria[categoria]) {
                         lotesPorCategoria[categoria] = {}
@@ -915,7 +1065,9 @@ export default function EstoquePage() {
                           <div className="space-y-2 p-4">
                             {Object.entries(produtosPorCat).map(([produtoId, lotesDoProduto]: any) => {
                               const produto = lotesDoProduto[0].produto
-                              const quantidade = lotesDoProduto.length
+                              // Para Gramas, soma o peso de cada etiqueta; para os demais, soma a quantidade (não a contagem de etiquetas)
+                              const ehPeso = produto.unidade_medida === 'Gramas'
+                              const quantidade = lotesDoProduto.reduce((soma: number, l: any) => soma + (ehPeso ? (l.peso_gramas || 0) : (l.quantidade || 0)), 0)
                               const itemsProxVencimento = lotesDoProduto.filter((l: any) => {
                                 const dias = Math.floor((new Date(l.data_validade + 'T00:00:00').getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
                                 return dias >= 0 && dias <= 7
@@ -938,7 +1090,7 @@ export default function EstoquePage() {
                                   )}
                                 </div>
                                 <p className="text-sm text-gray-600 mt-1">
-                                  📦 {quantidade} {quantidade === 1 ? 'unidade' : 'unidades'}
+                                  📦 {quantidade} {ehPeso ? produto.unidade_medida : (quantidade === 1 ? 'unidade' : 'unidades')}
                                   {produto.congelado ? ' ❄️' : ''}
                                 </p>
                               </div>
@@ -954,6 +1106,9 @@ export default function EstoquePage() {
                             {lotesDoProduto.map((lote: any, idx: number) => {
                               const dataValidade = new Date(lote.data_validade + 'T00:00:00')
                               const diasAteVencer = Math.floor((dataValidade.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+                              const diasEmEstoque = lote.data_producao
+                                ? Math.floor((new Date().getTime() - new Date(lote.data_producao + 'T00:00:00').getTime()) / (1000 * 60 * 60 * 24))
+                                : null
 
                               let corRisco = 'bg-green-100'
                               let corTexto = 'text-green-700'
@@ -1000,6 +1155,9 @@ export default function EstoquePage() {
                                       </div>
                                       <p className="text-xs text-gray-600 mt-1">
                                         Validade: {dataValidade.toLocaleDateString('pt-BR')} • {diasAteVencer} dias
+                                        {diasEmEstoque !== null && (
+                                          <> • Em estoque há {diasEmEstoque} dia{diasEmEstoque === 1 ? '' : 's'}</>
+                                        )}
                                       </p>
                                     </div>
                                   </div>
@@ -1055,7 +1213,11 @@ export default function EstoquePage() {
               </div>
             ) : (
               <div className="text-center py-12 text-gray-400">
-                {lotes.length === 0 ? `Sem estoque em ${LOCAL_LABEL[local]}` : 'Nenhum item disponível para venda'}
+                {lotes.length === 0
+                  ? `Sem estoque em ${LOCAL_LABEL[local]}`
+                  : modoBaixaConsumo
+                  ? 'Nenhum insumo disponível para baixa de consumo'
+                  : 'Nenhum item disponível para venda'}
               </div>
             )
           })()}

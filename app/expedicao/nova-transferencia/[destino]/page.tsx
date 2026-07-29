@@ -1,8 +1,8 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Package } from 'lucide-react'
 
 interface ProdutoAgrupado {
@@ -14,11 +14,13 @@ interface ProdutoAgrupado {
   total_selecionado: number
 }
 
-export default function SelecioarEstoqueTransferenciaPage() {
+function SelecionarEstoqueTransferenciaForm() {
   const { usuario } = useAuth()
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const destino = params.destino as string
+  const origemEfetiva = usuario?.role === 'admin' ? searchParams.get('origem') : usuario?.loja_id
 
   const [estoque, setEstoque] = useState<Map<string, ProdutoAgrupado>>(new Map())
   const [loading, setLoading] = useState(true)
@@ -30,10 +32,10 @@ export default function SelecioarEstoqueTransferenciaPage() {
 
   useEffect(() => {
     carregarEstoque()
-  }, [usuario?.loja_id])
+  }, [origemEfetiva])
 
   async function carregarEstoque() {
-    if (!usuario?.loja_id) return
+    if (!origemEfetiva) return
     setLoading(true)
 
     try {
@@ -43,7 +45,7 @@ export default function SelecioarEstoqueTransferenciaPage() {
         .select(
           'id, codigo_qr, produto_id, quantidade, peso_gramas, data_validade, status, produto:produtos(nome, unidade_medida)'
         )
-        .eq('destino', usuario.loja_id)
+        .eq('destino', origemEfetiva)
         .eq('status', 'na_loja')
         .order('data_validade')
 
@@ -235,5 +237,13 @@ export default function SelecioarEstoqueTransferenciaPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function SelecionarEstoqueTransferenciaPage() {
+  return (
+    <Suspense>
+      <SelecionarEstoqueTransferenciaForm />
+    </Suspense>
   )
 }

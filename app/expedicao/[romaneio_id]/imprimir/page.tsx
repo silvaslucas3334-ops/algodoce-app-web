@@ -24,10 +24,10 @@ export default function ImprimirRomaneioPage() {
 
     if (data) {
       setRomaneio(data)
-      setLoading(false)
       // Auto-dispara a impressão após carregar
       setTimeout(() => dispararImpressao(data), 300)
     }
+    setLoading(false)
   }
 
   function dispararImpressao(rom: any) {

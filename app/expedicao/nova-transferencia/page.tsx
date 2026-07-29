@@ -8,16 +8,18 @@ export default function NovaTransferenciaPage() {
   const { usuario } = useAuth()
   const router = useRouter()
   const [destino, setDestino] = useState('cozinha')
+  const [origemAdmin, setOrigemAdmin] = useState<'loja1' | 'loja2'>('loja1')
 
-  // Se não é loja, redirecionar
+  // Se não é loja nem admin, redirecionar
   useEffect(() => {
-    if (usuario && usuario.role !== 'loja') {
+    if (usuario && usuario.role !== 'loja' && usuario.role !== 'admin') {
       router.push('/expedicao')
     }
   }, [usuario, router])
 
   function avancar() {
-    router.push(`/expedicao/nova-transferencia/${destino}`)
+    const destinoUrl = `/expedicao/nova-transferencia/${destino}`
+    router.push(usuario?.role === 'admin' ? `${destinoUrl}?origem=${origemAdmin}` : destinoUrl)
   }
 
   return (
@@ -52,6 +54,22 @@ export default function NovaTransferenciaPage() {
               Selecione para onde deseja devolver/transferir os produtos
             </p>
           </div>
+
+          {usuario?.role === 'admin' && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-800 mb-3">
+                🏪 Origem (estoque de qual loja)
+              </label>
+              <select
+                value={origemAdmin}
+                onChange={(e) => setOrigemAdmin(e.target.value as 'loja1' | 'loja2')}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="loja1">Paraisópolis</option>
+                <option value="loja2">Itajubá</option>
+              </select>
+            </div>
+          )}
 
           <div className="flex gap-3 pt-4 border-t">
             <button
