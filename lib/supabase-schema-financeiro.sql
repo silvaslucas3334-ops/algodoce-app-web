@@ -543,15 +543,53 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Habilita a extensão pg_cron se ainda não estiver ativa neste projeto.
-CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- Recorrência não depende mais de automação por tempo (cron) — ao criar,
+-- gera todas as ocorrências até data_fim na hora (ver despesas/nova/page.tsx),
+-- visíveis/editáveis por qualquer um desde o primeiro minuto. Essa função
+-- gera TODAS as ocorrências de uma recorrência de uma vez, sem checar "hoje"
+-- (diferente de gerar_lancamentos_recorrentes() acima, que só alcança o
+-- presente) — é o que resolve o problema de visibilidade.
+CREATE OR REPLACE FUNCTION gerar_ocorrencias_recorrencia(p_recorrencia_id UUID) RETURNS INT AS $$
+DECLARE
+  rec RECORD;
+  prox DATE;
+  guarda INT := 0;
+  criadas INT := 0;
+BEGIN
+  SELECT * INTO rec FROM financeiro_recorrencias WHERE id = p_recorrencia_id AND ativa;
+  IF NOT FOUND THEN RETURN 0; END IF;
+  IF rec.data_fim IS NULL THEN
+    RAISE EXCEPTION 'Recorrência sem data_fim — não é possível gerar ocorrências sem um limite.';
+  END IF;
 
--- 03:15 UTC = 00:15 em São Paulo.
--- unschedule antes torna o script re-executável sem erro de job duplicado.
+  prox := rec.proxima_data;
+  WHILE prox <= rec.data_fim AND guarda < 60 LOOP
+    guarda := guarda + 1;
+    INSERT INTO financeiro_lancamentos (
+      tipo, parte_id, descricao, valor_total, data_lancamento, data_vencimento, data_competencia,
+      status, forma_pagamento, condicao_pagamento, unidade, conta_id, recorrencia_id, criado_por
+    ) VALUES (
+      'despesa', rec.parte_id, rec.descricao, rec.valor, prox, prox,
+      (date_trunc('month', prox) - (rec.competencia_deslocamento_meses || ' months')::interval)::date,
+      'aberto', rec.forma_pagamento, 'a_vista', rec.unidade, rec.conta_id, rec.id, rec.criado_por
+    );
+    criadas := criadas + 1;
+    prox := (date_trunc('month', prox) + INTERVAL '1 month' + (rec.dia_vencimento - 1) * INTERVAL '1 day')::date;
+  END LOOP;
+
+  -- Tudo já foi gerado — não sobra nada pra nenhum processo automático fazer depois.
+  UPDATE financeiro_recorrencias SET proxima_data = prox, ativa = false, updated_at = now() WHERE id = rec.id;
+  RETURN criadas;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- gerar_lancamentos_recorrentes() fica definida (útil como utilitário manual
+-- de catch-up), mas sem agendamento — nenhuma geração deve acontecer sozinha
+-- com o passar do tempo. unschedule dentro de DO$$ evita erro se o job nunca
+-- tiver existido (instalação limpa) ou já estiver desagendado.
 DO $$ BEGIN
   PERFORM cron.unschedule('gerar-lancamentos-recorrentes');
 EXCEPTION WHEN OTHERS THEN NULL; END $$;
-SELECT cron.schedule('gerar-lancamentos-recorrentes', '15 3 * * *', 'SELECT gerar_lancamentos_recorrentes()');
 
 -- ============================================================
 -- Verificação

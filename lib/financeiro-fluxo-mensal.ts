@@ -403,6 +403,7 @@ export async function buscarDespesasFixasFuturas(
       .from('financeiro_lancamentos')
       .select('recorrencia_id')
       .in('recorrencia_id', idsRecorrenciasAtivas)
+      .neq('status', 'cancelado') // um lançamento cancelado não conta como "já gerado" — senão a projeção some por engano
       .gte('data_vencimento', inicio)
       .lte('data_vencimento', fim)
     if (erroJaLancadas) throw new Error(erroJaLancadas.message)

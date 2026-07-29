@@ -101,11 +101,22 @@ function NovaDespesaForm() {
   // Recorrência é exclusiva do admin (RLS de financeiro_recorrencias) e
   // incompatível com parcelamento (uma despesa fixa se repete inteira).
   const podeRecorrencia = usuario?.role === 'admin' && parcelas === 1 && !extratoTransacaoId
-  const podeSalvar = parteId && descricao.trim() && valorNum > 0 && contaId && dataLancamento && (!jaPago ? dataVencimento : dataPagamento)
+  const podeSalvar =
+    parteId &&
+    descricao.trim() &&
+    valorNum > 0 &&
+    contaId &&
+    dataLancamento &&
+    (!jaPago ? dataVencimento : dataPagamento) &&
+    (!recorrente || !!dataFimRecorrencia)
 
   async function salvar() {
     if (!podeSalvar || !usuario) {
-      setErro('Preencha beneficiário, descrição, valor e a conta contábil (obrigatória).')
+      setErro(
+        recorrente && !dataFimRecorrencia
+          ? 'Informe até quando a despesa recorrente se repete.'
+          : 'Preencha beneficiário, descrição, valor e a conta contábil (obrigatória).'
+      )
       return
     }
     setSalvando(true)
@@ -174,6 +185,25 @@ function NovaDespesaForm() {
 
       const { data: criados, error } = await supabase.from('financeiro_lancamentos').insert(linhas).select('id')
       if (error) throw error
+
+      // Gera de uma vez todos os lançamentos futuros até data_fim — ficam
+      // visíveis e editáveis na tela de Despesas desde já, em vez de
+      // dependerem de um processo automático rodando mês a mês (ninguém além
+      // de quem criou a recorrência saberia que ela existe até o dia chegar).
+      if (recorrenciaId) {
+        const { error: erroGeracao } = await supabase.rpc('gerar_ocorrencias_recorrencia', {
+          p_recorrencia_id: recorrenciaId,
+        })
+        if (erroGeracao) {
+          setErro(
+            'Despesa recorrente criada, mas falhou ao gerar as ocorrências futuras: ' +
+              erroGeracao.message +
+              '. Os lançamentos dos próximos meses ainda não existem — avise o suporte.'
+          )
+          setSalvando(false)
+          return
+        }
+      }
 
       if (extratoTransacaoId && criados && criados[0]) {
         try {
@@ -420,7 +450,7 @@ function NovaDespesaForm() {
 
             {podeRecorrencia && recorrente && (
               <div className="pl-3">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Repetir até (opcional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Repetir até</label>
                 <input
                   type="date"
                   value={dataFimRecorrencia}
@@ -428,7 +458,7 @@ function NovaDespesaForm() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  Deixe vazio pra repetir indefinidamente. A competência (pro DRE) é calculada sozinha a partir da Data da despesa e do Vencimento.
+                  Obrigatório — todos os lançamentos até essa data já são criados agora, prontos pra editar por qualquer um. A competência (pro DRE) é calculada sozinha a partir da Data da despesa e do Vencimento.
                 </p>
               </div>
             )}
