@@ -7,11 +7,12 @@ import ConciliarExtratoTab from '@/components/ConciliarExtratoTab'
 import FluxoMensalTabela from '@/components/FluxoMensalTabela'
 import FluxoMensalDrilldownModal, { LinhaDrilldown } from '@/components/FluxoMensalDrilldownModal'
 import NovaReceitaDinheiroModal from '@/components/NovaReceitaDinheiroModal'
+import InformarFaturamentoDiarioModal from '@/components/InformarFaturamentoDiarioModal'
 import { buscarFluxoMensal, buscarAtrasados, FluxoMensalResultado, FluxoMensalAtrasados } from '@/lib/financeiro-fluxo-mensal'
 import { formatBRL } from '@/lib/ofx'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark, AlertTriangle, Receipt } from 'lucide-react'
 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -35,6 +36,7 @@ function FluxoCaixaContent() {
   const [atrasados, setAtrasados] = useState<FluxoMensalAtrasados | null>(null)
   const [modalDrilldown, setModalDrilldown] = useState<{ titulo: string; linhas: LinhaDrilldown[] } | null>(null)
   const [modalNovaReceita, setModalNovaReceita] = useState(false)
+  const [modalFaturamentoDiario, setModalFaturamentoDiario] = useState(false)
 
   useEffect(() => {
     if (aba === 'mensal') carregar()
@@ -82,6 +84,12 @@ function FluxoCaixaContent() {
                   className="bg-green-700 text-white rounded-lg px-3 py-2 font-semibold flex items-center gap-1.5 hover:bg-green-800 text-sm"
                 >
                   <Plus size={16} /> Dinheiro
+                </button>
+                <button
+                  onClick={() => setModalFaturamentoDiario(true)}
+                  className="bg-blue-700 text-white rounded-lg px-3 py-2 font-semibold flex items-center gap-1.5 hover:bg-blue-800 text-sm"
+                >
+                  <Receipt size={16} /> Faturamento do Dia
                 </button>
                 <Link
                   href={`/financeiro/fluxo-caixa/orcamento?ano=${ano}&mes=${mes}`}
@@ -194,6 +202,15 @@ function FluxoCaixaContent() {
             usuarioId={usuario.id}
             onClose={() => setModalNovaReceita(false)}
             onCriada={carregar}
+          />
+        )}
+
+        {modalFaturamentoDiario && usuario && (
+          <InformarFaturamentoDiarioModal
+            unidadeInicial="loja1"
+            usuarioId={usuario.id}
+            onClose={() => setModalFaturamentoDiario(false)}
+            onSalvo={carregar}
           />
         )}
       </div>

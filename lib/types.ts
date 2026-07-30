@@ -396,6 +396,27 @@ export interface FinanceiroReceita {
   criado_em: string
 }
 
+// Faturamento diário informado manualmente (por loja+dia+forma de
+// pagamento) — só alimenta a linha "Faturamento"/"Meta de Venda" do Fluxo
+// de Caixa (ver buscarFaturamentoLoja em financeiro-fluxo-mensal.ts).
+// Nunca vira Entrada de Caixa (financeiro_receitas) — essa continua vindo
+// só de conciliação de extrato ou do lançamento manual de dinheiro.
+export type CategoriaFaturamentoDiario = Exclude<CategoriaReceita, 'outros'>
+
+export interface FinanceiroFaturamentoDiario {
+  id: string
+  unidade: 'loja1' | 'loja2'
+  data: string
+  dinheiro: number
+  venda_cartao: number
+  pix: number
+  repasse_ifood: number
+  repasse_aiqfome: number
+  criado_por: string
+  created_at: string
+  updated_at: string
+}
+
 // Orçamento do mês — meta de venda + previsão de entrada de caixa por dia
 // da semana + saldo inicial (só loja1/loja2) e previsão manual de
 // despesas, base da visão mensal do Fluxo de Caixa. Arrays sempre length

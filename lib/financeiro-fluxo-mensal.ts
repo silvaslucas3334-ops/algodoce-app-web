@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import { CategoriaReceita, FinanceiroOrcamentoItem, TipoLancamento } from './types'
 import { CATEGORIA_RECEITA_LABEL } from './constants'
 import { buscarPedidosDoPeriodo, gerarItensVendidosFlat } from './pdv-report'
+import { buscarFaturamentoDiarioPeriodo, somaFaturamentoDiario } from './financeiro-faturamento-diario'
 import { PontoHistorico, calcularMediaPorDiaSemana, inicioJanelaHistorico } from './financeiro-forecast'
 import { hojeISO } from './financeiro-utils'
 import { buscarOrcamento } from './financeiro-orcamento'
@@ -295,7 +296,7 @@ export function calcularSaldoDiarioEAcumulado(
   return { saldoDiaPorDia, saldoAcumuladoPorDia }
 }
 
-// --- Faturamento (PDV) por loja ---------------------------------------------
+// --- Faturamento (manual > PDV) por loja ------------------------------------
 
 async function buscarFaturamentoLoja(
   loja: 'loja1' | 'loja2',
@@ -308,9 +309,11 @@ async function buscarFaturamentoLoja(
   const inicioHistorico = inicioJanelaHistorico(hoje)
   const fimReal = fim < hoje ? fim : hoje
 
-  const [pedidosMes, pedidosHistorico] = await Promise.all([
+  const [pedidosMes, pedidosHistorico, manualMes, manualHistorico] = await Promise.all([
     inicio <= hoje ? buscarPedidosDoPeriodo(loja, inicio, fimReal) : Promise.resolve([]),
     buscarPedidosDoPeriodo(loja, inicioHistorico, hoje),
+    inicio <= hoje ? buscarFaturamentoDiarioPeriodo(loja, inicio, fimReal) : Promise.resolve([]),
+    buscarFaturamentoDiarioPeriodo(loja, inicioHistorico, hoje),
   ])
 
   function agruparPorDia(pedidos: typeof pedidosMes): Map<string, number> {
@@ -327,9 +330,23 @@ async function buscarFaturamentoLoja(
     return totais
   }
 
-  const porDiaReal = agruparPorDia(pedidosMes)
-  const totaisHistorico = agruparPorDia(pedidosHistorico)
-  const pontosHistoricos: PontoHistorico[] = Array.from(totaisHistorico.entries()).map(([data, valor]) => ({ data, valor }))
+  const pdvPorDiaReal = agruparPorDia(pedidosMes)
+  const pdvHistorico = agruparPorDia(pedidosHistorico)
+
+  // Lançamento manual (informado pelo próprio lojista, mais atual que o PDV,
+  // que é importado em lote/atrasado) sempre vence o PDV no dia em que os
+  // dois existirem — tanto no valor realizado quanto na média histórica do
+  // forecast. A linha manual existir já conta como "dia fechado" mesmo com
+  // soma 0 (loja fechada num feriado), por isso usa o Map (presença), nunca
+  // um teste de "soma > 0".
+  const manualPorDiaReal = new Map(manualMes.map((r) => [r.data, somaFaturamentoDiario(r)]))
+  const manualPorDiaHistorico = new Map(manualHistorico.map((r) => [r.data, somaFaturamentoDiario(r)]))
+
+  const datasHistorico = new Set([...pdvHistorico.keys(), ...manualPorDiaHistorico.keys()])
+  const pontosHistoricos: PontoHistorico[] = Array.from(datasHistorico).map((data) => ({
+    data,
+    valor: manualPorDiaHistorico.has(data) ? manualPorDiaHistorico.get(data)! : pdvHistorico.get(data)!,
+  }))
 
   const mediaPorDiaSemana = calcularMediaPorDiaSemana(pontosHistoricos)
 
@@ -337,7 +354,7 @@ async function buscarFaturamentoLoja(
   const ehForecastPorDia: boolean[] = []
   dias.forEach((dia) => {
     if (dia <= hoje) {
-      porDia.push(porDiaReal.get(dia) ?? 0)
+      porDia.push(manualPorDiaReal.has(dia) ? manualPorDiaReal.get(dia)! : (pdvPorDiaReal.get(dia) ?? 0))
       ehForecastPorDia.push(false)
     } else {
       porDia.push(mediaPorDiaSemana[new Date(dia + 'T00:00:00').getDay()])

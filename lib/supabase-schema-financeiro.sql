@@ -1251,3 +1251,55 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 GRANT EXECUTE ON FUNCTION financeiro_orcamento_salvar_itens TO authenticated;
 
 SELECT tablename, rowsecurity FROM pg_tables WHERE tablename LIKE 'financeiro_orcamento%';
+
+-- ============================================================
+-- 17. Faturamento diário manual — conteúdo idêntico ao de
+-- lib/migrations/criar-financeiro-faturamento-diario.sql, replicado aqui
+-- pra esse arquivo continuar sendo a fonte única de instalação limpa.
+--
+-- Uma linha por (unidade, data), uma coluna por forma de pagamento
+-- (vocabulário de CategoriaReceita, sem 'outros'). Alimenta só a linha
+-- "Faturamento"/"Meta de Venda" do Fluxo de Caixa (ver buscarFaturamentoLoja
+-- em lib/financeiro-fluxo-mensal.ts) — nunca vira Entrada de Caixa real
+-- (financeiro_receitas continua sendo a única fonte disso, via conciliação
+-- de extrato ou o lançamento manual de dinheiro já existente). A linha
+-- existir já significa "dia fechado": todas as colunas podem ser 0 sem
+-- isso ser "não informado".
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS financeiro_faturamento_diario (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  unidade TEXT NOT NULL CHECK (unidade IN ('loja1', 'loja2')),
+  data DATE NOT NULL,
+  dinheiro NUMERIC NOT NULL DEFAULT 0 CHECK (dinheiro >= 0),
+  venda_cartao NUMERIC NOT NULL DEFAULT 0 CHECK (venda_cartao >= 0),
+  pix NUMERIC NOT NULL DEFAULT 0 CHECK (pix >= 0),
+  repasse_ifood NUMERIC NOT NULL DEFAULT 0 CHECK (repasse_ifood >= 0),
+  repasse_aiqfome NUMERIC NOT NULL DEFAULT 0 CHECK (repasse_aiqfome >= 0),
+  criado_por UUID NOT NULL REFERENCES usuarios(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (unidade, data)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ffd_unidade_data ON financeiro_faturamento_diario(unidade, data);
+
+ALTER TABLE financeiro_faturamento_diario ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS financeiro_faturamento_diario_select ON financeiro_faturamento_diario;
+CREATE POLICY financeiro_faturamento_diario_select ON financeiro_faturamento_diario FOR SELECT TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+
+DROP POLICY IF EXISTS financeiro_faturamento_diario_insert ON financeiro_faturamento_diario;
+CREATE POLICY financeiro_faturamento_diario_insert ON financeiro_faturamento_diario FOR INSERT TO authenticated
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin' AND criado_por = auth.uid());
+
+DROP POLICY IF EXISTS financeiro_faturamento_diario_update ON financeiro_faturamento_diario;
+CREATE POLICY financeiro_faturamento_diario_update ON financeiro_faturamento_diario FOR UPDATE TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+
+DROP POLICY IF EXISTS financeiro_faturamento_diario_delete_blocked ON financeiro_faturamento_diario;
+CREATE POLICY financeiro_faturamento_diario_delete_blocked ON financeiro_faturamento_diario FOR DELETE USING (false);
+
+SELECT tablename, rowsecurity FROM pg_tables WHERE tablename = 'financeiro_faturamento_diario';
