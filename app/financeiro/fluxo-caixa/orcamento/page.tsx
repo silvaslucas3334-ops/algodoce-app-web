@@ -13,7 +13,7 @@ import { hojeISO, mesEncerrado } from '@/lib/financeiro-utils'
 import {
   buscarFluxoMensal,
   buscarDespesasFixasFuturas,
-  buscarSaldoFinalDoMes,
+  buscarSaldosFinaisDoMes,
   metaDiariaDeWeekdays,
   entradaPrevistaDeWeekdays,
   calcularDeltaEGap,
@@ -124,17 +124,16 @@ function OrcamentoWizardContent() {
     try {
       const anoAnterior = mes === 1 ? ano - 1 : ano
       const mesAnterior = mes === 1 ? 12 : mes - 1
-      const [orcLoja1, orcLoja2, orcGeral, recs, fixas, fluxo, saldoAnteriorLoja1, saldoAnteriorLoja2] = await Promise.all([
+      const [orcLoja1, orcLoja2, orcGeral, recs, fixas, fluxo, saldosAnteriores] = await Promise.all([
         buscarOrcamento(ano, mes, 'loja1'),
         buscarOrcamento(ano, mes, 'loja2'),
         buscarOrcamento(ano, mes, 'geral'),
         buscarRecorrenciasAtivas(),
         buscarDespesasFixasFuturas('consolidado', ano, mes),
         buscarFluxoMensal('consolidado', ano, mes),
-        buscarSaldoFinalDoMes('loja1', anoAnterior, mesAnterior),
-        buscarSaldoFinalDoMes('loja2', anoAnterior, mesAnterior),
+        buscarSaldosFinaisDoMes(anoAnterior, mesAnterior),
       ])
-      setSugestaoSaldoAnterior({ loja1: saldoAnteriorLoja1, loja2: saldoAnteriorLoja2 })
+      setSugestaoSaldoAnterior(saldosAnteriores)
       setMetaVenda({
         loja1: orcLoja1?.metaVendaPorDiaSemana || vazioSemana(),
         loja2: orcLoja2?.metaVendaPorDiaSemana || vazioSemana(),

@@ -809,15 +809,36 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
 }
 
 /**
- * Saldo acumulado no último dia de um mês específico, pra uma loja — usado
- * como SUGESTÃO (nunca preenchimento automático) de saldo inicial do mês
- * seguinte no wizard de Orçamento. Reaproveita buscarFluxoMensal em vez de
- * duplicar o cálculo; não tenta ratear custos de rateio/cozinha por loja
- * (mesma simplificação que o resto da visão por loja já assume).
+ * Saldo acumulado no último dia de um mês, pras duas lojas — usado como
+ * SUGESTÃO (nunca preenchimento automático) de saldo inicial do mês
+ * seguinte no wizard de Orçamento. buscarFluxoMensal('loja1'|'loja2', ...)
+ * sozinho NÃO inclui as saídas de 'rateio' (cozinha, sem conta própria —
+ * o gasto sai do caixa das lojas), então o saldo de cada loja isolada fica
+ * inflado; aqui a fatia de rateio do mês é rateada entre as duas na
+ * proporção do faturamento de cada uma, pra soma das duas sugestões bater
+ * com o saldo acumulado real do Fluxo de Caixa consolidado.
  */
-export async function buscarSaldoFinalDoMes(unidade: 'loja1' | 'loja2', ano: number, mes: number): Promise<number | null> {
-  const dados = await buscarFluxoMensal(unidade, ano, mes)
-  return dados.saldoAcumuladoPorDia.length > 0 ? dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1] : null
+export async function buscarSaldosFinaisDoMes(ano: number, mes: number): Promise<{ loja1: number | null; loja2: number | null }> {
+  const [dadosLoja1, dadosLoja2, dadosRateio] = await Promise.all([
+    buscarFluxoMensal('loja1', ano, mes),
+    buscarFluxoMensal('loja2', ano, mes),
+    buscarFluxoMensal('rateio', ano, mes),
+  ])
+
+  const faturamentoLoja1 = dadosLoja1.faturamentoPorDia.reduce((s: number, v) => s + (v || 0), 0)
+  const faturamentoLoja2 = dadosLoja2.faturamentoPorDia.reduce((s: number, v) => s + (v || 0), 0)
+  const faturamentoTotal = faturamentoLoja1 + faturamentoLoja2
+  const proporcaoLoja1 = faturamentoTotal > 0 ? faturamentoLoja1 / faturamentoTotal : 0.5
+  const proporcaoLoja2 = faturamentoTotal > 0 ? faturamentoLoja2 / faturamentoTotal : 0.5
+
+  const ultimoDia = (arr: (number | null)[]) => (arr.length > 0 ? arr[arr.length - 1] : null)
+  const saldoLoja1 = ultimoDia(dadosLoja1.saldoAcumuladoPorDia)
+  const saldoLoja2 = ultimoDia(dadosLoja2.saldoAcumuladoPorDia)
+
+  return {
+    loja1: saldoLoja1 != null ? saldoLoja1 - dadosRateio.totalSaidas * proporcaoLoja1 : null,
+    loja2: saldoLoja2 != null ? saldoLoja2 - dadosRateio.totalSaidas * proporcaoLoja2 : null,
+  }
 }
 
 export interface ResumoHubFinanceiro {
