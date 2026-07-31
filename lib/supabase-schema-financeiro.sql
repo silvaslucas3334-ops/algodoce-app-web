@@ -410,10 +410,14 @@ CREATE POLICY financeiro_lancamento_itens_select ON financeiro_lancamento_itens 
 -- INSERT não trava por status nem por unidade: criar os itens é parte do
 -- mesmo fluxo atômico de lançar a nota (mesma liberação do pai acima) —
 -- só a UPDATE (editar item depois) trava em status='aberto' + unidade.
+-- Admin também precisa poder ACRESCENTAR item numa nota criada por outra
+-- pessoa (ex: corrigir NF depois) — sem esse bypass só o criado_por original
+-- conseguia inserir item, mesmo sendo admin.
 DROP POLICY IF EXISTS financeiro_lancamento_itens_insert ON financeiro_lancamento_itens;
 CREATE POLICY financeiro_lancamento_itens_insert ON financeiro_lancamento_itens FOR INSERT TO authenticated
   WITH CHECK (
-    EXISTS (SELECT 1 FROM financeiro_lancamentos l WHERE l.id = lancamento_id AND l.criado_por = auth.uid())
+    (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+    OR EXISTS (SELECT 1 FROM financeiro_lancamentos l WHERE l.id = lancamento_id AND l.criado_por = auth.uid())
   );
 DROP POLICY IF EXISTS financeiro_lancamento_itens_update ON financeiro_lancamento_itens;
 CREATE POLICY financeiro_lancamento_itens_update ON financeiro_lancamento_itens FOR UPDATE TO authenticated
