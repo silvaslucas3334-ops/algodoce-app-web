@@ -8,7 +8,7 @@ import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
 import { Plus, Search, ReceiptText, ShoppingCart, CheckCircle, X } from 'lucide-react'
 import { EtiquetaAprovacao, FinanceiroLancamento } from '@/lib/types'
-import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR, ETIQUETA_APROVACAO_LABEL } from '@/lib/constants'
+import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR, ETIQUETA_APROVACAO_LABEL, ETIQUETA_APROVACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { hojeISO, somarDias, statusExibicao } from '@/lib/financeiro-utils'
 import EtiquetaAprovacaoSeletor from '@/components/EtiquetaAprovacaoSeletor'
@@ -32,6 +32,54 @@ const FILTROS_ETIQUETA: { key: FiltroEtiqueta; label: string }[] = [
   { key: 'aprovada_pagamento', label: ETIQUETA_APROVACAO_LABEL.aprovada_pagamento },
 ]
 
+const MESES = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+]
+
+type Agrupamento = 'mes' | 'etiqueta'
+
+interface GrupoLancamentos {
+  chave: string
+  label: string
+  corBadge?: string
+  itens: FinanceiroLancamento[]
+  subtotal: number
+}
+
+/** Agrupa "Em aberto" por mês de vencimento — dá o panorama do mês sem a lista virar uma maratona conforme recorrências pré-geradas se acumulam meses à frente. */
+function agruparPorMes(itens: FinanceiroLancamento[]): GrupoLancamentos[] {
+  const grupos = new Map<string, FinanceiroLancamento[]>()
+  itens.forEach((l) => {
+    const chave = l.data_vencimento.slice(0, 7) // YYYY-MM
+    if (!grupos.has(chave)) grupos.set(chave, [])
+    grupos.get(chave)!.push(l)
+  })
+  return Array.from(grupos.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([chave, lista]) => {
+      const [ano, mes] = chave.split('-').map(Number)
+      return { chave, label: `${MESES[mes - 1]} de ${ano}`, itens: lista, subtotal: lista.reduce((s, l) => s + l.valor_total, 0) }
+    })
+}
+
+/** Agrupa "Em aberto" por etiqueta — responde "o que já está pronto pra eu pagar agora" de relance, sem precisar abrir cada card. */
+function agruparPorEtiqueta(itens: FinanceiroLancamento[]): GrupoLancamentos[] {
+  const ordem: (EtiquetaAprovacao | 'sem_etiqueta')[] = ['aprovada_pagamento', 'planejar_pagamento', 'sem_etiqueta']
+  return ordem
+    .map((chave) => {
+      const lista = itens.filter((l) => (l.etiqueta_aprovacao || 'sem_etiqueta') === chave)
+      return {
+        chave,
+        label: chave === 'sem_etiqueta' ? 'Sem etiqueta' : ETIQUETA_APROVACAO_LABEL[chave],
+        corBadge: chave === 'sem_etiqueta' ? undefined : ETIQUETA_APROVACAO_COLOR[chave],
+        itens: lista,
+        subtotal: lista.reduce((s, l) => s + l.valor_total, 0),
+      }
+    })
+    .filter((g) => g.itens.length > 0)
+}
+
 export default function DespesasPage() {
   const { usuario } = useAuth()
   const [lancamentos, setLancamentos] = useState<FinanceiroLancamento[]>([])
@@ -44,6 +92,7 @@ export default function DespesasPage() {
   const [filtroEtiqueta, setFiltroEtiqueta] = useState<FiltroEtiqueta>('todas')
   const [vencimentoDe, setVencimentoDe] = useState('')
   const [vencimentoAte, setVencimentoAte] = useState('')
+  const [agrupamento, setAgrupamento] = useState<Agrupamento>('mes')
 
   useEffect(() => {
     if (usuario) carregar()
@@ -112,10 +161,9 @@ export default function DespesasPage() {
     .map(([id, nome]) => ({ id, nome }))
     .sort((a, b) => a.nome.localeCompare(b.nome))
 
-  const filtrosSecundariosAtivos = !!filtroParteId || filtroEtiqueta !== 'todas' || !!vencimentoDe || !!vencimentoAte
+  const filtrosSecundariosAtivos = !!filtroParteId || !!vencimentoDe || !!vencimentoAte
   function limparFiltrosSecundarios() {
     setFiltroParteId('')
-    setFiltroEtiqueta('todas')
     setVencimentoDe('')
     setVencimentoAte('')
   }
@@ -138,6 +186,65 @@ export default function DespesasPage() {
   })
 
   const totalFiltrado = filtradas.reduce((acc, l) => acc + l.valor_total, 0)
+  const grupos = filtro === 'aberto' ? (agrupamento === 'mes' ? agruparPorMes(filtradas) : agruparPorEtiqueta(filtradas)) : null
+
+  function renderCard(l: FinanceiroLancamento) {
+    const st = statusExibicao(l.status, l.data_vencimento)
+    return (
+      <div key={l.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all">
+        <div className="flex items-start justify-between gap-3">
+          <Link href={`/financeiro/despesas/${l.id}`} className="flex-1 cursor-pointer">
+            <div className="flex items-center gap-2">
+              {l.tipo === 'compra_insumos' ? (
+                <ShoppingCart size={14} className="text-blue-600 flex-shrink-0" />
+              ) : (
+                <ReceiptText size={14} className="text-purple-600 flex-shrink-0" />
+              )}
+              <p className="font-semibold text-gray-800">{l.descricao}</p>
+            </div>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {l.parte?.nome} · {UNIDADE_LABEL[l.unidade]}
+              {l.conta && <span> · {l.conta.codigo} {l.conta.nome}</span>}
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              {l.status === 'pago' && l.data_pagamento
+                ? `Paga em ${new Date(l.data_pagamento + 'T00:00:00').toLocaleDateString('pt-BR')}`
+                : `Vencimento: ${new Date(l.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}`}
+              {l.tipo === 'despesa' && !l.conta_id && <span className="ml-2 text-amber-600">· sem conta</span>}
+            </p>
+          </Link>
+          <div className="text-right flex flex-col items-end gap-1.5">
+            {!!l.valor_juros_multa && l.valor_juros_multa > 0 && (
+              <p className="text-[11px] text-red-600 font-medium">
+                + {formatBRL(l.valor_juros_multa)} juros/multa
+              </p>
+            )}
+            <p className="font-semibold text-gray-800">{formatBRL(l.valor_total)}</p>
+            <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
+            {usuario?.role === 'admin' && l.status === 'aberto' && (
+              <EtiquetaAprovacaoSeletor valor={l.etiqueta_aprovacao} onChange={(nova) => mudarEtiqueta(l, nova)} />
+            )}
+            {l.extrato_transacao && (
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap font-medium ${STATUS_CONCILIACAO_COLOR[l.extrato_transacao.status_conciliacao]}`}
+              >
+                {STATUS_CONCILIACAO_LABEL[l.extrato_transacao.status_conciliacao]}
+              </span>
+            )}
+            {l.status === 'aberto' && (
+              <button
+                onClick={() => marcarPago(l)}
+                disabled={pagandoId === l.id}
+                className="text-xs px-2 py-1 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 disabled:opacity-50 flex items-center gap-1"
+              >
+                <CheckCircle size={12} /> {pagandoId === l.id ? 'Salvando...' : 'Pagar'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
@@ -202,6 +309,41 @@ export default function DespesasPage() {
             </button>
           </div>
 
+          <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+            <span className="text-xs text-gray-400 flex-shrink-0">Etiqueta:</span>
+            {FILTROS_ETIQUETA.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setFiltroEtiqueta(f.key)}
+                className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${
+                  filtroEtiqueta === f.key
+                    ? 'bg-gray-800 text-white border-transparent font-semibold'
+                    : 'bg-white border-gray-200 text-gray-500'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+            {filtro === 'aberto' && (
+              <div className="flex items-center gap-1 ml-auto flex-shrink-0">
+                <span className="text-xs text-gray-400 mr-1">Agrupar:</span>
+                {(['mes', 'etiqueta'] as Agrupamento[]).map((a) => (
+                  <button
+                    key={a}
+                    onClick={() => setAgrupamento(a)}
+                    className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${
+                      agrupamento === a
+                        ? 'bg-pink-100 text-pink-700 border-transparent font-semibold'
+                        : 'bg-white border-gray-200 text-gray-500'
+                    }`}
+                  >
+                    {a === 'mes' ? 'Mês' : 'Etiqueta'}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {mostrarMaisFiltros && (
             <div className="bg-white border border-gray-200 rounded-lg p-3 mb-4 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -238,25 +380,6 @@ export default function DespesasPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Etiqueta</label>
-                <div className="flex gap-2 flex-wrap">
-                  {FILTROS_ETIQUETA.map((f) => (
-                    <button
-                      key={f.key}
-                      onClick={() => setFiltroEtiqueta(f.key)}
-                      className={`px-3 py-1 rounded-full text-xs whitespace-nowrap border ${
-                        filtroEtiqueta === f.key
-                          ? 'bg-pink-100 text-pink-700 border-transparent font-semibold'
-                          : 'bg-white border-gray-200 text-gray-500'
-                      }`}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {filtrosSecundariosAtivos && (
                 <button
                   onClick={limparFiltrosSecundarios}
@@ -281,66 +404,23 @@ export default function DespesasPage() {
               title="Nada por aqui"
               description={busca ? `Nenhum lançamento encontrado para "${busca}"` : 'Nenhum lançamento neste filtro'}
             />
-          ) : (
-            <div className="space-y-2">
-              {filtradas.map((l) => {
-                const st = statusExibicao(l.status, l.data_vencimento)
-                return (
-                  <div key={l.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all">
-                    <div className="flex items-start justify-between gap-3">
-                      <Link href={`/financeiro/despesas/${l.id}`} className="flex-1 cursor-pointer">
-                        <div className="flex items-center gap-2">
-                          {l.tipo === 'compra_insumos' ? (
-                            <ShoppingCart size={14} className="text-blue-600 flex-shrink-0" />
-                          ) : (
-                            <ReceiptText size={14} className="text-purple-600 flex-shrink-0" />
-                          )}
-                          <p className="font-semibold text-gray-800">{l.descricao}</p>
-                        </div>
-                        <p className="text-sm text-gray-500 mt-0.5">
-                          {l.parte?.nome} · {UNIDADE_LABEL[l.unidade]}
-                          {l.conta && <span> · {l.conta.codigo} {l.conta.nome}</span>}
-                        </p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          {l.status === 'pago' && l.data_pagamento
-                            ? `Paga em ${new Date(l.data_pagamento + 'T00:00:00').toLocaleDateString('pt-BR')}`
-                            : `Vencimento: ${new Date(l.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}`}
-                          {l.tipo === 'despesa' && !l.conta_id && <span className="ml-2 text-amber-600">· sem conta</span>}
-                        </p>
-                      </Link>
-                      <div className="text-right flex flex-col items-end gap-1.5">
-                        {!!l.valor_juros_multa && l.valor_juros_multa > 0 && (
-                          <p className="text-[11px] text-red-600 font-medium">
-                            + {formatBRL(l.valor_juros_multa)} juros/multa
-                          </p>
-                        )}
-                        <p className="font-semibold text-gray-800">{formatBRL(l.valor_total)}</p>
-                        <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
-                        {usuario?.role === 'admin' && l.status === 'aberto' && (
-                          <EtiquetaAprovacaoSeletor valor={l.etiqueta_aprovacao} onChange={(nova) => mudarEtiqueta(l, nova)} />
-                        )}
-                        {l.extrato_transacao && (
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap font-medium ${STATUS_CONCILIACAO_COLOR[l.extrato_transacao.status_conciliacao]}`}
-                          >
-                            {STATUS_CONCILIACAO_LABEL[l.extrato_transacao.status_conciliacao]}
-                          </span>
-                        )}
-                        {l.status === 'aberto' && (
-                          <button
-                            onClick={() => marcarPago(l)}
-                            disabled={pagandoId === l.id}
-                            className="text-xs px-2 py-1 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 disabled:opacity-50 flex items-center gap-1"
-                          >
-                            <CheckCircle size={12} /> {pagandoId === l.id ? 'Salvando...' : 'Pagar'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
+          ) : grupos ? (
+            <div className="space-y-5">
+              {grupos.map((g) => (
+                <div key={g.chave}>
+                  <div className="flex items-center gap-2 px-1 mb-2">
+                    {g.corBadge && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${g.corBadge}`}>{g.label}</span>}
+                    {!g.corBadge && <h3 className="text-sm font-semibold text-gray-700">{g.label}</h3>}
+                    <span className="text-xs text-gray-400 ml-auto">
+                      {g.itens.length} · {formatBRL(g.subtotal)}
+                    </span>
                   </div>
-                )
-              })}
+                  <div className="space-y-2">{g.itens.map(renderCard)}</div>
+                </div>
+              ))}
             </div>
+          ) : (
+            <div className="space-y-2">{filtradas.map(renderCard)}</div>
           )}
         </div>
       </div>
