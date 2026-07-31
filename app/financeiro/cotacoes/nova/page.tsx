@@ -90,7 +90,7 @@ export default function NovaCotacaoPage() {
   }
 
   return (
-    <ProtectedRoute allowedRoles={['admin']}>
+    <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
         <PageHeader title="Nova Cotação" onBack={() => router.back()} />
 

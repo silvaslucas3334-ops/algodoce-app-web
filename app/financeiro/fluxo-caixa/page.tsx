@@ -185,7 +185,7 @@ function FluxoCaixaContent() {
                     </button>
                   </div>
 
-                  <FluxoMensalTabela dados={dados} onAbrirDrilldown={(titulo, linhas) => setModalDrilldown({ titulo, linhas })} />
+                  <FluxoMensalTabela dados={dados} />
                 </>
               ) : null}
             </>

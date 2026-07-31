@@ -23,7 +23,7 @@ interface Card {
 const GRUPO_MOVIMENTO: Card[] = [
   { href: '/financeiro/despesas', label: 'Despesas', desc: 'Tudo a pagar e pago, de notas e despesas, numa tela só', icon: Receipt, roles: ['admin', 'loja', 'cozinha'] },
   { href: '/financeiro/compras/nova', label: 'Lançar Nota de Insumos', desc: 'Nota fiscal de compra — gera a despesa automaticamente', icon: ShoppingCart, roles: ['admin', 'loja', 'cozinha'] },
-  { href: '/financeiro/cotacoes', label: 'Cotações', desc: 'Comparar preços de fornecedores antes de comprar', icon: ClipboardList, roles: ['admin'] },
+  { href: '/financeiro/cotacoes', label: 'Cotações', desc: 'Comparar preços de fornecedores antes de comprar', icon: ClipboardList, roles: ['admin', 'loja', 'cozinha'] },
   { href: '/financeiro/pdv', label: 'Import do PDV', desc: 'Importar vendas do PDV e gerar relatório de faturamento', icon: FileSpreadsheet, roles: ['admin'] },
   { href: '/financeiro/fluxo-caixa', label: 'Fluxo de Caixa', desc: 'Calendário mensal com forecast e conciliação do extrato — orçamento fica em uma tela própria, ligada a partir daqui', icon: Wallet, roles: ['admin'] },
   { href: '/financeiro/dre', label: 'DRE', desc: 'Resultado do mês por competência, com rateio e custo de insumos', icon: TrendingUp, roles: ['admin'] },
@@ -33,8 +33,8 @@ const GRUPO_CADASTROS: Card[] = [
   { href: '/financeiro/materias-primas', label: 'Matérias-Primas', desc: 'Cadastro controlado e custo médio', icon: Package, roles: ['admin'] },
   { href: '/financeiro/partes', label: 'Fornecedores/Beneficiários', desc: 'Cadastro de quem recebe pagamento', icon: Users, roles: ['admin'] },
   { href: '/financeiro/contas', label: 'Plano de Contas', desc: 'Consulta de centro de custo e conta', icon: BookOpen, roles: ['admin'] },
-  { href: '/financeiro/pre-preparos', label: 'Pré-Preparados', desc: 'Massa, recheio, brownie... o que a cozinha produz e usa em outras receitas', icon: Layers, roles: ['admin'] },
-  { href: '/financeiro/produtos-finais', label: 'Produtos Finais', desc: 'O que é vendido na loja — combina pré-preparados e/ou matérias-primas, com custo por porção', icon: Cake, roles: ['admin'] },
+  { href: '/financeiro/pre-preparos', label: 'Pré-Preparados', desc: 'Massa, recheio, brownie... o que a cozinha produz e usa em outras receitas', icon: Layers, roles: ['admin', 'cozinha'] },
+  { href: '/financeiro/produtos-finais', label: 'Produtos Finais', desc: 'O que é vendido na loja — combina pré-preparados e/ou matérias-primas, com custo por porção', icon: Cake, roles: ['admin', 'cozinha'] },
 ]
 
 function CardGrid({ titulo, cards }: { titulo: string; cards: Card[] }) {

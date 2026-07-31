@@ -1,14 +1,22 @@
 'use client'
 import { useState } from 'react'
-import { FluxoMensalResultado, FluxoMensalLinhaGrupo } from '@/lib/financeiro-fluxo-mensal'
+import { FluxoMensalResultado } from '@/lib/financeiro-fluxo-mensal'
 import { formatBRL } from '@/lib/ofx'
 import { hojeISO } from '@/lib/financeiro-utils'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { LinhaDrilldown } from './FluxoMensalDrilldownModal'
+import FluxoDiaPopover from './FluxoDiaPopover'
 
 interface Props {
   dados: FluxoMensalResultado
-  onAbrirDrilldown: (titulo: string, linhas: LinhaDrilldown[]) => void
+}
+
+interface PopoverState {
+  dia: string
+  tituloGrupo: string
+  origem: 'conta' | 'parte'
+  grupoId: string
+  valorCelula: number
+  anchorRect: DOMRect
 }
 
 const DIA_SEMANA_LABEL = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
@@ -34,24 +42,28 @@ function CelulaDia({
   valor,
   ehForecast,
   className,
+  onClick,
 }: {
   valor: number | null
   ehForecast?: boolean
   className?: string
+  onClick?: (e: React.MouseEvent<HTMLTableCellElement>) => void
 }) {
   return (
-    <td className={`px-2 py-1.5 text-right whitespace-nowrap ${ehForecast ? 'text-gray-400 italic' : 'text-gray-700'} ${className || ''}`}>
+    <td
+      onClick={onClick}
+      className={`px-2 py-1.5 text-right whitespace-nowrap ${ehForecast ? 'text-gray-400 italic' : 'text-gray-700'} ${
+        onClick ? 'cursor-pointer hover:bg-gray-100' : ''
+      } ${className || ''}`}
+    >
       {formatCompacto(valor)}
     </td>
   )
 }
 
-function linhaParaDrilldown(linha: FluxoMensalLinhaGrupo, dias: string[]): LinhaDrilldown[] {
-  return dias.map((d, i) => ({ label: new Date(d + 'T00:00:00').toLocaleDateString('pt-BR'), valor: linha.porDia[i] }))
-}
-
-export default function FluxoMensalTabela({ dados, onAbrirDrilldown }: Props) {
+export default function FluxoMensalTabela({ dados }: Props) {
   const [expandidoSaidas, setExpandidoSaidas] = useState(false)
+  const [popover, setPopover] = useState<PopoverState | null>(null)
   const hoje = hojeISO()
 
   const orcadoPorId = new Map(dados.orcadoXRealizado.map((o) => [o.id, o]))
@@ -158,21 +170,28 @@ export default function FluxoMensalTabela({ dados, onAbrirDrilldown }: Props) {
             dados.saidasPorGrupo.map((linha) => {
               const orcado = orcadoPorId.get(linha.id)
               return (
-                <tr
-                  key={linha.id}
-                  className="hover:bg-gray-50 cursor-pointer"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onAbrirDrilldown(linha.nome, linhaParaDrilldown(linha, dados.dias))}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      onAbrirDrilldown(linha.nome, linhaParaDrilldown(linha, dados.dias))
-                    }
-                  }}
-                >
+                <tr key={linha.id} className="hover:bg-gray-50">
                   <td className="sticky left-0 bg-white px-3 py-1 pl-6 text-gray-500">{linha.nome}</td>
-                  {linha.porDia.map((v, i) => <CelulaDia key={i} valor={v > 0 ? -v : 0} className={bordaHoje(dados.dias[i], hoje)} />)}
+                  {linha.porDia.map((v, i) => (
+                    <CelulaDia
+                      key={i}
+                      valor={v > 0 ? -v : 0}
+                      className={bordaHoje(dados.dias[i], hoje)}
+                      onClick={
+                        v !== 0 && linha.origem
+                          ? (e) =>
+                              setPopover({
+                                dia: dados.dias[i],
+                                tituloGrupo: linha.nome,
+                                origem: linha.origem!,
+                                grupoId: linha.id,
+                                valorCelula: v,
+                                anchorRect: e.currentTarget.getBoundingClientRect(),
+                              })
+                          : undefined
+                      }
+                    />
+                  ))}
                   <td className={`px-3 py-1 text-right ${orcado ? corTexto(orcado.cor) : 'text-gray-600'}`}>
                     {formatBRL(linha.total)}
                     {orcado && <span className="block text-[10px]">orçado {formatBRL(orcado.previsto)}</span>}
@@ -214,6 +233,19 @@ export default function FluxoMensalTabela({ dados, onAbrirDrilldown }: Props) {
           </tr>
         </tbody>
       </table>
+
+      {popover && (
+        <FluxoDiaPopover
+          dia={popover.dia}
+          tituloGrupo={popover.tituloGrupo}
+          origem={popover.origem}
+          grupoId={popover.grupoId}
+          unidade={dados.unidade}
+          valorCelula={popover.valorCelula}
+          anchorRect={popover.anchorRect}
+          onClose={() => setPopover(null)}
+        />
+      )}
     </div>
   )
 }

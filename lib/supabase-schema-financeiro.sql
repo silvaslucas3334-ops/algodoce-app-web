@@ -221,6 +221,11 @@ CREATE TABLE IF NOT EXISTS financeiro_lancamentos (
   -- silêncio dentro de valor_total. Ver lib/migrations/financeiro-conciliacao-manual.sql.
   valor_juros_multa NUMERIC DEFAULT 0,
   observacoes TEXT,
+  -- Recado rápido entre os admins que mexem no financeiro, pra coordenar
+  -- prioridade de pagamento (não é o workflow de pagamento — isso é
+  -- `status`). Sem RLS própria: o UPDATE de financeiro_lancamentos já
+  -- permite qualquer admin editar qualquer lançamento.
+  etiqueta_aprovacao TEXT CHECK (etiqueta_aprovacao IN ('planejar_pagamento', 'aprovada_pagamento') OR etiqueta_aprovacao IS NULL),
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
@@ -370,15 +375,12 @@ CREATE POLICY financeiro_lancamentos_select ON financeiro_lancamentos FOR SELECT
     (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
     OR unidade = financeiro_unidade_do_usuario()
   );
+-- CRIAÇÃO liberada pra qualquer unidade, pra qualquer role — várias
+-- pessoas de unidades diferentes lançam despesa/nota. A EDIÇÃO (abaixo)
+-- continua travada por unidade pra não-admin.
 DROP POLICY IF EXISTS financeiro_lancamentos_insert ON financeiro_lancamentos;
 CREATE POLICY financeiro_lancamentos_insert ON financeiro_lancamentos FOR INSERT TO authenticated
-  WITH CHECK (
-    criado_por = auth.uid()
-    AND (
-      (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
-      OR unidade = financeiro_unidade_do_usuario()
-    )
-  );
+  WITH CHECK (criado_por = auth.uid());
 DROP POLICY IF EXISTS financeiro_lancamentos_update ON financeiro_lancamentos;
 CREATE POLICY financeiro_lancamentos_update ON financeiro_lancamentos FOR UPDATE TO authenticated
   USING (
@@ -405,20 +407,13 @@ CREATE POLICY financeiro_lancamento_itens_select ON financeiro_lancamento_itens 
         )
     )
   );
--- INSERT não trava por status: criar os itens é parte do mesmo fluxo
--- atômico de lançar a nota, mesmo quando ela já nasce paga (status='pago')
--- — só a UPDATE (editar item depois) trava em status='aberto'.
+-- INSERT não trava por status nem por unidade: criar os itens é parte do
+-- mesmo fluxo atômico de lançar a nota (mesma liberação do pai acima) —
+-- só a UPDATE (editar item depois) trava em status='aberto' + unidade.
 DROP POLICY IF EXISTS financeiro_lancamento_itens_insert ON financeiro_lancamento_itens;
 CREATE POLICY financeiro_lancamento_itens_insert ON financeiro_lancamento_itens FOR INSERT TO authenticated
   WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM financeiro_lancamentos l
-      WHERE l.id = lancamento_id
-        AND (
-          (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
-          OR l.unidade = financeiro_unidade_do_usuario()
-        )
-    )
+    EXISTS (SELECT 1 FROM financeiro_lancamentos l WHERE l.id = lancamento_id AND l.criado_por = auth.uid())
   );
 DROP POLICY IF EXISTS financeiro_lancamento_itens_update ON financeiro_lancamento_itens;
 CREATE POLICY financeiro_lancamento_itens_update ON financeiro_lancamento_itens FOR UPDATE TO authenticated
@@ -828,7 +823,9 @@ CREATE TABLE IF NOT EXISTS financeiro_cotacoes (
   titulo TEXT NOT NULL,
   -- Só pré-preenche a unidade da nota ao fechar — NÃO é usada para RLS
   -- (diferente de financeiro_lancamentos.unidade, que escopa
-  -- financeiro_unidade_do_usuario()). Cotações são admin-only, ponto.
+  -- financeiro_unidade_do_usuario()). Cotações é colaborativo: qualquer
+  -- role (admin/loja/cozinha) cria/edita — lojas criam a cotação, admin
+  -- centraliza e formaliza o pedido a partir do resultado.
   unidade TEXT NOT NULL CHECK (unidade IN ('loja1', 'loja2', 'rateio')),
   status TEXT NOT NULL DEFAULT 'aberta' CHECK (status IN ('aberta', 'fechada', 'cancelada')),
   fornecedor_vencedor_id UUID REFERENCES financeiro_partes(id),
@@ -898,8 +895,8 @@ CREATE OR REPLACE FUNCTION financeiro_cotacao_responder(
   p_precos JSONB
 ) RETURNS void AS $$
 BEGIN
-  IF (SELECT role FROM usuarios WHERE id = auth.uid()) IS DISTINCT FROM 'admin' THEN
-    RAISE EXCEPTION 'apenas admin pode responder cotações';
+  IF (SELECT role FROM usuarios WHERE id = auth.uid()) NOT IN ('admin', 'loja', 'cozinha') THEN
+    RAISE EXCEPTION 'apenas usuário autenticado do sistema pode responder cotações';
   END IF;
 
   INSERT INTO financeiro_cotacao_precos (cotacao_item_id, cotacao_fornecedor_id, valor_unitario, valor_total, disponivel)
@@ -931,53 +928,53 @@ ALTER TABLE financeiro_cotacao_precos ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS financeiro_cotacoes_select ON financeiro_cotacoes;
 CREATE POLICY financeiro_cotacoes_select ON financeiro_cotacoes FOR SELECT TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacoes_insert ON financeiro_cotacoes;
 CREATE POLICY financeiro_cotacoes_insert ON financeiro_cotacoes FOR INSERT TO authenticated
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin' AND criado_por = auth.uid());
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha') AND criado_por = auth.uid());
 DROP POLICY IF EXISTS financeiro_cotacoes_update ON financeiro_cotacoes;
 CREATE POLICY financeiro_cotacoes_update ON financeiro_cotacoes FOR UPDATE TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'))
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacoes_delete_blocked ON financeiro_cotacoes;
 CREATE POLICY financeiro_cotacoes_delete_blocked ON financeiro_cotacoes FOR DELETE USING (false);
 
 DROP POLICY IF EXISTS financeiro_cotacao_itens_select ON financeiro_cotacao_itens;
 CREATE POLICY financeiro_cotacao_itens_select ON financeiro_cotacao_itens FOR SELECT TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacao_itens_insert ON financeiro_cotacao_itens;
 CREATE POLICY financeiro_cotacao_itens_insert ON financeiro_cotacao_itens FOR INSERT TO authenticated
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacao_itens_update ON financeiro_cotacao_itens;
 CREATE POLICY financeiro_cotacao_itens_update ON financeiro_cotacao_itens FOR UPDATE TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'))
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacao_itens_delete_blocked ON financeiro_cotacao_itens;
 CREATE POLICY financeiro_cotacao_itens_delete_blocked ON financeiro_cotacao_itens FOR DELETE USING (false);
 
 DROP POLICY IF EXISTS financeiro_cotacao_fornecedores_select ON financeiro_cotacao_fornecedores;
 CREATE POLICY financeiro_cotacao_fornecedores_select ON financeiro_cotacao_fornecedores FOR SELECT TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacao_fornecedores_insert ON financeiro_cotacao_fornecedores;
 CREATE POLICY financeiro_cotacao_fornecedores_insert ON financeiro_cotacao_fornecedores FOR INSERT TO authenticated
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacao_fornecedores_update ON financeiro_cotacao_fornecedores;
 CREATE POLICY financeiro_cotacao_fornecedores_update ON financeiro_cotacao_fornecedores FOR UPDATE TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'))
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacao_fornecedores_delete_blocked ON financeiro_cotacao_fornecedores;
 CREATE POLICY financeiro_cotacao_fornecedores_delete_blocked ON financeiro_cotacao_fornecedores FOR DELETE USING (false);
 
 DROP POLICY IF EXISTS financeiro_cotacao_precos_select ON financeiro_cotacao_precos;
 CREATE POLICY financeiro_cotacao_precos_select ON financeiro_cotacao_precos FOR SELECT TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacao_precos_insert ON financeiro_cotacao_precos;
 CREATE POLICY financeiro_cotacao_precos_insert ON financeiro_cotacao_precos FOR INSERT TO authenticated
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacao_precos_update ON financeiro_cotacao_precos;
 CREATE POLICY financeiro_cotacao_precos_update ON financeiro_cotacao_precos FOR UPDATE TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'))
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_cotacao_precos_delete_blocked ON financeiro_cotacao_precos;
 CREATE POLICY financeiro_cotacao_precos_delete_blocked ON financeiro_cotacao_precos FOR DELETE USING (false);
 
@@ -991,13 +988,16 @@ SELECT tablename, rowsecurity FROM pg_tables WHERE tablename LIKE 'financeiro_co
 -- outro pré-preparo). Produto final combina matéria-prima e/ou
 -- pré-preparo livremente, com rendimento_porcoes pra venda porcionada.
 --
--- RLS admin-only até pra SELECT — dado de margem/custo, mesmo
--- tratamento de financeiro_cotacoes. As tabelas _itens não têm policy de
--- INSERT/UPDATE/DELETE — ficha técnica precisa ser editável (trocar
--- ingrediente, remover linha) mas DELETE é bloqueado em toda tabela
--- deste schema por design, então a escrita passa por uma função
--- SECURITY DEFINER que substitui o conjunto inteiro de linhas de uma vez
--- (mesmo padrão de financeiro_pdv_substituir_periodo).
+-- SELECT liberado pra admin + cozinha (dado de margem/custo visível pra
+-- cozinha por decisão consciente — ela precisa ver tudo pra montar receita
+-- nova). Escrita: admin cria/edita direto como 'aprovado'; cozinha só cria/
+-- edita como 'pendente_revisao' (coluna `status`), até um admin aprovar.
+-- As tabelas _itens não têm policy de INSERT/UPDATE/DELETE — ficha técnica
+-- precisa ser editável (trocar ingrediente, remover linha) mas DELETE é
+-- bloqueado em toda tabela deste schema por design, então a escrita passa
+-- por uma função SECURITY DEFINER que substitui o conjunto inteiro de
+-- linhas de uma vez (mesmo padrão de financeiro_pdv_substituir_periodo),
+-- também travada por status quando quem chama é cozinha.
 -- ============================================================
 
 CREATE SEQUENCE IF NOT EXISTS financeiro_pp_codigo_seq;
@@ -1011,6 +1011,9 @@ CREATE TABLE IF NOT EXISTS financeiro_pre_preparos (
   rendimento_quantidade NUMERIC NOT NULL CHECK (rendimento_quantidade > 0), -- quanto a receita rende, em unidade_medida
   descricao TEXT,
   ativo BOOLEAN NOT NULL DEFAULT true,
+  -- 'pendente_revisao' quando criado/editado pela cozinha, até um admin
+  -- aprovar; admin cria/edita direto como 'aprovado'.
+  status TEXT NOT NULL DEFAULT 'aprovado' CHECK (status IN ('aprovado', 'pendente_revisao')),
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -1036,6 +1039,7 @@ CREATE TABLE IF NOT EXISTS financeiro_produtos_finais (
   rendimento_porcoes INT NOT NULL DEFAULT 1 CHECK (rendimento_porcoes > 0),
   descricao TEXT,
   ativo BOOLEAN NOT NULL DEFAULT true,
+  status TEXT NOT NULL DEFAULT 'aprovado' CHECK (status IN ('aprovado', 'pendente_revisao')),
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -1063,43 +1067,85 @@ ALTER TABLE financeiro_pre_preparo_itens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE financeiro_produtos_finais ENABLE ROW LEVEL SECURITY;
 ALTER TABLE financeiro_produto_final_itens ENABLE ROW LEVEL SECURITY;
 
+-- SELECT liberado pra admin + cozinha: cozinha precisa ver tudo (inclusive
+-- custo/margem) pra montar receita nova referenciando pré-preparos/insumos
+-- existentes — sem isso o módulo fica inutilizável pra ela.
 DROP POLICY IF EXISTS financeiro_pre_preparos_select ON financeiro_pre_preparos;
 CREATE POLICY financeiro_pre_preparos_select ON financeiro_pre_preparos FOR SELECT TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'cozinha'));
+-- Cozinha só insere como 'pendente_revisao'; admin insere qualquer status.
 DROP POLICY IF EXISTS financeiro_pre_preparos_insert ON financeiro_pre_preparos;
 CREATE POLICY financeiro_pre_preparos_insert ON financeiro_pre_preparos FOR INSERT TO authenticated
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin' AND criado_por = auth.uid());
+  WITH CHECK (
+    criado_por = auth.uid()
+    AND (
+      (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+      OR ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'cozinha' AND status = 'pendente_revisao')
+    )
+  );
+-- Admin edita/aprova qualquer linha; cozinha só linhas ainda
+-- pendente_revisao (time compartilhado, sem trava por criador).
 DROP POLICY IF EXISTS financeiro_pre_preparos_update ON financeiro_pre_preparos;
 CREATE POLICY financeiro_pre_preparos_update ON financeiro_pre_preparos FOR UPDATE TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING (
+    (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+    OR ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'cozinha' AND status = 'pendente_revisao')
+  )
+  WITH CHECK (
+    (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+    OR ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'cozinha' AND status = 'pendente_revisao')
+  );
 DROP POLICY IF EXISTS financeiro_pre_preparos_delete_blocked ON financeiro_pre_preparos;
 CREATE POLICY financeiro_pre_preparos_delete_blocked ON financeiro_pre_preparos FOR DELETE USING (false);
 
 DROP POLICY IF EXISTS financeiro_produtos_finais_select ON financeiro_produtos_finais;
 CREATE POLICY financeiro_produtos_finais_select ON financeiro_produtos_finais FOR SELECT TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_produtos_finais_insert ON financeiro_produtos_finais;
 CREATE POLICY financeiro_produtos_finais_insert ON financeiro_produtos_finais FOR INSERT TO authenticated
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin' AND criado_por = auth.uid());
+  WITH CHECK (
+    criado_por = auth.uid()
+    AND (
+      (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+      OR ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'cozinha' AND status = 'pendente_revisao')
+    )
+  );
 DROP POLICY IF EXISTS financeiro_produtos_finais_update ON financeiro_produtos_finais;
 CREATE POLICY financeiro_produtos_finais_update ON financeiro_produtos_finais FOR UPDATE TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
-  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING (
+    (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+    OR ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'cozinha' AND status = 'pendente_revisao')
+  )
+  WITH CHECK (
+    (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
+    OR ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'cozinha' AND status = 'pendente_revisao')
+  );
 DROP POLICY IF EXISTS financeiro_produtos_finais_delete_blocked ON financeiro_produtos_finais;
 CREATE POLICY financeiro_produtos_finais_delete_blocked ON financeiro_produtos_finais FOR DELETE USING (false);
 
 DROP POLICY IF EXISTS financeiro_pre_preparo_itens_select ON financeiro_pre_preparo_itens;
 CREATE POLICY financeiro_pre_preparo_itens_select ON financeiro_pre_preparo_itens FOR SELECT TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'cozinha'));
 DROP POLICY IF EXISTS financeiro_produto_final_itens_select ON financeiro_produto_final_itens;
 CREATE POLICY financeiro_produto_final_itens_select ON financeiro_produto_final_itens FOR SELECT TO authenticated
-  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'cozinha'));
 
+-- Aceita admin e cozinha; cozinha só mexe em itens de linha pai ainda
+-- pendente de revisão.
 CREATE OR REPLACE FUNCTION financeiro_pre_preparo_salvar_itens(p_pre_preparo_id UUID, p_itens JSONB) RETURNS void AS $$
+DECLARE
+  v_role TEXT;
+  v_status TEXT;
 BEGIN
-  IF (SELECT role FROM usuarios WHERE id = auth.uid()) IS DISTINCT FROM 'admin' THEN
-    RAISE EXCEPTION 'apenas admin pode editar receitas';
+  SELECT role INTO v_role FROM usuarios WHERE id = auth.uid();
+  IF v_role NOT IN ('admin', 'cozinha') THEN
+    RAISE EXCEPTION 'apenas admin ou cozinha pode editar receitas';
+  END IF;
+  IF v_role = 'cozinha' THEN
+    SELECT status INTO v_status FROM financeiro_pre_preparos WHERE id = p_pre_preparo_id;
+    IF v_status IS DISTINCT FROM 'pendente_revisao' THEN
+      RAISE EXCEPTION 'cozinha só pode editar itens de pré-preparo pendente de revisão';
+    END IF;
   END IF;
   DELETE FROM financeiro_pre_preparo_itens WHERE pre_preparo_id = p_pre_preparo_id;
   INSERT INTO financeiro_pre_preparo_itens (pre_preparo_id, materia_prima_id, quantidade)
@@ -1110,9 +1156,19 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 GRANT EXECUTE ON FUNCTION financeiro_pre_preparo_salvar_itens TO authenticated;
 
 CREATE OR REPLACE FUNCTION financeiro_produto_final_salvar_itens(p_produto_final_id UUID, p_itens JSONB) RETURNS void AS $$
+DECLARE
+  v_role TEXT;
+  v_status TEXT;
 BEGIN
-  IF (SELECT role FROM usuarios WHERE id = auth.uid()) IS DISTINCT FROM 'admin' THEN
-    RAISE EXCEPTION 'apenas admin pode editar receitas';
+  SELECT role INTO v_role FROM usuarios WHERE id = auth.uid();
+  IF v_role NOT IN ('admin', 'cozinha') THEN
+    RAISE EXCEPTION 'apenas admin ou cozinha pode editar receitas';
+  END IF;
+  IF v_role = 'cozinha' THEN
+    SELECT status INTO v_status FROM financeiro_produtos_finais WHERE id = p_produto_final_id;
+    IF v_status IS DISTINCT FROM 'pendente_revisao' THEN
+      RAISE EXCEPTION 'cozinha só pode editar itens de produto final pendente de revisão';
+    END IF;
   END IF;
   DELETE FROM financeiro_produto_final_itens WHERE produto_final_id = p_produto_final_id;
   INSERT INTO financeiro_produto_final_itens (produto_final_id, materia_prima_id, pre_preparo_id, quantidade)

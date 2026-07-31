@@ -5,7 +5,7 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search, BarChart3 } from 'lucide-react'
 import { FinanceiroMateriaPrima } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 
@@ -48,12 +48,20 @@ export default function MateriasPrimasPage() {
           backHref="/financeiro"
           maxWidth="max-w-4xl"
           actions={
-            <Link
-              href="/financeiro/materias-primas/nova"
-              className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800"
-            >
-              <Plus size={18} /> Nova
-            </Link>
+            <div className="flex gap-2">
+              <Link
+                href="/financeiro/materias-primas/melhor-compra"
+                className="border border-pink-700 text-pink-700 rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-2 hover:bg-pink-50"
+              >
+                <BarChart3 size={16} /> Melhor Compra
+              </Link>
+              <Link
+                href="/financeiro/materias-primas/nova"
+                className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800"
+              >
+                <Plus size={18} /> Nova
+              </Link>
+            </div>
           }
         />
 

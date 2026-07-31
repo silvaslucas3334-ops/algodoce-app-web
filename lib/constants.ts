@@ -47,6 +47,28 @@ export const STATUS_CONCILIACAO_COLOR: Record<string, string> = {
   ignorado: 'bg-gray-100 text-gray-500',
 }
 
+// Etiqueta de aprovação de pagamento (financeiro_lancamentos) — recado
+// entre admins, não é o status de pagamento em si (ver STATUS_LABEL).
+export const ETIQUETA_APROVACAO_LABEL: Record<string, string> = {
+  planejar_pagamento: 'Planejar pagamento',
+  aprovada_pagamento: 'Aprovada p/ pagamento',
+}
+export const ETIQUETA_APROVACAO_COLOR: Record<string, string> = {
+  planejar_pagamento: 'bg-amber-100 text-amber-700',
+  aprovada_pagamento: 'bg-green-100 text-green-700',
+}
+
+// Status de revisão da Ficha Técnica (pré-preparos/produtos finais) —
+// cozinha cria/edita como pendente até um admin aprovar.
+export const STATUS_FICHA_TECNICA_LABEL: Record<string, string> = {
+  aprovado: 'Aprovado',
+  pendente_revisao: 'Pendente de Revisão',
+}
+export const STATUS_FICHA_TECNICA_COLOR: Record<string, string> = {
+  aprovado: 'bg-green-100 text-green-700',
+  pendente_revisao: 'bg-amber-100 text-amber-700',
+}
+
 export const FORMA_PAGAMENTO_LABEL: Record<string, string> = {
   boleto: 'Boleto',
   pix: 'PIX',

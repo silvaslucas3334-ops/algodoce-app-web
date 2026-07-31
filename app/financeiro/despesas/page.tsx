@@ -7,10 +7,11 @@ import EmptyState from '@/components/EmptyState'
 import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
 import { Plus, Search, ReceiptText, ShoppingCart, CheckCircle } from 'lucide-react'
-import { FinanceiroLancamento } from '@/lib/types'
+import { EtiquetaAprovacao, FinanceiroLancamento } from '@/lib/types'
 import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { hojeISO, somarDias, statusExibicao } from '@/lib/financeiro-utils'
+import EtiquetaAprovacaoSeletor from '@/components/EtiquetaAprovacaoSeletor'
 
 type Filtro = 'atrasadas' | 'vence7' | 'aberto' | 'pagas' | 'canceladas'
 
@@ -75,6 +76,19 @@ export default function DespesasPage() {
       alert('Erro ao marcar como paga: ' + (err?.message || 'desconhecido'))
     } finally {
       setPagandoId(null)
+    }
+  }
+
+  async function mudarEtiqueta(l: FinanceiroLancamento, nova: EtiquetaAprovacao | null) {
+    setLancamentos((prev) => prev.map((x) => (x.id === l.id ? { ...x, etiqueta_aprovacao: nova } : x)))
+    const { error } = await supabase
+      .from('financeiro_lancamentos')
+      .update({ etiqueta_aprovacao: nova, updated_at: new Date().toISOString() })
+      .eq('id', l.id)
+    if (error) {
+      console.error('Erro ao salvar etiqueta:', error)
+      setLancamentos((prev) => prev.map((x) => (x.id === l.id ? { ...x, etiqueta_aprovacao: l.etiqueta_aprovacao } : x)))
+      alert('Erro ao salvar etiqueta: ' + error.message)
     }
   }
 
@@ -191,6 +205,9 @@ export default function DespesasPage() {
                         )}
                         <p className="font-semibold text-gray-800">{formatBRL(l.valor_total)}</p>
                         <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
+                        {usuario?.role === 'admin' && l.status === 'aberto' && (
+                          <EtiquetaAprovacaoSeletor valor={l.etiqueta_aprovacao} onChange={(nova) => mudarEtiqueta(l, nova)} />
+                        )}
                         {l.extrato_transacao && (
                           <span
                             className={`text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap font-medium ${STATUS_CONCILIACAO_COLOR[l.extrato_transacao.status_conciliacao]}`}

@@ -244,6 +244,10 @@ export interface FinanceiroMateriaPrima {
 // final. Sem aninhamento: pré-preparo só usa matéria-prima (garantido
 // pela estrutura, FinanceiroPrePreparoItem não referencia outro
 // pré-preparo). Produto final combina matéria-prima e/ou pré-preparo.
+// 'pendente_revisao' quando criado/editado pela cozinha, até um admin
+// aprovar; admin cria/edita direto como 'aprovado'.
+export type StatusFichaTecnica = 'aprovado' | 'pendente_revisao'
+
 export interface FinanceiroPrePreparo {
   id: string
   codigo: string // auto-gerado (PP-0001...), não editável
@@ -252,6 +256,7 @@ export interface FinanceiroPrePreparo {
   rendimento_quantidade: number // quanto a receita rende, em unidade_medida
   descricao?: string
   ativo: boolean
+  status: StatusFichaTecnica
   criado_por: string
   created_at: string
   updated_at: string
@@ -275,6 +280,7 @@ export interface FinanceiroProdutoFinal {
   rendimento_porcoes: number // 1 = vendido inteiro; N = custo total dividido por N porções
   descricao?: string
   ativo: boolean
+  status: StatusFichaTecnica
   criado_por: string
   created_at: string
   updated_at: string
@@ -295,6 +301,10 @@ export interface FinanceiroProdutoFinalItem {
 // Tabela ÚNICA de lançamentos financeiros: despesa manual OU nota de compra
 // de insumos (que gera a sua "despesa" automaticamente; itens em
 // FinanceiroLancamentoItem alimentam o CMV).
+// Recado rápido entre os admins que mexem no financeiro, pra coordenar
+// prioridade de pagamento — não é o workflow de pagamento (isso é `status`).
+export type EtiquetaAprovacao = 'planejar_pagamento' | 'aprovada_pagamento'
+
 export interface FinanceiroLancamento {
   id: string
   tipo: TipoLancamento
@@ -321,6 +331,7 @@ export interface FinanceiroLancamento {
   extrato_transacao?: { status_conciliacao: StatusConciliacao }
   valor_juros_multa?: number // diferença entre valor lançado e valor pago (atraso), aplicada na conciliação manual
   observacoes?: string
+  etiqueta_aprovacao?: EtiquetaAprovacao | null
   criado_por: string
   created_at: string
   updated_at: string

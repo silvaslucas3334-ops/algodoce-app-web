@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
@@ -28,15 +28,18 @@ function NovaDespesaForm() {
   const extratoUnidade = params.get('unidade') as UnidadeFinanceiro | null
   const extratoDocumento = params.get('documento')
 
-  // Cozinha não é uma entidade própria — seus custos entram como rateio (0001).
-  const unidadeTravada: UnidadeFinanceiro | null =
-    usuario?.role === 'cozinha' ? 'rateio' : usuario?.role === 'loja' ? usuario?.loja_id : null
+  // Só o valor inicial do seletor — cozinha não é uma entidade própria
+  // (custos entram como rateio/0001) e loja tende a lançar pra própria
+  // unidade, mas qualquer um pode trocar depois: várias pessoas de
+  // unidades diferentes lançam despesa/nota, não é mais travado por role.
+  const unidadeInicial: UnidadeFinanceiro =
+    usuario?.role === 'cozinha' ? 'rateio' : usuario?.role === 'loja' && usuario?.loja_id ? (usuario.loja_id as UnidadeFinanceiro) : 'loja1'
 
   const [parteId, setParteId] = useState('')
   const [descricao, setDescricao] = useState('')
   const [valor, setValor] = useState(extratoValor || '')
   const [dataLancamento, setDataLancamento] = useState(extratoData || hojeISO())
-  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || extratoUnidade || 'loja1')
+  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(extratoUnidade || unidadeInicial)
   const [contaId, setContaId] = useState('')
   const [numeroDocumento, setNumeroDocumento] = useState('')
 
@@ -53,9 +56,16 @@ function NovaDespesaForm() {
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
+  // `usuario` carrega de forma assíncrona — aplica o palpite de unidade só
+  // uma vez, quando o usuário chega, sem sobrescrever se a pessoa já tiver
+  // trocado manualmente (não é mais uma trava permanente).
+  const unidadeAplicada = useRef(false)
   useEffect(() => {
-    if (unidadeTravada) setUnidade(unidadeTravada)
-  }, [unidadeTravada])
+    if (usuario && !unidadeAplicada.current && !extratoUnidade) {
+      unidadeAplicada.current = true
+      setUnidade(unidadeInicial)
+    }
+  }, [usuario])
 
   useEffect(() => {
     supabase
@@ -313,17 +323,11 @@ function NovaDespesaForm() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Unidade</label>
-                {unidadeTravada ? (
-                  <div className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-700 font-medium">
-                    {UNIDADE_LABEL[unidadeTravada]}
-                  </div>
-                ) : (
-                  <select value={unidade} onChange={(e) => setUnidade(e.target.value as UnidadeFinanceiro)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white">
-                    {(['loja1', 'loja2', 'rateio'] as UnidadeFinanceiro[]).map((u) => (
-                      <option key={u} value={u}>{UNIDADE_LABEL[u]}</option>
-                    ))}
-                  </select>
-                )}
+                <select value={unidade} onChange={(e) => setUnidade(e.target.value as UnidadeFinanceiro)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white">
+                  {(['loja1', 'loja2', 'rateio'] as UnidadeFinanceiro[]).map((u) => (
+                    <option key={u} value={u}>{UNIDADE_LABEL[u]}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Nº documento (opcional)</label>

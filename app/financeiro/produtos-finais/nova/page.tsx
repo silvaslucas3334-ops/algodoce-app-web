@@ -102,6 +102,7 @@ export default function NovoProdutoFinalPage() {
           codigo_pdv_loja2: codigoPdvLoja2.trim() || null,
           rendimento_porcoes: rendimentoNum,
           descricao: descricao.trim() || null,
+          status: usuario.role === 'cozinha' ? 'pendente_revisao' : 'aprovado',
         },
         usuario.id
       )
@@ -119,7 +120,7 @@ export default function NovoProdutoFinalPage() {
   }
 
   return (
-    <ProtectedRoute allowedRoles={['admin']}>
+    <ProtectedRoute allowedRoles={['admin', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
         <PageHeader title="Novo Produto Final" onBack={() => router.back()} />
 

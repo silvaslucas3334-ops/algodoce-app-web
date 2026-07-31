@@ -14,6 +14,11 @@ export interface FluxoMensalLinhaGrupo {
   nome: string
   porDia: number[]
   total: number
+  // Presente em saidasPorGrupo (que mistura despesa-por-conta e
+  // compra_insumos-por-fornecedor sem outro jeito de diferenciar) —
+  // discrimina se `id` é conta_id ou parte_id, usado pro popover de dia
+  // saber qual coluna/tipo buscar.
+  origem?: 'conta' | 'parte'
 }
 
 export interface FluxoMensalOrcadoRealizado {
@@ -456,6 +461,62 @@ export async function buscarDespesasFixasFuturas(
   return { itens, total: itens.reduce((s, i) => s + i.valor, 0) }
 }
 
+// --- lançamentos individuais de um dia, pro popover de Saídas -----------------
+
+export interface LancamentoDoDiaSaida {
+  id: string
+  descricao: string
+  valor_total: number
+  status: 'aberto' | 'pago'
+  numero_documento: string | null
+  parte_nome: string
+}
+
+/**
+ * Lançamentos individuais reais de UM grupo (conta ou fornecedor) em UM
+ * dia específico — busca sob demanda pro popover de dia, direto em
+ * financeiro_lancamentos (não reaproveita linhasFixo/linhasVariavel de
+ * buscarFluxoMensal, que misturam pago+aberto+recorrência-ainda-não-
+ * materializada+previsão-de-orçamento sem id real). Se vier vazio mas a
+ * célula clicada mostra valor, é 100% previsão (recorrência ou orçamento)
+ * sem lançamento real ainda — quem chama trata esse caso.
+ */
+export async function buscarLancamentosDoDiaSaida(
+  unidade: VisaoFluxoMensal,
+  dia: string,
+  origem: 'conta' | 'parte',
+  grupoId: string
+): Promise<LancamentoDoDiaSaida[]> {
+  const unidadesDespesa = unidade === 'consolidado' ? ['loja1', 'loja2', 'rateio'] : [unidade]
+  const tipo: TipoLancamento = origem === 'conta' ? 'despesa' : 'compra_insumos'
+  const coluna = origem === 'conta' ? 'conta_id' : 'parte_id'
+
+  function baseQuery() {
+    return supabase
+      .from('financeiro_lancamentos')
+      .select('id, descricao, valor_total, status, numero_documento, parte:financeiro_partes!parte_id(nome)')
+      .in('unidade', unidadesDespesa)
+      .eq('tipo', tipo)
+      .eq(coluna, grupoId)
+  }
+
+  const [{ data: pagos, error: erroPagos }, { data: abertos, error: erroAbertos }] = await Promise.all([
+    baseQuery().eq('status', 'pago').eq('data_pagamento', dia),
+    baseQuery().eq('status', 'aberto').eq('data_vencimento', dia),
+  ])
+  if (erroPagos) throw new Error(erroPagos.message)
+  if (erroAbertos) throw new Error(erroAbertos.message)
+
+  return [...(pagos || []), ...(abertos || [])].map((l: any) => ({
+    id: l.id,
+    descricao: l.descricao,
+    valor_total: l.valor_total,
+    status: l.status,
+    numero_documento: l.numero_documento,
+    parte_nome: l.parte?.nome || 'Sem beneficiário',
+  }))
+}
+
 // --- função principal --------------------------------------------------------
 
 /**
@@ -668,9 +729,9 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
 
   // Com a previsão já injetada — usado no calendário (totais e detalhamento).
   const saidasFixoPorDia = agruparLinhasPorDia(linhasFixo)
-  const saidasFixoPorConta = agruparLinhasPorChave(linhasFixo, 'contaId', 'contaNome')
+  const saidasFixoPorConta = agruparLinhasPorChave(linhasFixo, 'contaId', 'contaNome').map((g) => ({ ...g, origem: 'conta' as const }))
   const saidasVariavelPorDia = agruparLinhasPorDia(linhasVariavel)
-  const saidasVariavelPorFornecedor = agruparLinhasPorChave(linhasVariavel, 'parteId', 'parteNome')
+  const saidasVariavelPorFornecedor = agruparLinhasPorChave(linhasVariavel, 'parteId', 'parteNome').map((g) => ({ ...g, origem: 'parte' as const }))
 
   // Uma linha só de Saídas — despesa (por conta) e compra_insumos (por
   // fornecedor) não representam fixo x variável de verdade, então não

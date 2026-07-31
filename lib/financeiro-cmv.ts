@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { FinanceiroPrePreparo, FinanceiroProdutoFinal } from './types'
+import { FinanceiroPrePreparo, FinanceiroProdutoFinal, StatusFichaTecnica } from './types'
 
 // --- custo atual das matérias-primas -----------------------------------
 
@@ -111,7 +111,7 @@ export function calcularCustoProdutoFinal(
 // --- escrita: pré-preparo -------------------------------------------------
 
 export async function criarPrePreparo(
-  dados: { nome: string; unidade_medida: string; rendimento_quantidade: number; descricao: string | null },
+  dados: { nome: string; unidade_medida: string; rendimento_quantidade: number; descricao: string | null; status?: StatusFichaTecnica },
   usuarioId: string
 ): Promise<string> {
   const { data, error } = await supabase
@@ -150,6 +150,7 @@ export async function criarProdutoFinal(
     codigo_pdv_loja2: string | null
     rendimento_porcoes: number
     descricao: string | null
+    status?: StatusFichaTecnica
   },
   usuarioId: string
 ): Promise<string> {

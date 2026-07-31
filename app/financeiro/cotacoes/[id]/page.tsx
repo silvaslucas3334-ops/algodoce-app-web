@@ -96,7 +96,7 @@ export default function DetalheCotacaoPage() {
 
   if (loading) {
     return (
-      <ProtectedRoute allowedRoles={['admin']}>
+      <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
         <div className="flex items-center justify-center min-h-screen gap-2 text-gray-400">
           <Loader size={20} className="animate-spin" /> Carregando...
         </div>
@@ -106,14 +106,14 @@ export default function DetalheCotacaoPage() {
 
   if (!cotacao) {
     return (
-      <ProtectedRoute allowedRoles={['admin']}>
+      <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
         <NotFoundState title="Cotação não encontrada" backHref="/financeiro/cotacoes" />
       </ProtectedRoute>
     )
   }
 
   return (
-    <ProtectedRoute allowedRoles={['admin']}>
+    <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
         <PageHeader
           title={cotacao.titulo}

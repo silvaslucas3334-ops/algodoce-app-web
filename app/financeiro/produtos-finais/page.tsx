@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { Plus, Search } from 'lucide-react'
 import { FinanceiroProdutoFinal } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
+import { STATUS_FICHA_TECNICA_LABEL, STATUS_FICHA_TECNICA_COLOR } from '@/lib/constants'
 import { buscarCustosAtuaisMateriasPrimas, calcularCustoPrePreparo, calcularCustoProdutoFinal } from '@/lib/financeiro-cmv'
 
 export default function ProdutosFinaisPage() {
@@ -15,6 +16,7 @@ export default function ProdutosFinaisPage() {
   const [custos, setCustos] = useState<Record<string, ReturnType<typeof calcularCustoProdutoFinal>>>({})
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
+  const [soPendentes, setSoPendentes] = useState(false)
 
   useEffect(() => {
     carregar()
@@ -59,10 +61,12 @@ export default function ProdutosFinaisPage() {
     setLoading(false)
   }
 
-  const filtrados = produtos.filter((p) => p.nome.toLowerCase().includes(busca.trim().toLowerCase()))
+  const filtrados = produtos.filter(
+    (p) => p.nome.toLowerCase().includes(busca.trim().toLowerCase()) && (!soPendentes || p.status === 'pendente_revisao')
+  )
 
   return (
-    <ProtectedRoute allowedRoles={['admin']}>
+    <ProtectedRoute allowedRoles={['admin', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
         <PageHeader
           title="Produtos Finais"
@@ -88,6 +92,23 @@ export default function ProdutosFinaisPage() {
               onChange={(e) => setBusca(e.target.value)}
               className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2.5 text-sm"
             />
+          </div>
+
+          <div className="flex gap-2 mb-4">
+            {[
+              { key: false, label: 'Todos' },
+              { key: true, label: 'Pendentes de revisão' },
+            ].map((f) => (
+              <button
+                key={String(f.key)}
+                onClick={() => setSoPendentes(f.key)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                  soPendentes === f.key ? 'bg-amber-600 border-amber-600 text-white' : 'bg-white border-gray-300 text-gray-600'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
           </div>
 
           {loading ? (
@@ -125,6 +146,11 @@ export default function ProdutosFinaisPage() {
                             <p className="text-xs text-amber-600">Custo incompleto</p>
                           )}
                           {!p.ativo && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Inativo</span>}
+                          {p.status === 'pendente_revisao' && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full ml-1 ${STATUS_FICHA_TECNICA_COLOR.pendente_revisao}`}>
+                              {STATUS_FICHA_TECNICA_LABEL.pendente_revisao}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

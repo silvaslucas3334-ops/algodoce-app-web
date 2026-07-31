@@ -167,7 +167,7 @@ export default function CotacaoPdfPage() {
 
   if (loading) {
     return (
-      <ProtectedRoute allowedRoles={['admin']}>
+      <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
         <div className="flex items-center justify-center min-h-screen text-gray-400">Carregando...</div>
       </ProtectedRoute>
     )
@@ -175,14 +175,14 @@ export default function CotacaoPdfPage() {
 
   if (!cotacao || !fornecedor) {
     return (
-      <ProtectedRoute allowedRoles={['admin']}>
+      <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
         <NotFoundState title="Cotação ou fornecedor não encontrado" backHref={`/financeiro/cotacoes/${cotacaoId}`} />
       </ProtectedRoute>
     )
   }
 
   return (
-    <ProtectedRoute allowedRoles={['admin']}>
+    <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
       <div className="bg-white min-h-screen">
         <div className="p-4 bg-gray-50 border-b flex items-center justify-between">
           <button onClick={() => router.back()} className="text-gray-600 hover:text-gray-800 flex items-center gap-2">

@@ -7,11 +7,12 @@ import PageHeader from '@/components/PageHeader'
 import NotFoundState from '@/components/NotFoundState'
 import { useParams } from 'next/navigation'
 import { Loader, CheckCircle, XCircle, ShoppingCart, ReceiptText, Pencil, Plus, Trash2 } from 'lucide-react'
-import { FinanceiroConta, FinanceiroLancamentoItem, FinanceiroParte, FinanceiroMateriaPrima } from '@/lib/types'
+import { EtiquetaAprovacao, FinanceiroConta, FinanceiroLancamentoItem, FinanceiroParte, FinanceiroMateriaPrima } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL, CONDICAO_PAGAMENTO_LABEL, TIPO_LANCAMENTO_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { formatarDocumento, hojeISO, statusExibicao, somarMeses } from '@/lib/financeiro-utils'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
+import EtiquetaAprovacaoSeletor from '@/components/EtiquetaAprovacaoSeletor'
 
 function itemParaItemNota(item: FinanceiroLancamentoItem): ItemNota {
   return {
@@ -171,6 +172,21 @@ export default function DetalheDespesaPage() {
       setErro('Erro ao cancelar: ' + (err?.message || 'desconhecido'))
     } finally {
       setProcessando(false)
+    }
+  }
+
+  async function mudarEtiqueta(nova: EtiquetaAprovacao | null) {
+    if (!lancamento) return
+    const anterior = lancamento.etiqueta_aprovacao
+    setLancamento({ ...lancamento, etiqueta_aprovacao: nova })
+    const { error } = await supabase
+      .from('financeiro_lancamentos')
+      .update({ etiqueta_aprovacao: nova, updated_at: new Date().toISOString() })
+      .eq('id', lancamentoId)
+    if (error) {
+      console.error('Erro ao salvar etiqueta:', error)
+      setLancamento((prev: any) => ({ ...prev, etiqueta_aprovacao: anterior }))
+      alert('Erro ao salvar etiqueta: ' + error.message)
     }
   }
 
@@ -470,6 +486,15 @@ export default function DetalheDespesaPage() {
                     )}
                   </span>
                 </div>
+                {ehAdmin && lancamento.status === 'aberto' && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500">Etiqueta</span>
+                    <EtiquetaAprovacaoSeletor
+                      valor={lancamento.etiqueta_aprovacao}
+                      onChange={(nova) => mudarEtiqueta(nova)}
+                    />
+                  </div>
+                )}
                 {!!lancamento.valor_juros_multa && lancamento.valor_juros_multa > 0 && (
                   <div className="flex justify-between">
                     <span className="text-red-600 text-xs">Juros/multa por atraso</span>

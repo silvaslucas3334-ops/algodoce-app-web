@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
@@ -45,15 +45,18 @@ function LancarNotaForm() {
   const [avisoCotacao, setAvisoCotacao] = useState('')
   const [modalCotacao, setModalCotacao] = useState(false)
 
-  // Cozinha não é uma entidade própria — seus custos entram como rateio (0001).
-  const unidadeTravada: UnidadeFinanceiro | null =
-    usuario?.role === 'cozinha' ? 'rateio' : usuario?.role === 'loja' ? usuario?.loja_id : null
+  // Só o valor inicial do seletor — cozinha não é uma entidade própria
+  // (custos entram como rateio/0001) e loja tende a lançar pra própria
+  // unidade, mas qualquer um pode trocar depois: várias pessoas de
+  // unidades diferentes lançam nota, não é mais travado por role.
+  const unidadeInicial: UnidadeFinanceiro =
+    usuario?.role === 'cozinha' ? 'rateio' : usuario?.role === 'loja' && usuario?.loja_id ? (usuario.loja_id as UnidadeFinanceiro) : 'loja1'
 
   // Dados da nota
   const [fornecedorId, setFornecedorId] = useState('')
   const [numeroNota, setNumeroNota] = useState('')
   const [dataCompra, setDataCompra] = useState(extratoData || hojeISO())
-  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(unidadeTravada || extratoUnidade || 'loja1')
+  const [unidade, setUnidade] = useState<UnidadeFinanceiro>(extratoUnidade || unidadeInicial)
 
   // Itens
   const [itens, setItens] = useState<ItemNota[]>([])
@@ -70,10 +73,22 @@ function LancarNotaForm() {
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
+  // `usuario` carrega de forma assíncrona — aplica o palpite de unidade só
+  // uma vez, quando o usuário chega, sem sobrescrever se a pessoa já tiver
+  // trocado manualmente (não é mais uma trava permanente).
+  const unidadeAplicada = useRef(false)
   useEffect(() => {
-    if (unidadeTravada) setUnidade(unidadeTravada)
-    else if (cotacaoUnidade) setUnidade(cotacaoUnidade)
-  }, [unidadeTravada, cotacaoUnidade])
+    if (usuario && !unidadeAplicada.current && !extratoUnidade) {
+      unidadeAplicada.current = true
+      setUnidade(unidadeInicial)
+    }
+  }, [usuario])
+
+  // Importar cotação é uma ação deliberada — essa sim sempre substitui a
+  // unidade escolhida, mesmo depois do palpite inicial.
+  useEffect(() => {
+    if (cotacaoUnidade) setUnidade(cotacaoUnidade)
+  }, [cotacaoUnidade])
 
   // Busca uma cotação fechada + itens + preços do fornecedor vencedor, e
   // SOMA ao array de itens já no carrinho (nunca substitui — permite
@@ -343,17 +358,11 @@ function LancarNotaForm() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Unidade</label>
-              {unidadeTravada ? (
-                <div className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-700 font-medium">
-                  {UNIDADE_LABEL[unidadeTravada]}
-                </div>
-              ) : (
-                <select value={unidade} onChange={(e) => setUnidade(e.target.value as UnidadeFinanceiro)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white">
-                  {(['loja1', 'loja2', 'rateio'] as UnidadeFinanceiro[]).map((u) => (
-                    <option key={u} value={u}>{UNIDADE_LABEL[u]}</option>
-                  ))}
-                </select>
-              )}
+              <select value={unidade} onChange={(e) => setUnidade(e.target.value as UnidadeFinanceiro)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white">
+                {(['loja1', 'loja2', 'rateio'] as UnidadeFinanceiro[]).map((u) => (
+                  <option key={u} value={u}>{UNIDADE_LABEL[u]}</option>
+                ))}
+              </select>
             </div>
           </div>
 

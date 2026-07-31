@@ -73,6 +73,7 @@ export default function NovoPrePreparoPage() {
           unidade_medida: unidadeMedida.trim(),
           rendimento_quantidade: rendimentoNum,
           descricao: descricao.trim() || null,
+          status: usuario.role === 'cozinha' ? 'pendente_revisao' : 'aprovado',
         },
         usuario.id
       )
@@ -90,7 +91,7 @@ export default function NovoPrePreparoPage() {
   }
 
   return (
-    <ProtectedRoute allowedRoles={['admin']}>
+    <ProtectedRoute allowedRoles={['admin', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
         <PageHeader title="Novo Pré-Preparado" onBack={() => router.back()} />
 

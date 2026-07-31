@@ -6,9 +6,11 @@ import PageHeader from '@/components/PageHeader'
 import NotFoundState from '@/components/NotFoundState'
 import SelecionarInsumoReceitaModal, { ItemReceitaForm } from '@/components/SelecionarInsumoReceitaModal'
 import { useRouter, useParams } from 'next/navigation'
-import { Loader, Plus, Trash2 } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
+import { Loader, Plus, Trash2, CheckCircle } from 'lucide-react'
 import { FinanceiroProdutoFinal, FinanceiroMateriaPrima, FinanceiroPrePreparo } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
+import { STATUS_FICHA_TECNICA_LABEL, STATUS_FICHA_TECNICA_COLOR } from '@/lib/constants'
 import {
   buscarCustosAtuaisMateriasPrimas,
   calcularCustoPrePreparo,
@@ -17,6 +19,7 @@ import {
 } from '@/lib/financeiro-cmv'
 
 export default function DetalheProdutoFinalPage() {
+  const { usuario } = useAuth()
   const router = useRouter()
   const params = useParams()
   const produtoFinalId = params.id as string
@@ -116,6 +119,25 @@ export default function DetalheProdutoFinalPage() {
   const itensSemCusto = itens.filter((i) => custoDaLinha(i) == null)
   const custoCompleto = itensSemCusto.length === 0
   const rendimentoPorcoes = produtoFinal?.rendimento_porcoes || 1
+  const podeEditar = usuario?.role === 'admin' || (usuario?.role === 'cozinha' && produtoFinal?.status === 'pendente_revisao')
+
+  async function aprovar() {
+    if (!produtoFinal) return
+    setSalvando(true)
+    setErro('')
+    try {
+      const { error } = await supabase
+        .from('financeiro_produtos_finais')
+        .update({ status: 'aprovado', updated_at: new Date().toISOString() })
+        .eq('id', produtoFinalId)
+      if (error) throw error
+      await carregar()
+    } catch (err: any) {
+      setErro('Erro ao aprovar: ' + (err?.message || 'desconhecido'))
+    } finally {
+      setSalvando(false)
+    }
+  }
 
   async function salvar() {
     if (!produtoFinal) return
@@ -152,7 +174,7 @@ export default function DetalheProdutoFinalPage() {
 
   if (loading) {
     return (
-      <ProtectedRoute allowedRoles={['admin']}>
+      <ProtectedRoute allowedRoles={['admin', 'cozinha']}>
         <div className="flex items-center justify-center min-h-screen gap-2 text-gray-400">
           <Loader size={20} className="animate-spin" /> Carregando...
         </div>
@@ -162,19 +184,45 @@ export default function DetalheProdutoFinalPage() {
 
   if (!produtoFinal) {
     return (
-      <ProtectedRoute allowedRoles={['admin']}>
+      <ProtectedRoute allowedRoles={['admin', 'cozinha']}>
         <NotFoundState backHref="/financeiro/produtos-finais" />
       </ProtectedRoute>
     )
   }
 
   return (
-    <ProtectedRoute allowedRoles={['admin']}>
+    <ProtectedRoute allowedRoles={['admin', 'cozinha']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <PageHeader title={produtoFinal.nome} onBack={() => router.back()} />
+        <PageHeader
+          title={produtoFinal.nome}
+          onBack={() => router.back()}
+          actions={
+            produtoFinal.status === 'pendente_revisao' ? (
+              <div className="flex items-center gap-2">
+                <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_FICHA_TECNICA_COLOR.pendente_revisao}`}>
+                  {STATUS_FICHA_TECNICA_LABEL.pendente_revisao}
+                </span>
+                {usuario?.role === 'admin' && (
+                  <button
+                    onClick={aprovar}
+                    disabled={salvando}
+                    className="bg-green-600 text-white rounded-lg px-3 py-1.5 text-xs font-semibold flex items-center gap-1 hover:bg-green-700 disabled:opacity-50"
+                  >
+                    <CheckCircle size={14} /> Aprovar
+                  </button>
+                )}
+              </div>
+            ) : undefined
+          }
+        />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}
+          {!podeEditar && (
+            <div className="bg-gray-100 border border-gray-200 rounded-lg p-3 text-sm text-gray-600">
+              Já foi aprovado — só um admin pode editar a partir daqui.
+            </div>
+          )}
 
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
             <h2 className="font-semibold text-gray-800">Cadastro</h2>
@@ -304,9 +352,11 @@ export default function DetalheProdutoFinalPage() {
             )}
           </div>
 
-          <button onClick={salvar} disabled={salvando} className="w-full bg-pink-700 text-white rounded-lg py-3 font-medium disabled:opacity-50">
-            {salvando ? 'Salvando...' : 'Salvar Alterações'}
-          </button>
+          {podeEditar && (
+            <button onClick={salvar} disabled={salvando} className="w-full bg-pink-700 text-white rounded-lg py-3 font-medium disabled:opacity-50">
+              {salvando ? 'Salvando...' : 'Salvar Alterações'}
+            </button>
+          )}
         </div>
       </div>
 
