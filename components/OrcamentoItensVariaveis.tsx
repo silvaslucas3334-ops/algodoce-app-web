@@ -101,7 +101,13 @@ export default function OrcamentoItensVariaveis({ itens, onChange, fornecedores,
               <div className="flex items-center gap-2">
                 <div className="text-right">
                   <span className="font-semibold text-gray-800">{formatBRL(item.valor_previsto)}</span>
-                  {item.diaSemana != null && <span className="block text-[10px] text-gray-400">por ocorrência</span>}
+                  {/* "R$ 500 toda segunda" não é R$ 500 no mês — mostrar o
+                      total mensal evita o usuário somar errado de cabeça. */}
+                  {item.diaSemana != null && (
+                    <span className="block text-[10px] text-gray-400">
+                      por ocorrência · {formatBRL(valorMensalItemOrcamento({ valor_previsto: item.valor_previsto, dia_semana: item.diaSemana }, dias))} no mês
+                    </span>
+                  )}
                 </div>
                 {!readOnly && (
                   <button onClick={() => removerItem(i)} className="text-red-600 hover:text-red-700"><Trash2 size={14} /></button>
@@ -179,6 +185,7 @@ export default function OrcamentoItensVariaveis({ itens, onChange, fornecedores,
           <div className="flex gap-2">
             <input
               type="number" step="0.01" min={0} value={novoValor} onChange={(e) => setNovoValor(e.target.value)}
+              onWheel={(e) => e.currentTarget.blur()} // rolar a página não pode alterar um campo de dinheiro
               placeholder={novoQuando === 'dia_semana' ? 'Valor por ocorrência (R$)' : 'Valor previsto (R$)'} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
             <button
