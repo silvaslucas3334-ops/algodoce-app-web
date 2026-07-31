@@ -370,6 +370,28 @@ async function buscarFaturamentoLoja(
   return { porDia, ehForecastPorDia }
 }
 
+export interface FaturamentoPorLoja {
+  loja: 'loja1' | 'loja2'
+  porDia: (number | null)[]
+  ehForecastPorDia: boolean[]
+}
+
+/**
+ * Breakdown por loja do Faturamento do mês — buscarFluxoMensal já calcula
+ * isso internamente (via buscarFaturamentoLoja, uma vez por loja) mas soma
+ * antes de retornar (view é sempre 'consolidado'). Usado só pelo popover
+ * de navegação da linha Faturamento (clique num dia ou no Total do mês),
+ * sob demanda — reaproveita a mesma lógica de merge manual×PDV e
+ * forecast, sem duplicar.
+ */
+export async function buscarFaturamentoPorLojaDoMes(ano: number, mes: number): Promise<FaturamentoPorLoja[]> {
+  const dias = diasDoMes(ano, mes)
+  const hoje = hojeISO()
+  const lojas: ('loja1' | 'loja2')[] = ['loja1', 'loja2']
+  const resultados = await Promise.all(lojas.map((loja) => buscarFaturamentoLoja(loja, ano, mes, dias, hoje)))
+  return lojas.map((loja, i) => ({ loja, porDia: resultados[i].porDia, ehForecastPorDia: resultados[i].ehForecastPorDia }))
+}
+
 // --- Despesas fixas futuras (já lançadas + recorrências ainda não materializadas) --
 
 export interface LinhaDespesaFixaFutura {

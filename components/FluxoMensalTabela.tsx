@@ -5,6 +5,7 @@ import { formatBRL } from '@/lib/ofx'
 import { hojeISO } from '@/lib/financeiro-utils'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import FluxoDiaPopover from './FluxoDiaPopover'
+import FluxoFaturamentoPopover from './FluxoFaturamentoPopover'
 
 interface Props {
   dados: FluxoMensalResultado
@@ -16,6 +17,12 @@ interface PopoverState {
   origem: 'conta' | 'parte'
   grupoId: string
   valorCelula: number
+  anchorRect: DOMRect
+}
+
+interface PopoverFaturamentoState {
+  dia: string | null // null = Total do mês
+  diaIndex: number | null
   anchorRect: DOMRect
 }
 
@@ -64,6 +71,7 @@ function CelulaDia({
 export default function FluxoMensalTabela({ dados }: Props) {
   const [expandidoSaidas, setExpandidoSaidas] = useState(false)
   const [popover, setPopover] = useState<PopoverState | null>(null)
+  const [popoverFaturamento, setPopoverFaturamento] = useState<PopoverFaturamentoState | null>(null)
   const hoje = hojeISO()
 
   const orcadoPorId = new Map(dados.orcadoXRealizado.map((o) => [o.id, o]))
@@ -102,9 +110,20 @@ export default function FluxoMensalTabela({ dados }: Props) {
               <tr className="bg-blue-50/50">
                 <td className="sticky left-0 bg-blue-50 px-3 py-1.5 font-semibold text-gray-700">Faturamento</td>
                 {dados.faturamentoPorDia.map((v, i) => (
-                  <CelulaDia key={i} valor={v} ehForecast={dados.faturamentoEhForecastPorDia[i]} className={bordaHoje(dados.dias[i], hoje)} />
+                  <CelulaDia
+                    key={i}
+                    valor={v}
+                    ehForecast={dados.faturamentoEhForecastPorDia[i]}
+                    className={bordaHoje(dados.dias[i], hoje)}
+                    onClick={(e) =>
+                      setPopoverFaturamento({ dia: dados.dias[i], diaIndex: i, anchorRect: e.currentTarget.getBoundingClientRect() })
+                    }
+                  />
                 ))}
-                <td className="px-3 py-1.5 text-right font-semibold text-gray-800">
+                <td
+                  onClick={(e) => setPopoverFaturamento({ dia: null, diaIndex: null, anchorRect: e.currentTarget.getBoundingClientRect() })}
+                  className="px-3 py-1.5 text-right font-semibold text-gray-800 cursor-pointer hover:bg-blue-100"
+                >
                   {formatBRL(dados.faturamentoPorDia.reduce((s: number, v) => s + (v || 0), 0))}
                 </td>
               </tr>
@@ -244,6 +263,17 @@ export default function FluxoMensalTabela({ dados }: Props) {
           valorCelula={popover.valorCelula}
           anchorRect={popover.anchorRect}
           onClose={() => setPopover(null)}
+        />
+      )}
+
+      {popoverFaturamento && (
+        <FluxoFaturamentoPopover
+          ano={dados.ano}
+          mes={dados.mes}
+          dia={popoverFaturamento.dia}
+          diaIndex={popoverFaturamento.diaIndex}
+          anchorRect={popoverFaturamento.anchorRect}
+          onClose={() => setPopoverFaturamento(null)}
         />
       )}
     </div>
