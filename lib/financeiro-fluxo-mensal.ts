@@ -264,20 +264,30 @@ export function entradaPrevistaDeWeekdays(
   return somaPorDiaSemana(orcamentos.map((o) => o?.entradaPrevistaPorDiaSemana || []), dias)
 }
 
-/** Delta (Faturamento − Meta Diária) e GAP acumulado (soma corrida do Delta). */
+/**
+ * Delta (Faturamento − Meta Diária) e GAP acumulado (soma corrida do Delta).
+ *
+ * Um dia sem Delta (sem meta cadastrada pro dia da semana — loja fechada
+ * no domingo, por exemplo) não contribui com nada, mas TAMBÉM não invalida
+ * o acumulado: o GAP repete o valor do dia anterior. Antes um único dia
+ * sem meta zerava (null) o GAP de todos os dias seguintes, deixando a
+ * linha inteira do calendário como "—" a partir do primeiro domingo. O GAP
+ * só continua null enquanto nenhum Delta foi calculado ainda (mês sem meta
+ * nenhuma cadastrada = "—" o mês todo, que é o correto).
+ */
 export function calcularDeltaEGap(
   faturamentoPorDia: (number | null)[],
   metaDiariaPorDia: (number | null)[]
 ): { deltaPorDia: (number | null)[]; gapAcumuladoPorDia: (number | null)[] } {
   const deltaPorDia = faturamentoPorDia.map((f, i) => (f != null && metaDiariaPorDia[i] != null ? f - metaDiariaPorDia[i]! : null))
-  let gapCorrente: number | null = 0
+  let gapCorrente = 0
+  let comecou = false
   const gapAcumuladoPorDia = deltaPorDia.map((delta) => {
-    if (gapCorrente == null || delta == null) {
-      gapCorrente = null
-    } else {
-      gapCorrente = gapCorrente + delta
+    if (delta != null) {
+      gapCorrente += delta
+      comecou = true
     }
-    return gapCorrente
+    return comecou ? gapCorrente : null
   })
   return { deltaPorDia, gapAcumuladoPorDia }
 }
