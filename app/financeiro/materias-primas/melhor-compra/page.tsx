@@ -22,7 +22,7 @@ export default function MelhorCompraPage() {
     setLoading(true)
     const [{ data: custos }, { data: materias }] = await Promise.all([
       supabase.from('financeiro_custo_por_fornecedor').select('*'),
-      supabase.from('financeiro_materias_primas').select('id, nome, unidade_medida').eq('ativo', true),
+      supabase.from('financeiro_materias_primas').select('id, nome, unidade_medida, unidade_compra, fator_conversao').eq('ativo', true),
     ])
     setGrupos(agruparCustoPorFornecedor((custos || []) as FinanceiroCustoPorFornecedor[], (materias || []) as FinanceiroMateriaPrima[]))
     setLoading(false)
@@ -72,6 +72,7 @@ export default function MelhorCompraPage() {
                         <tr className="text-left text-gray-500 border-b border-gray-200">
                           <th className="py-2 pr-3">Fornecedor</th>
                           <th className="py-2 pr-3">Custo médio/{grupo.unidade_medida}</th>
+                          <th className="py-2 pr-3">Preço/{grupo.unidade_compra}</th>
                           <th className="py-2 pr-3">Nº compras</th>
                           <th className="py-2 pr-3">Última compra</th>
                         </tr>
@@ -88,6 +89,9 @@ export default function MelhorCompraPage() {
                               )}
                             </td>
                             <td className="py-2 pr-3 text-gray-800">{formatBRL(f.custo_medio_por_unidade_medida)}</td>
+                            <td className="py-2 pr-3 font-medium text-gray-800">
+                              {formatBRL(f.custo_medio_por_unidade_medida * grupo.fator_conversao)}
+                            </td>
                             <td className="py-2 pr-3 text-gray-600">{f.numero_compras}</td>
                             <td className="py-2 pr-3 text-gray-600">{new Date(f.ultima_compra + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
                           </tr>

@@ -6,9 +6,9 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { Plus, Search, ReceiptText, ShoppingCart, CheckCircle } from 'lucide-react'
+import { Plus, Search, ReceiptText, ShoppingCart, CheckCircle, X } from 'lucide-react'
 import { EtiquetaAprovacao, FinanceiroLancamento } from '@/lib/types'
-import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
+import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR, ETIQUETA_APROVACAO_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { hojeISO, somarDias, statusExibicao } from '@/lib/financeiro-utils'
 import EtiquetaAprovacaoSeletor from '@/components/EtiquetaAprovacaoSeletor'
@@ -23,6 +23,15 @@ const FILTROS: { key: Filtro; label: string }[] = [
   { key: 'canceladas', label: 'Canceladas' },
 ]
 
+type FiltroEtiqueta = 'todas' | 'sem_etiqueta' | EtiquetaAprovacao
+
+const FILTROS_ETIQUETA: { key: FiltroEtiqueta; label: string }[] = [
+  { key: 'todas', label: 'Todas' },
+  { key: 'sem_etiqueta', label: 'Sem etiqueta' },
+  { key: 'planejar_pagamento', label: ETIQUETA_APROVACAO_LABEL.planejar_pagamento },
+  { key: 'aprovada_pagamento', label: ETIQUETA_APROVACAO_LABEL.aprovada_pagamento },
+]
+
 export default function DespesasPage() {
   const { usuario } = useAuth()
   const [lancamentos, setLancamentos] = useState<FinanceiroLancamento[]>([])
@@ -30,6 +39,11 @@ export default function DespesasPage() {
   const [filtro, setFiltro] = useState<Filtro>('aberto')
   const [busca, setBusca] = useState('')
   const [pagandoId, setPagandoId] = useState<string | null>(null)
+  const [mostrarMaisFiltros, setMostrarMaisFiltros] = useState(false)
+  const [filtroParteId, setFiltroParteId] = useState('')
+  const [filtroEtiqueta, setFiltroEtiqueta] = useState<FiltroEtiqueta>('todas')
+  const [vencimentoDe, setVencimentoDe] = useState('')
+  const [vencimentoAte, setVencimentoAte] = useState('')
 
   useEffect(() => {
     if (usuario) carregar()
@@ -92,15 +106,36 @@ export default function DespesasPage() {
     }
   }
 
+  const fornecedoresDisponiveis = Array.from(
+    new Map(lancamentos.filter((l) => l.parte).map((l) => [l.parte_id, l.parte!.nome])).entries()
+  )
+    .map(([id, nome]) => ({ id, nome }))
+    .sort((a, b) => a.nome.localeCompare(b.nome))
+
+  const filtrosSecundariosAtivos = !!filtroParteId || filtroEtiqueta !== 'todas' || !!vencimentoDe || !!vencimentoAte
+  function limparFiltrosSecundarios() {
+    setFiltroParteId('')
+    setFiltroEtiqueta('todas')
+    setVencimentoDe('')
+    setVencimentoAte('')
+  }
+
   const termo = busca.trim().toLowerCase()
-  const filtradas = termo
-    ? lancamentos.filter(
-        (l) =>
-          l.descricao.toLowerCase().includes(termo) ||
-          (l.parte?.nome || '').toLowerCase().includes(termo) ||
-          (l.conta?.nome || '').toLowerCase().includes(termo)
-      )
-    : lancamentos
+  const filtradas = lancamentos.filter((l) => {
+    if (termo) {
+      const bate =
+        l.descricao.toLowerCase().includes(termo) ||
+        (l.parte?.nome || '').toLowerCase().includes(termo) ||
+        (l.conta?.nome || '').toLowerCase().includes(termo)
+      if (!bate) return false
+    }
+    if (filtroParteId && l.parte_id !== filtroParteId) return false
+    if (filtroEtiqueta === 'sem_etiqueta' && l.etiqueta_aprovacao) return false
+    if (filtroEtiqueta !== 'todas' && filtroEtiqueta !== 'sem_etiqueta' && l.etiqueta_aprovacao !== filtroEtiqueta) return false
+    if (vencimentoDe && l.data_vencimento < vencimentoDe) return false
+    if (vencimentoAte && l.data_vencimento > vencimentoAte) return false
+    return true
+  })
 
   const totalFiltrado = filtradas.reduce((acc, l) => acc + l.valor_total, 0)
 
@@ -141,7 +176,7 @@ export default function DespesasPage() {
             />
           </div>
 
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+          <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
             {FILTROS.map((f) => (
               <button
                 key={f.key}
@@ -155,7 +190,83 @@ export default function DespesasPage() {
                 {f.label}
               </button>
             ))}
+            <button
+              onClick={() => setMostrarMaisFiltros((v) => !v)}
+              className={`px-3 py-1 rounded-full text-sm whitespace-nowrap border flex items-center gap-1 ${
+                mostrarMaisFiltros || filtrosSecundariosAtivos
+                  ? 'bg-gray-800 text-white border-transparent font-semibold'
+                  : 'bg-white border-gray-200 text-gray-500'
+              }`}
+            >
+              Mais filtros{filtrosSecundariosAtivos ? ' ·' : ''}
+            </button>
           </div>
+
+          {mostrarMaisFiltros && (
+            <div className="bg-white border border-gray-200 rounded-lg p-3 mb-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Fornecedor</label>
+                  <select
+                    value={filtroParteId}
+                    onChange={(e) => setFiltroParteId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  >
+                    <option value="">Todos</option>
+                    {fornecedoresDisponiveis.map((f) => (
+                      <option key={f.id} value={f.id}>{f.nome}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Vencimento</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={vencimentoDe}
+                      onChange={(e) => setVencimentoDe(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm"
+                    />
+                    <span className="text-gray-400 text-xs">até</span>
+                    <input
+                      type="date"
+                      value={vencimentoAte}
+                      onChange={(e) => setVencimentoAte(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Etiqueta</label>
+                <div className="flex gap-2 flex-wrap">
+                  {FILTROS_ETIQUETA.map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => setFiltroEtiqueta(f.key)}
+                      className={`px-3 py-1 rounded-full text-xs whitespace-nowrap border ${
+                        filtroEtiqueta === f.key
+                          ? 'bg-pink-100 text-pink-700 border-transparent font-semibold'
+                          : 'bg-white border-gray-200 text-gray-500'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {filtrosSecundariosAtivos && (
+                <button
+                  onClick={limparFiltrosSecundarios}
+                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+                >
+                  <X size={12} /> Limpar esses filtros
+                </button>
+              )}
+            </div>
+          )}
 
           {!loading && filtradas.length > 0 && (
             <p className="text-xs text-gray-500 mb-3">

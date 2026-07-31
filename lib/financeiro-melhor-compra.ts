@@ -4,6 +4,8 @@ export interface MelhorCompraGrupo {
   materia_prima_id: string
   materia_prima_nome: string
   unidade_medida: string
+  unidade_compra: string
+  fator_conversao: number
   fornecedores: (FinanceiroCustoPorFornecedor & { melhorPreco: boolean })[]
 }
 
@@ -15,7 +17,7 @@ export interface MelhorCompraGrupo {
  */
 export function agruparCustoPorFornecedor(
   custos: FinanceiroCustoPorFornecedor[],
-  materias: Pick<FinanceiroMateriaPrima, 'id' | 'nome' | 'unidade_medida'>[]
+  materias: Pick<FinanceiroMateriaPrima, 'id' | 'nome' | 'unidade_medida' | 'unidade_compra' | 'fator_conversao'>[]
 ): MelhorCompraGrupo[] {
   const materiaPorId = new Map(materias.map((m) => [m.id, m]))
   const grupos = new Map<string, FinanceiroCustoPorFornecedor[]>()
@@ -33,6 +35,8 @@ export function agruparCustoPorFornecedor(
         materia_prima_id: materiaId,
         materia_prima_nome: materia.nome,
         unidade_medida: materia.unidade_medida,
+        unidade_compra: materia.unidade_compra,
+        fator_conversao: materia.fator_conversao,
         fornecedores: ordenada.map((f, i) => ({ ...f, melhorPreco: i === 0 && ordenada.length > 1 })),
       }
     })
