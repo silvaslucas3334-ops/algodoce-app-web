@@ -75,7 +75,7 @@ function FluxoCaixaContent() {
         <PageHeader
           title="Fluxo de Caixa"
           backHref="/financeiro"
-          maxWidth="max-w-5xl"
+          maxWidth="max-w-[1600px]"
           actions={
             aba === 'mensal' ? (
               <div className="flex gap-2">
@@ -115,7 +115,7 @@ function FluxoCaixaContent() {
           }
         />
 
-        <div className="max-w-5xl mx-auto px-4 py-6">
+        <div className="max-w-[1600px] mx-auto px-4 py-6">
           {aba === 'extrato' ? (
             <ConciliarExtratoTab />
           ) : (
