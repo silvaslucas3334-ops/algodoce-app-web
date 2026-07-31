@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { FinanceiroOrcamento, FinanceiroRecorrencia, TipoLancamento, UnidadeOrcamento } from './types'
+import { FinanceiroOrcamento, TipoLancamento, UnidadeOrcamento } from './types'
 
 // Ordem das colunas por dia da semana no banco — índice 0=domingo..6=sábado,
 // igual Date.getDay() e DIA_SEMANA_LABEL em components/FluxoMensalTabela.tsx.
@@ -88,20 +88,4 @@ export async function salvarItensOrcamento(orcamentoId: string, itens: ItemOrcam
     p_itens: itens,
   })
   if (error) throw new Error(error.message)
-}
-
-/**
- * Recorrências ativas da empresa inteira (loja1+loja2+rateio) — seção "já
- * garantido pela recorrência" do orçamento, só leitura (não duplica como
- * item manual). Despesas orçadas são consolidadas, sem distinção de
- * unidade, então a lista também é.
- */
-export async function buscarRecorrenciasAtivas(): Promise<FinanceiroRecorrencia[]> {
-  const { data, error } = await supabase
-    .from('financeiro_recorrencias')
-    .select('*, parte:financeiro_partes(nome), conta:financeiro_contas(codigo, nome)')
-    .eq('ativa', true)
-    .order('dia_vencimento')
-  if (error) throw new Error(error.message)
-  return data || []
 }

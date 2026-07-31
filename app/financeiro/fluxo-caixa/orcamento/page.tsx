@@ -25,7 +25,7 @@ import {
   LinhaDespesaFixaFutura,
   FluxoMensalOrcadoRealizado,
 } from '@/lib/financeiro-fluxo-mensal'
-import { buscarOrcamento, salvarOrcamento, salvarItensOrcamento, buscarRecorrenciasAtivas, ItemOrcamentoPayload } from '@/lib/financeiro-orcamento'
+import { buscarOrcamento, salvarOrcamento, salvarItensOrcamento, ItemOrcamentoPayload } from '@/lib/financeiro-orcamento'
 import OrcamentoGradeSemanal from '@/components/OrcamentoGradeSemanal'
 import OrcamentoItensVariaveis, { ItemOrcamentoVariavel } from '@/components/OrcamentoItensVariaveis'
 import { Check, Plus } from 'lucide-react'
@@ -87,7 +87,6 @@ function OrcamentoWizardContent() {
   const [fornecedores, setFornecedores] = useState<FinanceiroParte[]>([])
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [despesasFixas, setDespesasFixas] = useState<{ itens: LinhaDespesaFixaFutura[]; total: number } | null>(null)
-  const [recorrencias, setRecorrencias] = useState<{ nome: string; valor: number; diaVencimento: number }[]>([])
   const [dadosFluxo, setDadosFluxo] = useState<FluxoMensalResultado | null>(null)
   // Sugestão (nunca preenchimento automático) do saldo inicial deste mês —
   // saldo final calculado do mês anterior, por loja.
@@ -124,11 +123,10 @@ function OrcamentoWizardContent() {
     try {
       const anoAnterior = mes === 1 ? ano - 1 : ano
       const mesAnterior = mes === 1 ? 12 : mes - 1
-      const [orcLoja1, orcLoja2, orcGeral, recs, fixas, fluxo, saldosAnteriores] = await Promise.all([
+      const [orcLoja1, orcLoja2, orcGeral, fixas, fluxo, saldosAnteriores] = await Promise.all([
         buscarOrcamento(ano, mes, 'loja1'),
         buscarOrcamento(ano, mes, 'loja2'),
         buscarOrcamento(ano, mes, 'geral'),
-        buscarRecorrenciasAtivas(),
         buscarDespesasFixasFuturas('consolidado', ano, mes),
         buscarFluxoMensal('consolidado', ano, mes),
         buscarSaldosFinaisDoMes(anoAnterior, mesAnterior),
@@ -156,7 +154,6 @@ function OrcamentoWizardContent() {
           dataEspecifica: i.data_especifica ?? null,
         }))
       )
-      setRecorrencias((recs || []).map((r) => ({ nome: r.parte?.nome || r.descricao, valor: r.valor, diaVencimento: r.dia_vencimento })))
       setDespesasFixas(fixas)
       setDadosFluxo(fluxo)
       setAlterado(false)
@@ -375,7 +372,7 @@ function OrcamentoWizardContent() {
                     <div>
                       <h2 className="text-lg font-bold text-gray-800">Despesas Fixas</h2>
                       <p className="text-sm text-gray-500 mt-1">
-                        O que já está lançado com vencimento futuro, mais o que as recorrências ativas vão gerar. Se é previsível, lance como despesa de verdade — não tem campo de previsão manual aqui.
+                        O que já está lançado com vencimento futuro — inclui as recorrências, que geram lançamento de verdade assim que criadas. Se é previsível, lance como despesa de verdade — não tem campo de previsão manual aqui.
                       </p>
                     </div>
                     {!bloqueado && (
@@ -387,20 +384,6 @@ function OrcamentoWizardContent() {
                       </Link>
                     )}
                   </div>
-
-                  {recorrencias.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-2">Recorrências ativas ({formatBRL(recorrencias.reduce((s, r) => s + r.valor, 0))})</p>
-                      <div className="space-y-1">
-                        {recorrencias.map((r, i) => (
-                          <div key={i} className="flex items-center justify-between px-3 py-2 bg-purple-50 rounded-lg text-xs text-purple-800">
-                            <span>{r.nome} (dia {r.diaVencimento})</span>
-                            <span className="font-semibold">{formatBRL(r.valor)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
 
                   <div>
                     <p className="text-sm font-medium text-gray-700 mb-2">Já lançadas, vencimento futuro — {formatBRL(despesasFixas?.total || 0)}</p>
