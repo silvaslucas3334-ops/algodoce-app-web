@@ -6,6 +6,7 @@ import { hojeISO } from '@/lib/financeiro-utils'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import FluxoDiaPopover from './FluxoDiaPopover'
 import FluxoFaturamentoPopover from './FluxoFaturamentoPopover'
+import FluxoSaldoPopover from './FluxoSaldoPopover'
 
 interface Props {
   dados: FluxoMensalResultado
@@ -72,6 +73,7 @@ export default function FluxoMensalTabela({ dados }: Props) {
   const [expandidoSaidas, setExpandidoSaidas] = useState(false)
   const [popover, setPopover] = useState<PopoverState | null>(null)
   const [popoverFaturamento, setPopoverFaturamento] = useState<PopoverFaturamentoState | null>(null)
+  const [popoverSaldo, setPopoverSaldo] = useState<{ diaIndex: number; anchorRect: DOMRect } | null>(null)
   const hoje = hojeISO()
 
   const orcadoPorId = new Map(dados.orcadoXRealizado.map((o) => [o.id, o]))
@@ -238,12 +240,24 @@ export default function FluxoMensalTabela({ dados }: Props) {
             {dados.saldoAcumuladoPorDia.map((v, i) => (
               <td
                 key={i}
-                className={`px-2 py-1.5 text-right whitespace-nowrap font-medium ${v == null ? 'text-gray-400' : v >= 0 ? 'text-green-600' : 'text-red-600'} ${bordaHoje(dados.dias[i], hoje)}`}
+                onClick={v != null ? (e) => setPopoverSaldo({ diaIndex: i, anchorRect: e.currentTarget.getBoundingClientRect() }) : undefined}
+                className={`px-2 py-1.5 text-right whitespace-nowrap font-medium ${v == null ? 'text-gray-400' : v >= 0 ? 'text-green-600' : 'text-red-600'} ${
+                  v != null ? 'cursor-pointer hover:bg-gray-100' : ''
+                } ${bordaHoje(dados.dias[i], hoje)}`}
               >
                 {formatCompacto(v)}
               </td>
             ))}
-            <td className="px-3 py-1.5 text-right font-bold text-gray-800">
+            <td
+              onClick={
+                dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1] != null
+                  ? (e) => setPopoverSaldo({ diaIndex: dados.saldoAcumuladoPorDia.length - 1, anchorRect: e.currentTarget.getBoundingClientRect() })
+                  : undefined
+              }
+              className={`px-3 py-1.5 text-right font-bold text-gray-800 ${
+                dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1] != null ? 'cursor-pointer hover:bg-gray-100' : ''
+              }`}
+            >
               {(() => {
                 const ultimo = dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1]
                 return ultimo != null ? formatBRL(ultimo) : '—'
@@ -274,6 +288,15 @@ export default function FluxoMensalTabela({ dados }: Props) {
           diaIndex={popoverFaturamento.diaIndex}
           anchorRect={popoverFaturamento.anchorRect}
           onClose={() => setPopoverFaturamento(null)}
+        />
+      )}
+
+      {popoverSaldo && (
+        <FluxoSaldoPopover
+          dados={dados}
+          diaIndex={popoverSaldo.diaIndex}
+          anchorRect={popoverSaldo.anchorRect}
+          onClose={() => setPopoverSaldo(null)}
         />
       )}
     </div>
