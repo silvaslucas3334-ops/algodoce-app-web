@@ -81,8 +81,18 @@ function primeiroEUltimoDia(ano: number, mes: number): { inicio: string; fim: st
   return { inicio: dias[0], fim: dias[dias.length - 1] }
 }
 
+/**
+ * Data da ocorrência de uma recorrência no mês, clampando o dia de
+ * vencimento ao último dia do mês (mesma convenção de somarMeses). Sem o
+ * clamp, uma recorrência de dia 31 gerava "2026-04-31": data inexistente
+ * que aparecia como "Invalid Date" no passo Despesas Fixas do Orçamento e
+ * entrava no Total do grupo sem entrar em nenhuma coluna de dia do
+ * calendário — o Total da linha não fechava com a soma dos dias.
+ */
 function diaOcorrenciaRecorrencia(ano: number, mes: number, diaVencimento: number): string {
-  return `${ano}-${String(mes).padStart(2, '0')}-${String(diaVencimento).padStart(2, '0')}`
+  const ultimoDia = new Date(ano, mes, 0).getDate()
+  const dia = Math.min(diaVencimento, ultimoDia)
+  return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
 }
 
 /**
