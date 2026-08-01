@@ -27,6 +27,10 @@ export default function NovoPrePreparoPage() {
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+  // Guarda o id assim que o pré-preparo (cabeçalho) é criado — se salvar
+  // os itens falhar (ex: insumo duplicado), tentar de novo reaproveita
+  // esse id em vez de criar um segundo pré-preparo com o mesmo nome.
+  const [prePreparoIdCriado, setPrePreparoIdCriado] = useState<string | null>(null)
 
   useEffect(() => {
     supabase
@@ -66,25 +70,40 @@ export default function NovoPrePreparoPage() {
     }
     setSalvando(true)
     setErro('')
+    let id = prePreparoIdCriado
+    if (!id) {
+      try {
+        id = await criarPrePreparo(
+          {
+            nome: nome.trim(),
+            unidade_medida: unidadeMedida.trim(),
+            rendimento_quantidade: rendimentoNum,
+            descricao: descricao.trim() || null,
+            status: usuario.role === 'cozinha' ? 'pendente_revisao' : 'aprovado',
+          },
+          usuario.id
+        )
+        setPrePreparoIdCriado(id)
+      } catch (err: any) {
+        console.error('Erro ao criar pré-preparo:', err)
+        const msg = err?.code === '23505' ? 'Já existe um pré-preparo com esse nome.' : 'Erro ao salvar: ' + (err?.message || 'desconhecido')
+        setErro(msg)
+        setSalvando(false)
+        return
+      }
+    }
     try {
-      const id = await criarPrePreparo(
-        {
-          nome: nome.trim(),
-          unidade_medida: unidadeMedida.trim(),
-          rendimento_quantidade: rendimentoNum,
-          descricao: descricao.trim() || null,
-          status: usuario.role === 'cozinha' ? 'pendente_revisao' : 'aprovado',
-        },
-        usuario.id
-      )
       await salvarItensPrePreparo(
         id,
         itens.map((i) => ({ materia_prima_id: i.materia_prima_id!, quantidade: i.quantidade }))
       )
       router.push('/financeiro/pre-preparos')
     } catch (err: any) {
-      console.error('Erro ao salvar pré-preparo:', err)
-      const msg = err?.code === '23505' ? 'Já existe um pré-preparo com esse nome.' : 'Erro ao salvar: ' + (err?.message || 'desconhecido')
+      console.error('Erro ao salvar itens do pré-preparo:', err)
+      const msg =
+        err?.code === '23505'
+          ? 'Algum insumo foi adicionado mais de uma vez nessa receita — remova a duplicata e tente de novo.'
+          : 'O pré-preparo foi criado, mas os itens não foram salvos: ' + (err?.message || 'desconhecido') + '. Abra o pré-preparo na lista e adicione os itens por lá.'
       setErro(msg)
       setSalvando(false)
     }
@@ -207,6 +226,7 @@ export default function NovoPrePreparoPage() {
       {modalAberto && (
         <SelecionarInsumoReceitaModal
           materias={materias}
+          idsJaAdicionados={itens.map((i) => i.materia_prima_id).filter((id): id is string => !!id)}
           onAdd={(item) => setItens((prev) => [...prev, item])}
           onClose={() => setModalAberto(false)}
         />

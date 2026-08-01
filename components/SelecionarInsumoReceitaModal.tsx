@@ -24,6 +24,11 @@ interface Props {
   // produto final) — se omitido, só matéria-prima é selecionável (editor
   // de pré-preparo, que por regra nunca usa outro pré-preparo).
   prePreparos?: FinanceiroPrePreparo[]
+  // Itens já adicionados na receita (materia_prima_id/pre_preparo_id) —
+  // ficam fora da lista pra não deixar escolher o mesmo insumo duas
+  // vezes (o banco rejeita duplicata de matéria-prima em produto final
+  // com um erro cru; melhor nem deixar chegar lá).
+  idsJaAdicionados?: string[]
   onAdd: (item: ItemReceitaForm) => void
   onClose: () => void
 }
@@ -31,14 +36,15 @@ interface Props {
 // Irmão mais simples de SelecionarItemCotacaoModal — sem preço, sem
 // conversão: a receita é sempre expressa na unidade_medida do próprio
 // item (a "unidade da ficha técnica"), nunca na unidade de compra.
-export default function SelecionarInsumoReceitaModal({ materias, prePreparos, onAdd, onClose }: Props) {
+export default function SelecionarInsumoReceitaModal({ materias, prePreparos, idsJaAdicionados, onAdd, onClose }: Props) {
   const [busca, setBusca] = useState('')
   const [selecionada, setSelecionada] = useState<Opcao | null>(null)
   const [quantidade, setQuantidade] = useState('')
 
+  const jaAdicionados = new Set(idsJaAdicionados || [])
   const opcoes: Opcao[] = [
-    ...materias.map((m) => ({ tipo: 'materia_prima' as const, id: m.id, nome: m.nome, unidade_medida: m.unidade_medida })),
-    ...(prePreparos || []).map((p) => ({ tipo: 'pre_preparo' as const, id: p.id, nome: p.nome, unidade_medida: p.unidade_medida })),
+    ...materias.filter((m) => !jaAdicionados.has(m.id)).map((m) => ({ tipo: 'materia_prima' as const, id: m.id, nome: m.nome, unidade_medida: m.unidade_medida })),
+    ...(prePreparos || []).filter((p) => !jaAdicionados.has(p.id)).map((p) => ({ tipo: 'pre_preparo' as const, id: p.id, nome: p.nome, unidade_medida: p.unidade_medida })),
   ]
 
   const filtradas = opcoes.filter((o) => o.nome.toLowerCase().includes(busca.trim().toLowerCase()))

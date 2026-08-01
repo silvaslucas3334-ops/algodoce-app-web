@@ -316,6 +316,7 @@ export default function DetalhePrePreparoPage() {
       {modalAberto && (
         <SelecionarInsumoReceitaModal
           materias={materias}
+          idsJaAdicionados={itens.map((i) => i.materia_prima_id).filter((id): id is string => !!id)}
           onAdd={(item) => setItens((prev) => [...prev, item])}
           onClose={() => setModalAberto(false)}
         />

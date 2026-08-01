@@ -34,6 +34,10 @@ export default function NovoProdutoFinalPage() {
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+  // Guarda o id assim que o produto (cabeçalho) é criado — se salvar os
+  // itens falhar (ex: insumo duplicado), tentar de novo reaproveita esse
+  // id em vez de criar um segundo produto com o mesmo nome.
+  const [produtoFinalIdCriado, setProdutoFinalIdCriado] = useState<string | null>(null)
 
   useEffect(() => {
     supabase
@@ -94,26 +98,41 @@ export default function NovoProdutoFinalPage() {
     }
     setSalvando(true)
     setErro('')
+    let id = produtoFinalIdCriado
+    if (!id) {
+      try {
+        id = await criarProdutoFinal(
+          {
+            nome: nome.trim(),
+            codigo_pdv_loja1: codigoPdvLoja1.trim() || null,
+            codigo_pdv_loja2: codigoPdvLoja2.trim() || null,
+            rendimento_porcoes: rendimentoNum,
+            descricao: descricao.trim() || null,
+            status: usuario.role === 'cozinha' ? 'pendente_revisao' : 'aprovado',
+          },
+          usuario.id
+        )
+        setProdutoFinalIdCriado(id)
+      } catch (err: any) {
+        console.error('Erro ao criar produto final:', err)
+        const msg = err?.code === '23505' ? 'Já existe um produto final com esse nome (ou código de PDV já usado).' : 'Erro ao salvar: ' + (err?.message || 'desconhecido')
+        setErro(msg)
+        setSalvando(false)
+        return
+      }
+    }
     try {
-      const id = await criarProdutoFinal(
-        {
-          nome: nome.trim(),
-          codigo_pdv_loja1: codigoPdvLoja1.trim() || null,
-          codigo_pdv_loja2: codigoPdvLoja2.trim() || null,
-          rendimento_porcoes: rendimentoNum,
-          descricao: descricao.trim() || null,
-          status: usuario.role === 'cozinha' ? 'pendente_revisao' : 'aprovado',
-        },
-        usuario.id
-      )
       await salvarItensProdutoFinal(
         id,
         itens.map((i) => ({ materia_prima_id: i.materia_prima_id, pre_preparo_id: i.pre_preparo_id, quantidade: i.quantidade }))
       )
       router.push('/financeiro/produtos-finais')
     } catch (err: any) {
-      console.error('Erro ao salvar produto final:', err)
-      const msg = err?.code === '23505' ? 'Já existe um produto final com esse nome (ou código de PDV já usado).' : 'Erro ao salvar: ' + (err?.message || 'desconhecido')
+      console.error('Erro ao salvar itens do produto final:', err)
+      const msg =
+        err?.code === '23505'
+          ? 'Algum insumo foi adicionado mais de uma vez nessa receita — remova a duplicata e tente de novo.'
+          : 'O produto foi criado, mas os itens não foram salvos: ' + (err?.message || 'desconhecido') + '. Abra o produto na lista e adicione os itens por lá.'
       setErro(msg)
       setSalvando(false)
     }
@@ -256,6 +275,7 @@ export default function NovoProdutoFinalPage() {
         <SelecionarInsumoReceitaModal
           materias={materias}
           prePreparos={prePreparos}
+          idsJaAdicionados={itens.map((i) => i.materia_prima_id || i.pre_preparo_id).filter((id): id is string => !!id)}
           onAdd={(item) => setItens((prev) => [...prev, item])}
           onClose={() => setModalAberto(false)}
         />

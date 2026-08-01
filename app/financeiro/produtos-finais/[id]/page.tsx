@@ -157,15 +157,25 @@ export default function DetalheProdutoFinalPage() {
         })
         .eq('id', produtoFinalId)
       if (error) throw error
-
+    } catch (err: any) {
+      console.error('Erro ao salvar produto final:', err)
+      const msg = err?.code === '23505' ? 'Nome ou código de PDV já usado em outro produto final.' : 'Erro ao salvar: ' + (err?.message || 'desconhecido')
+      setErro(msg)
+      setSalvando(false)
+      return
+    }
+    try {
       await salvarItensProdutoFinal(
         produtoFinalId,
         itens.map((i) => ({ materia_prima_id: i.materia_prima_id, pre_preparo_id: i.pre_preparo_id, quantidade: i.quantidade }))
       )
       await carregar()
     } catch (err: any) {
-      console.error('Erro ao salvar produto final:', err)
-      const msg = err?.code === '23505' ? 'Nome ou código de PDV já usado em outro produto final.' : 'Erro ao salvar: ' + (err?.message || 'desconhecido')
+      console.error('Erro ao salvar itens do produto final:', err)
+      const msg =
+        err?.code === '23505'
+          ? 'Algum insumo foi adicionado mais de uma vez nessa receita — remova a duplicata e tente de novo.'
+          : 'Erro ao salvar os itens: ' + (err?.message || 'desconhecido')
       setErro(msg)
     } finally {
       setSalvando(false)
@@ -364,6 +374,7 @@ export default function DetalheProdutoFinalPage() {
         <SelecionarInsumoReceitaModal
           materias={materias}
           prePreparos={prePreparosAtivos}
+          idsJaAdicionados={itens.map((i) => i.materia_prima_id || i.pre_preparo_id).filter((id): id is string => !!id)}
           onAdd={(item) => setItens((prev) => [...prev, item])}
           onClose={() => setModalAberto(false)}
         />

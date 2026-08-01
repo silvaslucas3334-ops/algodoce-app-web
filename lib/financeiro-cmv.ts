@@ -119,7 +119,7 @@ export async function criarPrePreparo(
     .insert({ ...dados, criado_por: usuarioId })
     .select('id')
     .single()
-  if (error) throw new Error(error.message)
+  if (error) throw error
   return data.id
 }
 
@@ -138,7 +138,7 @@ export async function salvarItensPrePreparo(prePreparoId: string, itens: ItemRec
     p_pre_preparo_id: prePreparoId,
     p_itens: itens,
   })
-  if (error) throw new Error(error.message)
+  if (error) throw error
 }
 
 // --- escrita: produto final ------------------------------------------------
@@ -159,7 +159,7 @@ export async function criarProdutoFinal(
     .insert({ ...dados, criado_por: usuarioId })
     .select('id')
     .single()
-  if (error) throw new Error(error.message)
+  if (error) throw error
   return data.id
 }
 
@@ -174,5 +174,5 @@ export async function salvarItensProdutoFinal(produtoFinalId: string, itens: Ite
     p_produto_final_id: produtoFinalId,
     p_itens: itens,
   })
-  if (error) throw new Error(error.message)
+  if (error) throw error
 }
