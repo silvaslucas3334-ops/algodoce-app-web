@@ -1,11 +1,11 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
 import NotFoundState from '@/components/NotFoundState'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { Loader, CheckCircle, XCircle, ShoppingCart, ReceiptText, Pencil, Plus, Trash2 } from 'lucide-react'
 import { EtiquetaAprovacao, FinanceiroConta, FinanceiroLancamentoItem, FinanceiroParte, FinanceiroMateriaPrima } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL, CONDICAO_PAGAMENTO_LABEL, TIPO_LANCAMENTO_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
@@ -28,10 +28,15 @@ function itemParaItemNota(item: FinanceiroLancamentoItem): ItemNota {
   }
 }
 
-export default function DetalheDespesaPage() {
+function DetalheDespesaContent() {
   const { usuario } = useAuth()
   const params = useParams()
   const lancamentoId = params.id as string
+  const searchParams = useSearchParams()
+  // Presente quando se chega aqui a partir de outra tela (ex: passo
+  // Despesas Fixas do wizard de Orçamento) — o botão voltar deve retornar
+  // pra lá, não pro default (lista de Despesas).
+  const voltarPara = searchParams.get('voltarPara')
 
   const [lancamento, setLancamento] = useState<any>(null)
   const [itens, setItens] = useState<FinanceiroLancamentoItem[]>([])
@@ -439,7 +444,7 @@ export default function DetalheDespesaPage() {
   if (!lancamento) {
     return (
       <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
-        <NotFoundState title="Lançamento não encontrado" backHref="/financeiro/despesas" />
+        <NotFoundState title="Lançamento não encontrado" backHref={voltarPara || '/financeiro/despesas'} />
       </ProtectedRoute>
     )
   }
@@ -458,7 +463,7 @@ export default function DetalheDespesaPage() {
               {lancamento.parcela_num && lancamento.parcela_total && ` · parcela ${lancamento.parcela_num}/${lancamento.parcela_total}`}
             </span>
           }
-          backHref="/financeiro/despesas"
+          backHref={voltarPara || '/financeiro/despesas'}
           actions={
             <>
               {ehAdmin && !editando && (
@@ -856,5 +861,13 @@ export default function DetalheDespesaPage() {
         />
       )}
     </ProtectedRoute>
+  )
+}
+
+export default function DetalheDespesaPage() {
+  return (
+    <Suspense>
+      <DetalheDespesaContent />
+    </Suspense>
   )
 }

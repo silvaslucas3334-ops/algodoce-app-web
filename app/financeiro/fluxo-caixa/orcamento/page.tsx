@@ -28,6 +28,7 @@ import {
 import { buscarOrcamento, salvarOrcamento, salvarItensOrcamento, ItemOrcamentoPayload } from '@/lib/financeiro-orcamento'
 import OrcamentoGradeSemanal from '@/components/OrcamentoGradeSemanal'
 import OrcamentoItensVariaveis, { ItemOrcamentoVariavel } from '@/components/OrcamentoItensVariaveis'
+import DespesaFixaQuickEditModal from '@/components/DespesaFixaQuickEditModal'
 import { Check, ChevronLeft, ChevronRight, Copy, Plus } from 'lucide-react'
 
 const MESES = [
@@ -147,6 +148,7 @@ function OrcamentoWizardContent() {
   // saldo final calculado do mês anterior, por loja.
   const [sugestaoSaldoAnterior, setSugestaoSaldoAnterior] = useState<Record<string, number | null>>({ loja1: null, loja2: null })
   const [orcamentoAnterior, setOrcamentoAnterior] = useState<OrcamentoAnterior | null>(null)
+  const [edicaoRapida, setEdicaoRapida] = useState<LinhaDespesaFixaFutura | null>(null)
 
   useEffect(() => {
     function handler(e: BeforeUnloadEvent) {
@@ -228,6 +230,13 @@ function OrcamentoWizardContent() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Só a lista de Despesas Fixas — evita re-buscar orçamento/fluxo/saldo
+  // inteiros depois de um ajuste rápido de status/data/valor.
+  async function recarregarDespesasFixas() {
+    const fixas = await buscarDespesasFixasFuturas('consolidado', ano, mes)
+    setDespesasFixas(fixas)
   }
 
   function mudarMeta(lojaId: string, diaSemana: number, valor: number | null) {
@@ -583,7 +592,13 @@ function OrcamentoWizardContent() {
                     {despesasFixas && despesasFixas.itens.length > 0 ? (
                       <div className="space-y-1">
                         {despesasFixas.itens.map((item, i) => (
-                          <div key={i} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg text-sm">
+                          <div
+                            key={i}
+                            onClick={item.id && !bloqueado ? () => setEdicaoRapida(item) : undefined}
+                            className={`flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg text-sm ${
+                              item.id && !bloqueado ? 'cursor-pointer hover:bg-gray-100' : ''
+                            }`}
+                          >
                             <span className="text-gray-700">
                               {item.parteNome} — {item.contaNome}
                               <span className="ml-1.5 text-[10px] text-gray-400">{new Date(item.data + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
@@ -789,6 +804,18 @@ function OrcamentoWizardContent() {
           </div>
         )}
       </div>
+
+      {edicaoRapida && edicaoRapida.id && (
+        <DespesaFixaQuickEditModal
+          id={edicaoRapida.id}
+          descricao={`${edicaoRapida.parteNome} — ${edicaoRapida.contaNome}`}
+          valorAtual={edicaoRapida.valor}
+          vencimentoAtual={edicaoRapida.data}
+          detalheHref={`/financeiro/despesas/${edicaoRapida.id}?voltarPara=${encodeURIComponent(`/financeiro/fluxo-caixa/orcamento?ano=${ano}&mes=${mes}&step=3`)}`}
+          onClose={() => setEdicaoRapida(null)}
+          onSalvo={recarregarDespesasFixas}
+        />
+      )}
     </ProtectedRoute>
   )
 }

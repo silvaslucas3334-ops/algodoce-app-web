@@ -415,6 +415,9 @@ export async function buscarFaturamentoPorLojaDoMes(ano: number, mes: number): P
 // --- Despesas fixas futuras (já lançadas + recorrências ainda não materializadas) --
 
 export interface LinhaDespesaFixaFutura {
+  // null quando origem='recorrencia' — ainda não existe lançamento real
+  // pra editar, é só uma projeção da próxima ocorrência.
+  id: string | null
   data: string
   valor: number
   parteId: string
@@ -445,7 +448,7 @@ export async function buscarDespesasFixasFuturas(
   const [{ data: abertosFuturos, error: erroAbertos }, { data: recorrenciasAtivas, error: erroRecorrencias }] = await Promise.all([
     supabase
       .from('financeiro_lancamentos')
-      .select('valor_total, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
+      .select('id, valor_total, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
       .in('unidade', unidadesDespesa)
       .eq('status', 'aberto')
       .eq('tipo', 'despesa')
@@ -475,6 +478,7 @@ export async function buscarDespesasFixasFuturas(
   }
 
   const itens: LinhaDespesaFixaFutura[] = (abertosFuturos || []).map((l: any) => ({
+    id: l.id,
     data: l.data_vencimento,
     valor: l.valor_total,
     parteId: l.parte_id || 'sem-parte',
@@ -489,6 +493,7 @@ export async function buscarDespesasFixasFuturas(
     const dataOcorrencia = diaOcorrenciaRecorrencia(ano, mes, r.dia_vencimento)
     if (dataOcorrencia < hoje) return // só projeta hoje/futuro — passado sem lançamento é um gap raro, não um forecast
     itens.push({
+      id: null,
       data: dataOcorrencia,
       valor: r.valor,
       parteId: r.parte_id || 'sem-parte',
