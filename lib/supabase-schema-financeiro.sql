@@ -887,6 +887,13 @@ CREATE TABLE IF NOT EXISTS financeiro_cotacao_precos (
   valor_unitario NUMERIC CHECK (valor_unitario >= 0),
   valor_total NUMERIC CHECK (valor_total >= 0),
   disponivel BOOLEAN NOT NULL DEFAULT true, -- false = fornecedor respondeu mas não tem esse item
+  -- unidade_medida por 1 unidade_cotacao, conforme ESSE fornecedor — só
+  -- preenchido quando a embalagem dele difere do padrão cadastrado em
+  -- financeiro_materias_primas.fator_conversao (ex: caixa com menos
+  -- unidades). NULL = usa o padrão da matéria-prima. Sem isso, "valor por
+  -- cx" de dois fornecedores com caixas de tamanhos diferentes (ex: 300 un
+  -- x 100 un) seria comparado como se fossem a mesma coisa.
+  fator_conversao_fornecedor NUMERIC CHECK (fator_conversao_fornecedor IS NULL OR fator_conversao_fornecedor > 0),
   UNIQUE (cotacao_item_id, cotacao_fornecedor_id),
   CONSTRAINT fcp_disponibilidade_check CHECK (
     (disponivel = false AND valor_unitario IS NULL AND valor_total IS NULL) OR
@@ -921,19 +928,21 @@ BEGIN
     RAISE EXCEPTION 'apenas usuário autenticado do sistema pode responder cotações';
   END IF;
 
-  INSERT INTO financeiro_cotacao_precos (cotacao_item_id, cotacao_fornecedor_id, valor_unitario, valor_total, disponivel)
+  INSERT INTO financeiro_cotacao_precos (cotacao_item_id, cotacao_fornecedor_id, valor_unitario, valor_total, disponivel, fator_conversao_fornecedor)
   SELECT
     (x->>'cotacao_item_id')::UUID,
     p_cotacao_fornecedor_id,
     (x->>'valor_unitario')::NUMERIC,
     (x->>'valor_total')::NUMERIC,
-    (x->>'disponivel')::BOOLEAN
+    (x->>'disponivel')::BOOLEAN,
+    (x->>'fator_conversao_fornecedor')::NUMERIC
   FROM jsonb_array_elements(p_precos) AS x
   ON CONFLICT (cotacao_item_id, cotacao_fornecedor_id)
   DO UPDATE SET
     valor_unitario = EXCLUDED.valor_unitario,
     valor_total = EXCLUDED.valor_total,
-    disponivel = EXCLUDED.disponivel;
+    disponivel = EXCLUDED.disponivel,
+    fator_conversao_fornecedor = EXCLUDED.fator_conversao_fornecedor;
 
   UPDATE financeiro_cotacao_fornecedores
   SET status = 'respondido', respondido_em = now()

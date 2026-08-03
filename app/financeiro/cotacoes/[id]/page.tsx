@@ -42,7 +42,7 @@ export default function DetalheCotacaoPage() {
         .single(),
       supabase
         .from('financeiro_cotacao_itens')
-        .select('*, materia_prima:financeiro_materias_primas(nome, unidade_medida, unidade_fornecedor, fator_unidade_fornecedor)')
+        .select('*, materia_prima:financeiro_materias_primas(nome, unidade_medida, fator_conversao, unidade_fornecedor, fator_unidade_fornecedor)')
         .eq('cotacao_id', cotacaoId),
       supabase
         .from('financeiro_cotacao_fornecedores')
@@ -57,12 +57,29 @@ export default function DetalheCotacaoPage() {
 
   const respondidos = fornecedores.filter((f) => f.status === 'respondido')
 
-  // Menor preço unitário por item, entre os fornecedores que cotaram (disponivel=true).
-  function menorUnitarioDoItem(itemId: string): number | null {
+  // "cx" de um fornecedor pode ter uma quantidade bem diferente de "cx" de
+  // outro (ex: caixa de 300 un x caixa de 100 un) — comparar valor_unitario
+  // bruto entre eles seria comparar coisas diferentes. Normaliza pelo fator
+  // de conversão dessa resposta (se o fornecedor informou um diferente do
+  // cadastro) ou pelo padrão da matéria-prima, caindo pro valor bruto só
+  // quando não há nenhum fator disponível (comportamento de sempre).
+  function fatorEfetivo(item: FinanceiroCotacaoItem, preco: FinanceiroCotacaoPreco): number | null {
+    return preco.fator_conversao_fornecedor ?? item.materia_prima?.fator_conversao ?? null
+  }
+
+  function precoNormalizado(item: FinanceiroCotacaoItem, preco: FinanceiroCotacaoPreco): number | null {
+    if (preco.valor_unitario == null) return null
+    const fator = fatorEfetivo(item, preco)
+    return fator ? preco.valor_unitario / fator : preco.valor_unitario
+  }
+
+  // Menor preço normalizado por item, entre os fornecedores que cotaram (disponivel=true).
+  function menorUnitarioDoItem(item: FinanceiroCotacaoItem): number | null {
     const valores = respondidos
-      .map((f) => f.precos.find((p) => p.cotacao_item_id === itemId))
-      .filter((p) => p && p.disponivel && p.valor_unitario != null)
-      .map((p) => p!.valor_unitario!)
+      .map((f) => f.precos.find((p) => p.cotacao_item_id === item.id))
+      .filter((p): p is FinanceiroCotacaoPreco => !!p && p.disponivel)
+      .map((p) => precoNormalizado(item, p))
+      .filter((v): v is number => v != null)
     return valores.length > 0 ? Math.min(...valores) : null
   }
 
@@ -192,18 +209,36 @@ export default function DetalheCotacaoPage() {
                   </thead>
                   <tbody>
                     {itens.map((item) => {
-                      const menor = menorUnitarioDoItem(item.id)
+                      const menor = menorUnitarioDoItem(item)
+                      const unidadeMedida = item.materia_prima?.unidade_medida
                       return (
                         <tr key={item.id} className="border-b border-gray-100">
-                          <td className="py-2 pr-3 text-gray-700">{item.materia_prima?.nome}</td>
+                          <td className="py-2 pr-3 text-gray-700">
+                            {item.materia_prima?.nome}
+                            <span className="block text-[10px] text-gray-400">{item.quantidade} {item.unidade_cotacao}</span>
+                          </td>
                           {respondidos.map((f) => {
                             const p = f.precos.find((x) => x.cotacao_item_id === item.id)
                             if (!p) return <td key={f.id} className="py-2 pr-3 text-gray-300">—</td>
                             if (!p.disponivel) return <td key={f.id} className="py-2 pr-3 text-gray-400 text-xs">Sem item</td>
-                            const menorAqui = menor != null && p.valor_unitario === menor
+                            const normalizado = precoNormalizado(item, p)
+                            const menorAqui = menor != null && normalizado === menor
+                            // Só vale a pena mostrar normalizado quando difere de verdade
+                            // do bruto (há um fator de conversão de fato aplicado) — senão
+                            // é o mesmo número duas vezes, sem valor pra comparação.
+                            const temNormalizacao = normalizado != null && unidadeMedida && normalizado !== p.valor_unitario
                             return (
                               <td key={f.id} className={`py-2 pr-3 ${menorAqui ? 'text-green-700 font-semibold' : 'text-gray-600'}`}>
-                                {formatBRL(p.valor_unitario || 0)}
+                                {temNormalizacao ? (
+                                  <>
+                                    {formatBRL(normalizado!)}/{unidadeMedida}
+                                    <span className="block text-[10px] font-normal text-gray-400">
+                                      {formatBRL(p.valor_unitario || 0)}/{item.unidade_cotacao}
+                                    </span>
+                                  </>
+                                ) : (
+                                  formatBRL(p.valor_unitario || 0)
+                                )}
                               </td>
                             )
                           })}

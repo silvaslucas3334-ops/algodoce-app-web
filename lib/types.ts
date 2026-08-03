@@ -543,6 +543,10 @@ export interface FinanceiroCotacaoPreco {
   valor_unitario: number | null
   valor_total: number | null
   disponivel: boolean
+  // unidade_medida por 1 unidade_cotacao, conforme ESSE fornecedor — override
+  // do fator_conversao da matéria-prima quando a embalagem dele difere (ex:
+  // caixa com menos unidades). null = usa o padrão da matéria-prima.
+  fator_conversao_fornecedor?: number | null
 }
 
 // Import do PDV — pedidos/itens importados dos exports do sistema de PDV.

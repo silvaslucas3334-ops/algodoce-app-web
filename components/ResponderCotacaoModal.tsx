@@ -21,6 +21,10 @@ interface LinhaResposta {
   valorTotal: string
   valorTotalEditado: boolean
   disponivel: boolean
+  // Override opcional de fator_conversao — só preenchido quando a embalagem
+  // DESSE fornecedor difere do padrão cadastrado na matéria-prima (ex: a
+  // caixa dele tem 100 un em vez das 300 do cadastro). Vazio = usa o padrão.
+  fatorConversaoDigitado: string
 }
 
 // unidade_compra por 1 unidade_fornecedor (ex: 1 pacote = 5kg -> 5). Sem
@@ -51,6 +55,7 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
         // valor total deve seguir calculando sozinho a partir do unitário.
         valorTotalEditado: existente?.valor_total != null,
         disponivel: existente?.disponivel ?? true,
+        fatorConversaoDigitado: existente?.fator_conversao_fornecedor != null ? String(existente.fator_conversao_fornecedor) : '',
       }
     }
     return inicial
@@ -99,6 +104,7 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
           valor_unitario: l.disponivel ? valorUnitario : null,
           valor_total: l.disponivel ? Number(l.valorTotal) : null,
           disponivel: l.disponivel,
+          fator_conversao_fornecedor: l.disponivel && l.fatorConversaoDigitado ? Number(l.fatorConversaoDigitado) : null,
         }
       })
       await responderCotacaoFornecedor(cotacaoFornecedor.id, precos)
@@ -126,6 +132,15 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
             if (!l) return null
             const fator = fatorFornecedor(item)
             const unidadePreco = item.materia_prima?.unidade_fornecedor || item.unidade_cotacao
+            // Conversão pra unidade primária (unidade_medida) — a mesma
+            // embalagem ("cx") pode ter quantidades bem diferentes de
+            // fornecedor pra fornecedor (ex: 300 un x 100 un), então o
+            // padrão do cadastro só serve de sugestão; cada resposta pode
+            // sobrescrever com o valor real informado por ESSE fornecedor.
+            const unidadeMedida = item.materia_prima?.unidade_medida
+            const mostraConversao = unidadeMedida && unidadeMedida !== item.unidade_cotacao
+            const fatorConversaoEfetivo = l.fatorConversaoDigitado ? Number(l.fatorConversaoDigitado) : item.materia_prima?.fator_conversao
+            const valorPorUnidadeCotacao = fator ? Number(l.valorDigitado) / fator : Number(l.valorDigitado)
             return (
               <div key={item.id} className="border border-gray-200 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
@@ -161,6 +176,11 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
                           ≈ {formatBRL(Number(l.valorDigitado) / fator)}/{item.unidade_cotacao}
                         </p>
                       )}
+                      {mostraConversao && fatorConversaoEfetivo && fatorConversaoEfetivo > 0 && valorPorUnidadeCotacao > 0 && (
+                        <p className="text-[11px] text-blue-600 mt-1">
+                          ≈ {formatBRL(valorPorUnidadeCotacao / fatorConversaoEfetivo)}/{unidadeMedida}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Valor total (R$)</label>
@@ -173,6 +193,25 @@ export default function ResponderCotacaoModal({ cotacaoFornecedor, itens, precos
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
+                    {mostraConversao && (
+                      <div className="col-span-2">
+                        <label className="block text-xs text-gray-500 mb-1">
+                          Quantas {unidadeMedida} vêm em 1 {item.unidade_cotacao}? <span className="text-gray-400">(opcional)</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          value={l.fatorConversaoDigitado}
+                          onChange={(e) => atualizarLinha(item.id, { fatorConversaoDigitado: e.target.value })}
+                          placeholder={item.materia_prima?.fator_conversao != null ? `padrão do cadastro: ${item.materia_prima.fator_conversao}` : ''}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          Só preencha se a embalagem desse fornecedor for diferente do cadastro (ex: caixa com menos unidades).
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

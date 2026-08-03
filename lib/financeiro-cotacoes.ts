@@ -54,6 +54,7 @@ export interface RespostaItemCotacao {
   valor_unitario: number | null
   valor_total: number | null
   disponivel: boolean
+  fator_conversao_fornecedor: number | null
 }
 
 /**
