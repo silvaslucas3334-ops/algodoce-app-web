@@ -27,6 +27,11 @@ function NovaDespesaForm() {
   const extratoData = params.get('data')
   const extratoUnidade = params.get('unidade') as UnidadeFinanceiro | null
   const extratoDocumento = params.get('documento')
+  // Vindo da conciliação do extrato (aba Conciliar Extrato do Fluxo de
+  // Caixa): mês/aba não vivem na URL daquela tela, então router.back() sozinho
+  // voltaria pro estado default (mês atual, aba mensal) em vez de onde o
+  // usuário estava — voltarPara carrega o destino exato.
+  const voltarPara = params.get('voltarPara')
 
   // Só o valor inicial do seletor — cozinha não é uma entidade própria
   // (custos entram como rateio/0001) e loja tende a lançar pra própria
@@ -227,7 +232,7 @@ function NovaDespesaForm() {
           setSalvando(false)
           return
         }
-        router.push('/financeiro/fluxo-caixa?tab=extrato')
+        router.push(voltarPara || '/financeiro/fluxo-caixa?tab=extrato')
         return
       }
 
@@ -245,7 +250,7 @@ function NovaDespesaForm() {
         <PageHeader
           title="Nova Despesa"
           subtitle={extratoTransacaoId ? 'Criando a partir de uma transação do extrato' : 'Para compras de insumo com nota, use "Lançar Nota"'}
-          onBack={() => router.back()}
+          onBack={() => (voltarPara ? router.push(voltarPara) : router.back())}
         />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">

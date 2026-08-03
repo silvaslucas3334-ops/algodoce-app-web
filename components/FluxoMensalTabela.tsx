@@ -10,6 +10,9 @@ import FluxoSaldoPopover from './FluxoSaldoPopover'
 
 interface Props {
   dados: FluxoMensalResultado
+  // Texto curto pra badge nas linhas de Saldo, avisando que os valores ali
+  // não são o padrão (ver toggle "desconsiderar aberto de hoje" na página).
+  saldoAjustadoAviso?: string
 }
 
 interface PopoverState {
@@ -69,7 +72,7 @@ function CelulaDia({
   )
 }
 
-export default function FluxoMensalTabela({ dados }: Props) {
+export default function FluxoMensalTabela({ dados, saldoAjustadoAviso }: Props) {
   const [expandidoSaidas, setExpandidoSaidas] = useState(false)
   const [popover, setPopover] = useState<PopoverState | null>(null)
   const [popoverFaturamento, setPopoverFaturamento] = useState<PopoverFaturamentoState | null>(null)
@@ -222,7 +225,10 @@ export default function FluxoMensalTabela({ dados }: Props) {
             })}
 
           <tr className="border-t-2 border-gray-300 bg-gray-50">
-            <td className="sticky left-0 bg-gray-50 px-3 py-1.5 font-semibold text-gray-700">Saldo do dia</td>
+            <td className="sticky left-0 bg-gray-50 px-3 py-1.5 font-semibold text-gray-700">
+              Saldo do dia
+              {saldoAjustadoAviso && <span className="block text-[10px] font-normal text-amber-600">{saldoAjustadoAviso}</span>}
+            </td>
             {dados.saldoDiaPorDia.map((v, i) => (
               <td
                 key={i}
@@ -236,6 +242,7 @@ export default function FluxoMensalTabela({ dados }: Props) {
           <tr className="bg-gray-50">
             <td className="sticky left-0 bg-gray-50 px-3 py-1.5 font-semibold text-gray-700">
               Saldo Acumulado{dados.saldoInicial == null && <span className="block text-[10px] font-normal text-amber-600">sem saldo inicial</span>}
+              {saldoAjustadoAviso && <span className="block text-[10px] font-normal text-amber-600">{saldoAjustadoAviso}</span>}
             </td>
             {dados.saldoAcumuladoPorDia.map((v, i) => (
               <td

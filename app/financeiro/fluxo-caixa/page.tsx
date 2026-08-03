@@ -1,5 +1,5 @@
 'use client'
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
@@ -8,8 +8,15 @@ import FluxoMensalTabela from '@/components/FluxoMensalTabela'
 import FluxoMensalDrilldownModal, { LinhaDrilldown } from '@/components/FluxoMensalDrilldownModal'
 import NovaReceitaDinheiroModal from '@/components/NovaReceitaDinheiroModal'
 import InformarFaturamentoDiarioModal from '@/components/InformarFaturamentoDiarioModal'
-import { buscarFluxoMensal, buscarAtrasados, FluxoMensalResultado, FluxoMensalAtrasados } from '@/lib/financeiro-fluxo-mensal'
+import {
+  buscarFluxoMensal,
+  buscarAtrasados,
+  calcularSaldoDiarioEAcumulado,
+  FluxoMensalResultado,
+  FluxoMensalAtrasados,
+} from '@/lib/financeiro-fluxo-mensal'
 import { formatBRL } from '@/lib/ofx'
+import { hojeISO } from '@/lib/financeiro-utils'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark, AlertTriangle, Receipt } from 'lucide-react'
@@ -37,10 +44,21 @@ function FluxoCaixaContent() {
   const [modalDrilldown, setModalDrilldown] = useState<{ titulo: string; linhas: LinhaDrilldown[] } | null>(null)
   const [modalNovaReceita, setModalNovaReceita] = useState(false)
   const [modalFaturamentoDiario, setModalFaturamentoDiario] = useState(false)
+  // "Visão de caixa real": ignora despesas/notas ainda em aberto vencendo
+  // hoje (e recorrência ainda não materializada) no Saldo do dia/Acumulado —
+  // não muda Saídas nem o resto da tabela, só essas duas linhas, pra mostrar
+  // quanto sobrou de fato pra decidir o que pagar. Sempre volta a false ao
+  // trocar de mês (é uma leitura do "agora", não faz sentido persistir pro
+  // histórico).
+  const [ignorarAbertoHoje, setIgnorarAbertoHoje] = useState(false)
 
   useEffect(() => {
     if (aba === 'mensal') carregar()
   }, [aba, ano, mes])
+
+  useEffect(() => {
+    setIgnorarAbertoHoje(false)
+  }, [ano, mes])
 
   async function carregar() {
     setLoading(true)
@@ -67,7 +85,27 @@ function FluxoCaixaContent() {
     if (mes === 12) { setMes(1); setAno(ano + 1) } else { setMes(mes + 1) }
   }
 
-  const saldoFinal = dados && dados.saldoAcumuladoPorDia.length > 0 ? dados.saldoAcumuladoPorDia[dados.saldoAcumuladoPorDia.length - 1] : null
+  // Recalculado 100% no client, em cima do que já veio de buscarFluxoMensal —
+  // sem novo fetch. Só as linhas de Saldo mudam (Saídas continua mostrando o
+  // comprometido de verdade); ver comentário de saidasAbertasHoje na lib.
+  const dadosExibidos: FluxoMensalResultado | null = useMemo(() => {
+    if (!dados || !ignorarAbertoHoje || dados.saidasAbertasHoje === 0) return dados
+    const indiceHoje = dados.dias.indexOf(hojeISO())
+    if (indiceHoje < 0) return dados
+    const saidasAjustadas = dados.saidasPorDia.map((v, i) => (i === indiceHoje ? v - dados.saidasAbertasHoje : v))
+    const { saldoDiaPorDia, saldoAcumuladoPorDia } = calcularSaldoDiarioEAcumulado(
+      dados.entradasCaixaPorDia,
+      saidasAjustadas,
+      dados.saldoInicial
+    )
+    return { ...dados, saldoDiaPorDia, saldoAcumuladoPorDia }
+  }, [dados, ignorarAbertoHoje])
+
+  const saldoAjustadoAtivo = ignorarAbertoHoje && !!dados && dados.saidasAbertasHoje > 0
+  const saldoFinal =
+    dadosExibidos && dadosExibidos.saldoAcumuladoPorDia.length > 0
+      ? dadosExibidos.saldoAcumuladoPorDia[dadosExibidos.saldoAcumuladoPorDia.length - 1]
+      : null
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
@@ -117,7 +155,7 @@ function FluxoCaixaContent() {
 
         <div className="max-w-[1600px] mx-auto px-4 py-6">
           {aba === 'extrato' ? (
-            <ConciliarExtratoTab />
+            <ConciliarExtratoTab voltarPara={`/financeiro/fluxo-caixa?tab=extrato&ano=${ano}&mes=${mes}`} />
           ) : (
             <>
               <div className="flex items-center gap-3 mb-4">
@@ -163,7 +201,10 @@ function FluxoCaixaContent() {
                       <p className="text-lg font-bold text-red-600 mt-1">{formatBRL(dados.totalSaidas)}</p>
                     </div>
                     <div className="bg-white rounded-xl p-4 border border-gray-100">
-                      <p className="text-xs text-gray-500 uppercase font-semibold">Saldo</p>
+                      <p className="text-xs text-gray-500 uppercase font-semibold">
+                        Saldo
+                        {saldoAjustadoAtivo && <span className="ml-1.5 text-[10px] font-semibold text-amber-600 normal-case">ajustado</span>}
+                      </p>
                       <p className={`text-lg font-bold mt-1 ${saldoFinal == null ? 'text-gray-400' : saldoFinal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {saldoFinal != null ? formatBRL(saldoFinal) : 'Incompleto'}
                       </p>
@@ -185,7 +226,22 @@ function FluxoCaixaContent() {
                     </button>
                   </div>
 
-                  <FluxoMensalTabela dados={dados} />
+                  {dados.saidasAbertasHoje > 0 && (
+                    <label className="flex items-center gap-2 mb-4 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 cursor-pointer w-fit">
+                      <input
+                        type="checkbox"
+                        checked={ignorarAbertoHoje}
+                        onChange={(e) => setIgnorarAbertoHoje(e.target.checked)}
+                        className="accent-amber-600"
+                      />
+                      Desconsiderar {formatBRL(dados.saidasAbertasHoje)} em despesas de hoje ainda não pagas no Saldo
+                    </label>
+                  )}
+
+                  <FluxoMensalTabela
+                    dados={dadosExibidos || dados}
+                    saldoAjustadoAviso={saldoAjustadoAtivo ? 'visão ajustada (hoje sem contar aberto)' : undefined}
+                  />
                 </>
               ) : null}
             </>

@@ -23,10 +23,15 @@ const CONTAS = [
   { id: 'loja2' as const, label: UNIDADE_LABEL.loja2 },
 ]
 
+interface Props {
+  // Repassado pro ExtratoConciliacaoModal — ver comentário lá.
+  voltarPara: string
+}
+
 // Antiga /financeiro/extrato — fundida pra dentro do Fluxo de Caixa como
 // aba, sem mudança de comportamento (só a casca de página/header some,
 // isso quem cuida agora é o componente pai).
-export default function ConciliarExtratoTab() {
+export default function ConciliarExtratoTab({ voltarPara }: Props) {
   const { usuario } = useAuth()
   const [transacoes, setTransacoes] = useState<FinanceiroExtratoTransacao[]>([])
   const [loading, setLoading] = useState(true)
@@ -350,6 +355,7 @@ export default function ConciliarExtratoTab() {
       {modalTransacao && (
         <ExtratoConciliacaoModal
           transacao={modalTransacao}
+          voltarPara={voltarPara}
           onClose={() => setModalTransacao(null)}
           onResolvido={carregar}
         />

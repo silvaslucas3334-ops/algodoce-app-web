@@ -10,6 +10,10 @@ import { X, Loader, CheckCircle, Receipt, ShoppingCart, ListChecks } from 'lucid
 
 interface Props {
   transacao: FinanceiroExtratoTransacao
+  // Pra onde "Nova Despesa"/"Nota de Insumos" deve voltar depois de salvar —
+  // sem isso, cai no default de cada form (router.back()), que reseta mês e
+  // aba do Fluxo de Caixa porque nenhum dos dois vive na URL.
+  voltarPara: string
   onClose: () => void
   onResolvido: () => void
 }
@@ -20,7 +24,7 @@ const CONFIANCA_LABEL: Record<string, { label: string; color: string }> = {
   baixa: { label: 'Confiança baixa (só o valor bate)', color: 'bg-gray-100 text-gray-600' },
 }
 
-export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvido }: Props) {
+export default function ExtratoConciliacaoModal({ transacao, voltarPara, onClose, onResolvido }: Props) {
   const router = useRouter()
   const [candidatos, setCandidatos] = useState<CandidatoConciliacao[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,6 +77,7 @@ export default function ExtratoConciliacaoModal({ transacao, onClose, onResolvid
       unidade: transacao.conta_bancaria,
     })
     if (transacao.documento_extraido) params.set('documento', transacao.documento_extraido)
+    params.set('voltarPara', voltarPara)
     router.push(`/financeiro/${destino}/nova?${params.toString()}`)
   }
 

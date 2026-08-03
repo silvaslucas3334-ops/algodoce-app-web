@@ -65,6 +65,12 @@ export interface FluxoMensalResultado {
   saldoDiaPorDia: (number | null)[]
   saldoInicial: number | null
   saldoAcumuladoPorDia: (number | null)[]
+  // Fatia de hoje que ainda não foi paga de verdade — despesa/compra_insumos
+  // 'aberto' vencendo hoje + recorrência ainda não materializada hoje. Já
+  // está somada em saidasPorDia/saldoAcumuladoPorDia (o comprometido); serve
+  // só pra UI oferecer a visão alternativa "o que sobrou de fato agora",
+  // recalculando saldoAcumulado sem esse valor em cima do que já veio.
+  saidasAbertasHoje: number
 
   orcadoXRealizado: FluxoMensalOrcadoRealizado[]
 }
@@ -726,6 +732,14 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
     linhasFixo.push({ data: i.data, valor: i.valor, parteId: i.parteId, parteNome: i.parteNome, contaId: i.contaId, contaNome: i.contaNome })
   })
 
+  // Só as duas fontes "ainda não pago" (aberto real + recorrência projetada)
+  // contam aqui — `pagos` já é dinheiro que saiu de verdade, e o forecast do
+  // orçamento (injetado só depois) nunca cai em hoje (ocorrenciasForecastItem
+  // exige data > hoje).
+  const saidasAbertasHoje =
+    despesasFixasFuturas.itens.filter((i) => i.data === hoje).reduce((s, i) => s + i.valor, 0) +
+    (abertosVariavelFuturos || []).filter((l: any) => l.data_vencimento === hoje).reduce((s: number, l: any) => s + l.valor_total, 0)
+
   function agruparLinhasPorDia(linhas: LinhaSaida[]): number[] {
     const porDia = new Map<string, number>()
     linhas.forEach((l) => porDia.set(l.data, (porDia.get(l.data) || 0) + l.valor))
@@ -829,6 +843,7 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
     saldoDiaPorDia,
     saldoInicial,
     saldoAcumuladoPorDia,
+    saidasAbertasHoje,
     orcadoXRealizado,
   }
 }

@@ -32,6 +32,10 @@ function LancarNotaForm() {
   const extratoData = params.get('data')
   const extratoUnidade = params.get('unidade') as UnidadeFinanceiro | null
   const extratoDocumento = params.get('documento')
+  // Vindo da conciliação do extrato: mês/aba não vivem na URL do Fluxo de
+  // Caixa, então router.back() sozinho voltaria pro estado default — voltarPara
+  // carrega o destino exato.
+  const voltarPara = params.get('voltarPara')
 
   // Vindo do fechamento de uma cotação: diferente do extrato, aqui NÃO é um
   // pagamento já feito — é uma decisão. Os campos vêm pré-preenchidos mas
@@ -285,7 +289,7 @@ function LancarNotaForm() {
           setSalvando(false)
           return
         }
-        router.push('/financeiro/fluxo-caixa?tab=extrato')
+        router.push(voltarPara || '/financeiro/fluxo-caixa?tab=extrato')
         return
       }
 
@@ -309,7 +313,7 @@ function LancarNotaForm() {
                 ? `Itens e preços vindos de ${cotacoesImportadas.length > 1 ? 'cotações' : 'cotação'} "${cotacoesImportadas.map((c) => c.titulo).join('", "')}" — confira e ajuste se necessário`
                 : 'A nota gera automaticamente a despesa correspondente'
           }
-          onBack={() => router.back()}
+          onBack={() => (voltarPara ? router.push(voltarPara) : router.back())}
         />
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
