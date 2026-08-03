@@ -17,7 +17,8 @@ export async function categorizarReceita(
   data: string,
   observacao: string | null,
   usuarioId: string,
-  valorBruto?: number
+  valorBruto?: number,
+  contaId?: string // obrigatório quando categoria='resgate_aplicacao' (CHECK no banco) — de qual conta de reserva veio o resgate
 ): Promise<void> {
   const { error: erroReceita } = await supabase.from('financeiro_receitas').insert({
     unidade,
@@ -27,6 +28,7 @@ export async function categorizarReceita(
     valor_bruto: valorBruto ?? null,
     observacao,
     extrato_transacao_id: transacaoId,
+    conta_id: contaId ?? null,
     criado_por: usuarioId,
   })
   if (erroReceita) throw new Error(erroReceita.message)

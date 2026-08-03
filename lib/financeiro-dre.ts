@@ -33,9 +33,16 @@ export interface DreResultado {
   totalDespesas: number
   resultado: number
   percentualRateio: number | null // só preenchido quando unidade é loja1/loja2 — % do faturamento do mês que essa loja representa
+  // Resgates de contas de reserva (afeta_dre=false) — informativo, fora do
+  // resultado do mês: não é venda, é a própria reserva voltando pro caixa.
+  totalResgatesAplicacao: number
+  // Aportes lançados em contas de reserva (afeta_dre=false) — informativo,
+  // fora do resultado do mês pelo mesmo motivo (não é despesa real).
+  totalAportesReserva: number
   receitasDetalhadas: DreReceitaDetalhe[]
   despesasDetalhadas: DreLinhaDetalhe[]
   custoInsumosDetalhados: DreLinhaDetalhe[]
+  aportesReservaDetalhados: DreLinhaDetalhe[]
 }
 
 function somaPorGrupo(linhas: { grupoDre: string; valor: number }[]): { grupoDre: string; valor: number }[] {
@@ -74,7 +81,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
       .lte('data', dataFim),
     supabase
       .from('financeiro_lancamentos')
-      .select('valor_total, unidade, parte_id, parte:financeiro_partes!parte_id(nome), conta:financeiro_contas(grupo_dre)')
+      .select('valor_total, unidade, parte_id, parte:financeiro_partes!parte_id(nome), conta:financeiro_contas(grupo_dre, afeta_dre)')
       .eq('tipo', 'despesa')
       .neq('status', 'cancelado')
       .gte('data_competencia', dataInicio)
@@ -103,9 +110,11 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
 
   // Faturamento das duas lojas no mês — usado tanto pra exibir a Receita
   // Bruta da unidade selecionada quanto (sempre) pra calcular o % de rateio.
+  // Resgate de aplicação nunca entra aqui — não é venda, distorceria o rateio.
   const valorContabil = (r: any) => r.valor_bruto ?? r.valor
-  const receitaLoja1 = (receitas || []).filter((r: any) => r.unidade === 'loja1').reduce((s: number, r: any) => s + valorContabil(r), 0)
-  const receitaLoja2 = (receitas || []).filter((r: any) => r.unidade === 'loja2').reduce((s: number, r: any) => s + valorContabil(r), 0)
+  const receitasVenda = (receitas || []).filter((r: any) => r.categoria !== 'resgate_aplicacao')
+  const receitaLoja1 = receitasVenda.filter((r: any) => r.unidade === 'loja1').reduce((s: number, r: any) => s + valorContabil(r), 0)
+  const receitaLoja2 = receitasVenda.filter((r: any) => r.unidade === 'loja2').reduce((s: number, r: any) => s + valorContabil(r), 0)
   const percentualRateio =
     unidade === 'consolidado'
       ? null
@@ -116,10 +125,13 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
         })()
 
   const receitasFiltradas = unidade === 'consolidado' ? receitas || [] : (receitas || []).filter((r: any) => r.unidade === unidade)
+  const receitasFiltradasVenda = receitasFiltradas.filter((r: any) => r.categoria !== 'resgate_aplicacao')
 
   const somaPorCategoria = new Map<CategoriaReceita, number>()
-  Object.keys(CATEGORIA_RECEITA_LABEL).forEach((c) => somaPorCategoria.set(c as CategoriaReceita, 0))
-  receitasFiltradas.forEach((r: any) => {
+  Object.keys(CATEGORIA_RECEITA_LABEL)
+    .filter((c) => c !== 'resgate_aplicacao')
+    .forEach((c) => somaPorCategoria.set(c as CategoriaReceita, 0))
+  receitasFiltradasVenda.forEach((r: any) => {
     somaPorCategoria.set(r.categoria, (somaPorCategoria.get(r.categoria) || 0) + valorContabil(r))
   })
   const receitaBrutaPorCategoria = Array.from(somaPorCategoria.entries()).map(([categoria, valor]) => ({
@@ -129,12 +141,16 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
   }))
   const totalReceitaBruta = receitaBrutaPorCategoria.reduce((s, c) => s + c.valor, 0)
 
+  const totalResgatesAplicacao = receitasFiltradas
+    .filter((r: any) => r.categoria === 'resgate_aplicacao')
+    .reduce((s: number, r: any) => s + valorContabil(r), 0)
+
   // Taxas descontadas no repasse: nunca viram lançamento, só existem aqui —
   // a diferença entre o que a maquininha/app processou e o que caiu líquido.
-  const taxaCartao = receitasFiltradas
+  const taxaCartao = receitasFiltradasVenda
     .filter((r: any) => r.categoria === 'venda_cartao' && r.valor_bruto != null)
     .reduce((s: number, r: any) => s + (r.valor_bruto - r.valor), 0)
-  const taxaApp = receitasFiltradas
+  const taxaApp = receitasFiltradasVenda
     .filter((r: any) => (r.categoria === 'repasse_ifood' || r.categoria === 'repasse_aiqfome') && r.valor_bruto != null)
     .reduce((s: number, r: any) => s + (r.valor_bruto - r.valor), 0)
   const taxasDescontadas = [
@@ -144,6 +160,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
   const totalTaxasDescontadas = taxasDescontadas.reduce((s, t) => s + t.valor, 0)
 
   const despesasDetalhadas: DreLinhaDetalhe[] = []
+  const aportesReservaDetalhados: DreLinhaDetalhe[] = []
   ;(despesas || []).forEach((d: any) => {
     const linha: DreLinhaDetalhe = {
       parteId: d.parte_id,
@@ -151,16 +168,21 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
       grupoDre: d.conta?.grupo_dre || 'Sem classificação',
       valor: d.valor_total,
     }
+    // Aporte pra conta de reserva (afeta_dre=false) — caixa mudando de
+    // "bolso" dentro do próprio patrimônio, não é despesa real do mês. Ainda
+    // assim listado à parte (informativo), pra não desaparecer sem explicação.
+    const destino = d.conta?.afeta_dre === false ? aportesReservaDetalhados : despesasDetalhadas
     if (unidade === 'consolidado') {
-      despesasDetalhadas.push(linha)
+      destino.push(linha)
     } else if (d.unidade === unidade) {
-      despesasDetalhadas.push(linha)
+      destino.push(linha)
     } else if (d.unidade === 'rateio') {
-      despesasDetalhadas.push({ ...linha, valor: linha.valor * (percentualRateio || 0) })
+      destino.push({ ...linha, valor: linha.valor * (percentualRateio || 0) })
     }
   })
   const despesasPorGrupoDre = somaPorGrupo(despesasDetalhadas)
   const totalDespesas = despesasPorGrupoDre.reduce((s, g) => s + g.valor, 0)
+  const totalAportesReserva = aportesReservaDetalhados.reduce((s, l) => s + l.valor, 0)
 
   const compraPorLancamento = new Map((comprasLancamentos || []).map((c: any) => [c.id, c]))
   const custoInsumosDetalhados: DreLinhaDetalhe[] = (itens || [])
@@ -201,8 +223,11 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     totalDespesas,
     resultado: totalReceitaBruta - totalTaxasDescontadas - totalCustoInsumos - totalDespesas,
     percentualRateio,
+    totalResgatesAplicacao,
+    totalAportesReserva,
     receitasDetalhadas,
     despesasDetalhadas,
     custoInsumosDetalhados,
+    aportesReservaDetalhados,
   }
 }

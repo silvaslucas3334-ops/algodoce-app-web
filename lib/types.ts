@@ -219,6 +219,7 @@ export interface FinanceiroConta {
   centro_custo?: FinanceiroCentroCusto
   grupo_dre: string
   aplicavel_a: 'compras_insumos' | 'despesas_gerais' | 'ambos'
+  afeta_dre: boolean // false = conta de reserva (aplicação financeira, ativo fixo etc.) — aportes nela não entram no DRE
   ativo: boolean
   created_at: string
 }
@@ -392,7 +393,9 @@ export interface FinanceiroExtratoTransacao {
 // Fluxo de Caixa — categoriza as entradas (créditos) do extrato bancário.
 // Vocabulário de canal de receita, diferente de FormaPagamento (vocabulário
 // de despesa) — 'pix'/'dinheiro' existem nos dois com significado distinto.
-export type CategoriaReceita = 'venda_cartao' | 'pix' | 'dinheiro' | 'repasse_ifood' | 'repasse_aiqfome' | 'outros'
+// 'resgate_aplicacao' = resgate de uma conta de reserva (afeta_dre=false em
+// FinanceiroConta) — não é venda, fica fora da Receita Bruta do DRE.
+export type CategoriaReceita = 'venda_cartao' | 'pix' | 'dinheiro' | 'repasse_ifood' | 'repasse_aiqfome' | 'outros' | 'resgate_aplicacao'
 
 export interface FinanceiroReceita {
   id: string
@@ -403,6 +406,8 @@ export interface FinanceiroReceita {
   valor_bruto?: number // opcional — só o DRE usa, pra calcular a taxa de cartão/app como diferença
   observacao?: string
   extrato_transacao_id?: string // ausente só para categoria='dinheiro'
+  conta_id?: string // só preenchido quando categoria='resgate_aplicacao' — de qual conta de reserva veio o resgate
+  conta?: FinanceiroConta
   criado_por: string
   criado_em: string
 }
@@ -412,7 +417,7 @@ export interface FinanceiroReceita {
 // de Caixa (ver buscarFaturamentoLoja em financeiro-fluxo-mensal.ts).
 // Nunca vira Entrada de Caixa (financeiro_receitas) — essa continua vindo
 // só de conciliação de extrato ou do lançamento manual de dinheiro.
-export type CategoriaFaturamentoDiario = Exclude<CategoriaReceita, 'outros'>
+export type CategoriaFaturamentoDiario = Exclude<CategoriaReceita, 'outros' | 'resgate_aplicacao'>
 
 export interface FinanceiroFaturamentoDiario {
   id: string

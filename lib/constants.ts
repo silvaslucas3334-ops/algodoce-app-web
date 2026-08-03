@@ -86,6 +86,7 @@ export const CATEGORIA_RECEITA_LABEL: Record<string, string> = {
   repasse_ifood: 'Repasse iFood',
   repasse_aiqfome: 'Repasse Aiqfome',
   outros: 'Outros',
+  resgate_aplicacao: 'Resgate de Aplicação',
 }
 
 export const CONDICAO_PAGAMENTO_LABEL: Record<string, string> = {

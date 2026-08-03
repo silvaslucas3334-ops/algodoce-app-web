@@ -1,10 +1,11 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { categorizarReceita } from '@/lib/financeiro-receitas'
 import { ignorarTransacao } from '@/lib/financeiro-reconciliacao'
+import { supabase } from '@/lib/supabase'
 import { formatBRL } from '@/lib/ofx'
 import { CATEGORIA_RECEITA_LABEL } from '@/lib/constants'
-import { FinanceiroExtratoTransacao, CategoriaReceita } from '@/lib/types'
+import { FinanceiroExtratoTransacao, CategoriaReceita, FinanceiroConta } from '@/lib/types'
 import { X, Loader, CheckCircle } from 'lucide-react'
 
 interface Props {
@@ -23,6 +24,7 @@ const CATEGORIAS: Exclude<CategoriaReceita, 'dinheiro'>[] = [
   'repasse_ifood',
   'repasse_aiqfome',
   'outros',
+  'resgate_aplicacao',
 ]
 
 // Categorias em que o valor que cai no banco é líquido de uma taxa
@@ -33,14 +35,28 @@ const CATEGORIAS_COM_TAXA: Exclude<CategoriaReceita, 'dinheiro'>[] = ['venda_car
 export default function CategorizarReceitaModal({ transacao, unidade, usuarioId, onClose, onResolvido }: Props) {
   const [categoria, setCategoria] = useState<Exclude<CategoriaReceita, 'dinheiro'> | ''>('')
   const [valorBruto, setValorBruto] = useState('')
+  const [contasReserva, setContasReserva] = useState<FinanceiroConta[]>([])
+  const [contaId, setContaId] = useState('')
   const [processando, setProcessando] = useState(false)
   const [erro, setErro] = useState('')
 
   const valorBrutoNum = valorBruto ? Number(valorBruto) : null
   const valorBrutoValido = valorBrutoNum == null || valorBrutoNum >= transacao.valor
+  const contaValida = categoria !== 'resgate_aplicacao' || !!contaId
+
+  useEffect(() => {
+    if (categoria !== 'resgate_aplicacao' || contasReserva.length > 0) return
+    supabase
+      .from('financeiro_contas')
+      .select('*')
+      .eq('afeta_dre', false)
+      .eq('ativo', true)
+      .order('nome')
+      .then(({ data }) => setContasReserva(data || []))
+  }, [categoria, contasReserva.length])
 
   async function confirmar() {
-    if (!categoria || !valorBrutoValido) return
+    if (!categoria || !valorBrutoValido || !contaValida) return
     setProcessando(true)
     setErro('')
     try {
@@ -52,7 +68,8 @@ export default function CategorizarReceitaModal({ transacao, unidade, usuarioId,
         transacao.data,
         null,
         usuarioId,
-        valorBrutoNum ?? undefined
+        valorBrutoNum ?? undefined,
+        categoria === 'resgate_aplicacao' ? contaId : undefined
       )
       onResolvido()
       onClose()
@@ -141,9 +158,29 @@ export default function CategorizarReceitaModal({ transacao, unidade, usuarioId,
           </div>
         )}
 
+        {categoria === 'resgate_aplicacao' && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">De qual reserva veio o resgate?</label>
+            {contasReserva.length === 0 ? (
+              <p className="text-xs text-gray-400">Nenhuma conta de reserva cadastrada (Plano de Contas).</p>
+            ) : (
+              <select
+                value={contaId}
+                onChange={(e) => setContaId(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+              >
+                <option value="">Selecione a conta...</option>
+                {contasReserva.map((c) => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+
         <button
           onClick={confirmar}
-          disabled={processando || !categoria || !valorBrutoValido}
+          disabled={processando || !categoria || !valorBrutoValido || !contaValida}
           className="w-full bg-green-600 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2 mb-3"
         >
           {processando ? <Loader size={16} className="animate-spin" /> : <CheckCircle size={16} />} Confirmar

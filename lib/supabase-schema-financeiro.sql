@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS financeiro_contas (
   centro_custo_id UUID NOT NULL REFERENCES financeiro_centros_custo(id) ON DELETE RESTRICT,
   grupo_dre TEXT NOT NULL, -- linha de DRE que esta conta alimenta
   aplicavel_a TEXT NOT NULL DEFAULT 'ambos' CHECK (aplicavel_a IN ('compras_insumos', 'despesas_gerais', 'ambos')),
+  -- false = conta de reserva/provisão (aplicação financeira, ativo fixo
+  -- etc.) — aportes lançados nela não entram no DRE como despesa, só saem
+  -- do caixa disponível (ver lib/migrations/financeiro-aplicacao-reserva-dre.sql).
+  afeta_dre BOOLEAN NOT NULL DEFAULT true,
   ativo BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -74,6 +78,8 @@ INSERT INTO financeiro_centros_custo (codigo, nome) VALUES
 ON CONFLICT (codigo) DO NOTHING;
 
 INSERT INTO financeiro_contas (codigo, nome, centro_custo_id, grupo_dre, aplicavel_a) VALUES
+  -- Nota: 3002 vira afeta_dre=false logo abaixo — é a conta de reserva
+  -- (aplicação financeira p/ 13º, férias etc.), não uma despesa real.
   ('1001', 'MATÉRIA-PRIMA',              (SELECT id FROM financeiro_centros_custo WHERE codigo='1000'), 'CMV', 'compras_insumos'),
   ('1002', 'EMBALAGEM',                  (SELECT id FROM financeiro_centros_custo WHERE codigo='1000'), 'Embalagens', 'compras_insumos'),
   ('1003', 'MÃO DE OBRA',                (SELECT id FROM financeiro_centros_custo WHERE codigo='1000'), 'Custos com Pessoal', 'despesas_gerais'),
@@ -94,6 +100,8 @@ INSERT INTO financeiro_contas (codigo, nome, centro_custo_id, grupo_dre, aplicav
   ('3005', 'DESPESAS FINANCEIRAS',       (SELECT id FROM financeiro_centros_custo WHERE codigo='3000'), 'Despesas Financeiras', 'despesas_gerais'),
   ('3006', 'SERVIÇOS CONTÁBEIS',         (SELECT id FROM financeiro_centros_custo WHERE codigo='3000'), 'Despesas Administrativas', 'despesas_gerais')
 ON CONFLICT (codigo) DO NOTHING;
+
+UPDATE financeiro_contas SET afeta_dre = false WHERE codigo = '3002';
 
 -- ============================================================
 -- 3. financeiro_materias_primas (cadastro controlado, sem texto livre)
@@ -773,7 +781,9 @@ GRANT EXECUTE ON FUNCTION financeiro_pdv_excluir_periodo TO authenticated;
 CREATE TABLE IF NOT EXISTS financeiro_receitas (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   unidade TEXT NOT NULL CHECK (unidade IN ('loja1', 'loja2')),
-  categoria TEXT NOT NULL CHECK (categoria IN ('venda_cartao', 'pix', 'dinheiro', 'repasse_ifood', 'repasse_aiqfome', 'outros')),
+  -- 'resgate_aplicacao' = resgate de uma conta de reserva (afeta_dre=false
+  -- em financeiro_contas) — não é venda, fica fora da Receita Bruta do DRE.
+  categoria TEXT NOT NULL CHECK (categoria IN ('venda_cartao', 'pix', 'dinheiro', 'repasse_ifood', 'repasse_aiqfome', 'outros', 'resgate_aplicacao')),
   data DATE NOT NULL,
   valor NUMERIC NOT NULL CHECK (valor > 0),
   -- Opcional. NUNCA substitui `valor` (que continua sendo sempre o
@@ -783,17 +793,25 @@ CREATE TABLE IF NOT EXISTS financeiro_receitas (
   valor_bruto NUMERIC CHECK (valor_bruto IS NULL OR valor_bruto >= valor),
   observacao TEXT,
   extrato_transacao_id UUID REFERENCES financeiro_extrato_transacoes(id),
+  -- Só preenchido quando categoria='resgate_aplicacao' — de qual conta de
+  -- reserva veio o resgate (ver lib/migrations/financeiro-aplicacao-reserva-dre.sql).
+  conta_id UUID REFERENCES financeiro_contas(id),
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   criado_em TIMESTAMPTZ DEFAULT now(),
   CONSTRAINT fr_extrato_dinheiro_check CHECK (
     (categoria = 'dinheiro' AND extrato_transacao_id IS NULL) OR
     (categoria <> 'dinheiro' AND extrato_transacao_id IS NOT NULL)
+  ),
+  CONSTRAINT fr_resgate_conta_check CHECK (
+    (categoria = 'resgate_aplicacao' AND conta_id IS NOT NULL) OR
+    (categoria <> 'resgate_aplicacao' AND conta_id IS NULL)
   )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fr_extrato_transacao_unico
   ON financeiro_receitas(extrato_transacao_id) WHERE extrato_transacao_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_fr_unidade_data ON financeiro_receitas(unidade, data);
+CREATE INDEX IF NOT EXISTS idx_fr_conta ON financeiro_receitas(conta_id) WHERE conta_id IS NOT NULL;
 
 ALTER TABLE financeiro_receitas ENABLE ROW LEVEL SECURITY;
 

@@ -24,6 +24,7 @@ type ModalDetalhe =
   | { tipo: 'receita'; titulo: string; categoria: CategoriaReceita }
   | { tipo: 'insumo'; titulo: string; grupoDre: string }
   | { tipo: 'despesa'; titulo: string; grupoDre: string }
+  | { tipo: 'aporte'; titulo: string }
 
 export default function DrePage() {
   const hoje = new Date()
@@ -144,6 +145,35 @@ export default function DrePage() {
                 </div>
               </div>
 
+              {(dados.totalResgatesAplicacao > 0 || dados.totalAportesReserva > 0) && (
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-4 divide-y divide-gray-100">
+                  {dados.totalAportesReserva > 0 && (
+                    <button
+                      onClick={() => setModalDetalhe({ tipo: 'aporte', titulo: 'Aportes em Reserva' })}
+                      className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700">Aportes em Reserva</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Caixa saindo pra reserva (13º, férias, ativo fixo...) — não é despesa, não entra no resultado.</p>
+                      </div>
+                      <span className="font-semibold text-gray-800 flex-shrink-0 ml-3">{formatBRL(dados.totalAportesReserva)}</span>
+                    </button>
+                  )}
+                  {dados.totalResgatesAplicacao > 0 && (
+                    <button
+                      onClick={() => setModalDetalhe({ tipo: 'receita', titulo: 'Resgate de Aplicação', categoria: 'resgate_aplicacao' })}
+                      className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700">Resgates de Aplicação</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Volta da reserva pro caixa — não é venda, não entra no resultado do mês.</p>
+                      </div>
+                      <span className="font-semibold text-gray-800 flex-shrink-0 ml-3">{formatBRL(dados.totalResgatesAplicacao)}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               {dados.taxasDescontadas.length > 0 && (
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-4">
                   <p className="text-sm font-semibold text-gray-700 px-4 py-3 border-b border-gray-100">
@@ -212,7 +242,7 @@ export default function DrePage() {
 
         {modalDetalhe && dados && (
           <DreDetalheModal
-            tipo={modalDetalhe.tipo}
+            tipo={modalDetalhe.tipo === 'aporte' ? 'despesa' : modalDetalhe.tipo}
             titulo={modalDetalhe.titulo}
             receitas={
               modalDetalhe.tipo === 'receita'
@@ -224,7 +254,9 @@ export default function DrePage() {
                 ? dados.custoInsumosDetalhados.filter((i) => i.grupoDre === modalDetalhe.grupoDre)
                 : modalDetalhe.tipo === 'despesa'
                   ? dados.despesasDetalhadas.filter((d) => d.grupoDre === modalDetalhe.grupoDre)
-                  : undefined
+                  : modalDetalhe.tipo === 'aporte'
+                    ? dados.aportesReservaDetalhados
+                    : undefined
             }
             onClose={() => setModalDetalhe(null)}
           />
