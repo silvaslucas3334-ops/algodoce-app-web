@@ -19,7 +19,7 @@ import { formatBRL } from '@/lib/ofx'
 import { hojeISO } from '@/lib/financeiro-utils'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark, AlertTriangle, Receipt } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark, AlertTriangle, Receipt } from 'lucide-react'
 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -113,6 +113,11 @@ function FluxoCaixaContent() {
         <PageHeader
           title="Fluxo de Caixa"
           backHref="/financeiro"
+          // Na aba Extrato, a seta do cabeçalho já cobre o "voltar" (pra
+          // Visão Mensal, sem sair do Fluxo de Caixa) — não faz sentido ter
+          // dois controles de voltar (a seta indo pro hub financeiro E um
+          // botão "Voltar à Visão Mensal" do lado oposto).
+          onBack={aba === 'extrato' ? () => setAba('mensal') : undefined}
           maxWidth="max-w-[1600px]"
           actions={
             aba === 'mensal' ? (
@@ -142,14 +147,7 @@ function FluxoCaixaContent() {
                   <Landmark size={16} /> Conciliar Extrato
                 </button>
               </div>
-            ) : (
-              <button
-                onClick={() => setAba('mensal')}
-                className="bg-white border-2 border-gray-200 text-gray-700 rounded-lg px-3 py-2 font-semibold flex items-center gap-1.5 hover:border-gray-300 text-sm"
-              >
-                <ArrowLeft size={16} /> Voltar à Visão Mensal
-              </button>
-            )
+            ) : undefined
           }
         />
 
@@ -227,14 +225,14 @@ function FluxoCaixaContent() {
                   </div>
 
                   {dados.saidasAbertasHoje > 0 && (
-                    <label className="flex items-center gap-2 mb-4 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 cursor-pointer w-fit">
+                    <label className="flex items-center gap-1.5 mb-4 text-xs text-gray-500 cursor-pointer w-fit hover:text-gray-700">
                       <input
                         type="checkbox"
                         checked={ignorarAbertoHoje}
                         onChange={(e) => setIgnorarAbertoHoje(e.target.checked)}
-                        className="accent-amber-600"
+                        className="w-3.5 h-3.5 accent-amber-600"
                       />
-                      Desconsiderar {formatBRL(dados.saidasAbertasHoje)} em despesas de hoje ainda não pagas no Saldo
+                      Ver saldo sem contar {formatBRL(dados.saidasAbertasHoje)} de hoje ainda em aberto
                     </label>
                   )}
 
