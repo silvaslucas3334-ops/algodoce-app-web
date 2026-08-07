@@ -50,9 +50,14 @@ export default function TarefaModal({
   onStatusChange,
   onComentario,
 }: TarefaModalProps) {
+  const [erro, setErro] = useState('')
   const [fazendoUpload, setFazendoUpload] = useState(false)
-  const [fotoUpload, setFotoUpload] = useState<File | null>(null)
+  // Foto já comprimida (não o File bruto) — comprimida uma única vez, na
+  // seleção, e reaproveitada tanto pro preview quanto pro upload em
+  // handleConcluir, em vez de comprimir duas vezes.
+  const [fotoComprimida, setFotoComprimida] = useState<Blob | null>(null)
   const [previewFoto, setPreviewFoto] = useState<string | null>(null)
+  const [comprimindoFoto, setComprimindoFoto] = useState(false)
   const [feedbackTexto, setFeedbackTexto] = useState('')
   const [mostrarRefazer, setMostrarRefazer] = useState(false)
   const [prazoData, setPrazoData] = useState('')
@@ -125,14 +130,21 @@ export default function TarefaModal({
   const criadoPorLabel =
     criador && criador.role !== 'admin' ? criador.nome : null
 
-  // Evidências da tentativa atual (para destaque na revisão)
+  // Evidências da tentativa atual (destaque na revisão) e de tentativas
+  // anteriores (histórico) — separadas pra não mostrar a mesma foto duas
+  // vezes quando o gestor está revisando (a atual já aparece em destaque
+  // acima, então "Fotos Anteriores" só faz sentido pra tentativas passadas).
   const evidenciasTentativaAtual = evidencias.filter(
     (e) => e.tentativa_num === tarefa.tentativa_num
+  )
+  const evidenciasAnteriores = evidencias.filter(
+    (e) => e.tentativa_num !== tarefa.tentativa_num
   )
   const statusInfo = STATUS_INFO[tarefa.status]
 
   const handleCancelar = async () => {
     if (!confirm(`Cancelar a tarefa "${tarefa.titulo}"? Ela sai das visões Hoje/Semana, mas o histórico é preservado.`)) return
+    setErro('')
     try {
       setFazendoUpload(true)
 
@@ -144,12 +156,12 @@ export default function TarefaModal({
         .select('id')
       if (error) {
         logErro('Erro ao cancelar (update tarefas):', error)
-        alert('Erro ao cancelar: ' + (error.message || 'sem mensagem'))
+        setErro('Erro ao cancelar: ' + (error.message || 'sem mensagem'))
         return
       }
       if (!updated || updated.length === 0) {
         console.error('Cancelamento sem efeito: 0 linhas atualizadas (RLS bloqueou o UPDATE).')
-        alert('Não foi possível cancelar: você não tem permissão para esta tarefa (RLS bloqueou o UPDATE).')
+        setErro('Não foi possível cancelar: você não tem permissão para esta tarefa.')
         return
       }
 
@@ -170,13 +182,14 @@ export default function TarefaModal({
       return
     } catch (err: any) {
       logErro('Erro ao cancelar tarefa (exceção):', err)
-      alert('Erro ao cancelar tarefa: ' + (err?.message || 'desconhecido'))
+      setErro('Erro ao cancelar tarefa: ' + (err?.message || 'desconhecido'))
     } finally {
       setFazendoUpload(false)
     }
   }
 
   const handleAprovar = async () => {
+    setErro('')
     try {
       setFazendoUpload(true)
       const { data: updated, error } = await supabase
@@ -190,11 +203,11 @@ export default function TarefaModal({
         .select('id')
       if (error) {
         logErro('Erro ao aprovar (update tarefas):', error)
-        alert('Erro ao aprovar: ' + (error.message || 'sem mensagem'))
+        setErro('Erro ao aprovar: ' + (error.message || 'sem mensagem'))
         return
       }
       if (!updated || updated.length === 0) {
-        alert('Não foi possível aprovar: RLS bloqueou o UPDATE.')
+        setErro('Não foi possível aprovar: você não tem permissão para esta tarefa.')
         return
       }
 
@@ -215,15 +228,16 @@ export default function TarefaModal({
       onClose()
     } catch (err: any) {
       logErro('Erro ao aprovar tarefa (exceção):', err)
-      alert('Erro ao aprovar tarefa: ' + (err?.message || 'desconhecido'))
+      setErro('Erro ao aprovar tarefa: ' + (err?.message || 'desconhecido'))
     } finally {
       setFazendoUpload(false)
     }
   }
 
   const handleRefazer = async () => {
+    setErro('')
     if (!feedbackTexto.trim()) {
-      alert('Descreva o motivo para refazer')
+      setErro('Descreva o motivo para refazer')
       return
     }
     try {
@@ -243,11 +257,11 @@ export default function TarefaModal({
         .select('id')
       if (error) {
         logErro('Erro ao refazer (update tarefas):', error)
-        alert('Erro ao marcar refazer: ' + (error.message || 'sem mensagem'))
+        setErro('Erro ao marcar refazer: ' + (error.message || 'sem mensagem'))
         return
       }
       if (!updated || updated.length === 0) {
-        alert('Não foi possível marcar refazer: RLS bloqueou o UPDATE.')
+        setErro('Não foi possível marcar refazer: você não tem permissão para esta tarefa.')
         return
       }
 
@@ -280,7 +294,7 @@ export default function TarefaModal({
       onClose()
     } catch (err: any) {
       logErro('Erro ao marcar refazer (exceção):', err)
-      alert('Erro ao marcar refazer: ' + (err?.message || 'desconhecido'))
+      setErro('Erro ao marcar refazer: ' + (err?.message || 'desconhecido'))
     } finally {
       setFazendoUpload(false)
     }
@@ -290,22 +304,42 @@ export default function TarefaModal({
     const file = e.target.files?.[0]
     if (!file) return
 
-    setFotoUpload(file)
-
-    // Preview
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      setPreviewFoto(event.target?.result as string)
+    setErro('')
+    setComprimindoFoto(true)
+    try {
+      // Comprime primeiro, e o preview usa o resultado já comprimido — nunca
+      // o arquivo bruto da câmera. FileReader.readAsDataURL num arquivo de
+      // 15-40MB (comum em Android) trava/recarrega o Chrome em aparelhos
+      // intermediários; createObjectURL num Blob já pequeno evita isso (e
+      // evita comprimir duas vezes, já que handleConcluir reaproveita esse
+      // mesmo blob pro upload).
+      const compressed = await compressImage(file)
+      if (previewFoto) URL.revokeObjectURL(previewFoto)
+      setFotoComprimida(compressed)
+      setPreviewFoto(URL.createObjectURL(compressed))
+    } catch (err: any) {
+      logErro('Erro ao processar foto:', err)
+      setErro('Não foi possível processar essa foto. Tente outra.')
+    } finally {
+      setComprimindoFoto(false)
     }
-    reader.readAsDataURL(file)
+  }
+
+  function removerFoto() {
+    if (previewFoto) URL.revokeObjectURL(previewFoto)
+    setFotoComprimida(null)
+    setPreviewFoto(null)
+    if (inputFileRef.current) inputFileRef.current.value = ''
   }
 
   const handleConcluir = async () => {
     if (!podeConluir) return
 
+    setErro('')
+
     // Validar foto obrigatória
-    if (tarefa.foto_obrigatoria && !fotoUpload && evidencias.length === 0) {
-      alert('Foto é obrigatória para esta tarefa')
+    if (tarefa.foto_obrigatoria && !fotoComprimida && evidencias.length === 0) {
+      setErro('Foto é obrigatória para esta tarefa')
       return
     }
 
@@ -316,18 +350,17 @@ export default function TarefaModal({
       let fotoHash: string | null = null
 
       // Upload da foto se selecionada
-      if (fotoUpload) {
-        const compressedBlob = await compressImage(fotoUpload)
-        fotoHash = await hashArquivo(compressedBlob)
+      if (fotoComprimida) {
+        fotoHash = await hashArquivo(fotoComprimida)
         if (await fotoJaEnviada(usuarioAtualId, fotoHash)) {
-          alert('Essa foto já foi usada como evidência antes. Tire uma foto nova.')
+          setErro('Essa foto já foi usada como evidência antes. Tire uma foto nova.')
           return
         }
         fotoUrl = await uploadFoto(
           tarefa.setor_id,
           tarefa.id,
           tarefa.tentativa_num,
-          compressedBlob
+          fotoComprimida
         )
       }
 
@@ -348,11 +381,11 @@ export default function TarefaModal({
 
       if (updateError) {
         logErro('Erro ao concluir (update tarefas):', updateError)
-        alert('Erro ao concluir: ' + (updateError.message || 'sem mensagem'))
+        setErro('Erro ao concluir: ' + (updateError.message || 'sem mensagem'))
         return
       }
       if (!updated || updated.length === 0) {
-        alert('Não foi possível concluir: RLS bloqueou o UPDATE.')
+        setErro('Não foi possível concluir: você não tem permissão para esta tarefa.')
         return
       }
 
@@ -374,7 +407,7 @@ export default function TarefaModal({
           // entre duas abas/dispositivos) — avisa em vez de engolir, já que
           // a tarefa segue concluída mas sem essa evidência registrada.
           if ((evidError as any).code === '23505') {
-            alert('Essa foto já tinha sido usada como evidência antes. A tarefa foi concluída, mas sem essa foto — envie uma evidência nova se precisar.')
+            setErro('A tarefa foi concluída, mas essa foto já tinha sido usada como evidência antes — envie uma foto nova se precisar registrar evidência.')
           }
           logErro('Concluiu, mas falhou ao gravar evidência:', evidError)
         }
@@ -403,15 +436,16 @@ export default function TarefaModal({
       onClose()
     } catch (err: any) {
       logErro('Erro ao concluir tarefa (exceção):', err)
-      alert('Erro ao concluir tarefa: ' + (err?.message || 'desconhecido'))
+      setErro('Erro ao concluir tarefa: ' + (err?.message || 'desconhecido'))
     } finally {
       setFazendoUpload(false)
     }
   }
 
   const handleConcluirComoGestor = async () => {
+    setErro('')
     if (!comentarioGestorTexto.trim()) {
-      alert('Descreva um comentário para o colaborador antes de concluir')
+      setErro('Descreva um comentário para o colaborador antes de concluir')
       return
     }
 
@@ -430,11 +464,11 @@ export default function TarefaModal({
 
       if (error) {
         logErro('Erro ao concluir como gestor (update tarefas):', error)
-        alert('Erro ao concluir: ' + (error.message || 'sem mensagem'))
+        setErro('Erro ao concluir: ' + (error.message || 'sem mensagem'))
         return
       }
       if (!updated || updated.length === 0) {
-        alert('Não foi possível concluir: RLS bloqueou o UPDATE.')
+        setErro('Não foi possível concluir: você não tem permissão para esta tarefa.')
         return
       }
 
@@ -459,7 +493,7 @@ export default function TarefaModal({
       onClose()
     } catch (err: any) {
       logErro('Erro ao concluir como gestor (exceção):', err)
-      alert('Erro ao concluir: ' + (err?.message || 'desconhecido'))
+      setErro('Erro ao concluir: ' + (err?.message || 'desconhecido'))
     } finally {
       setFazendoUpload(false)
     }
@@ -467,6 +501,7 @@ export default function TarefaModal({
 
   const handleComentar = async () => {
     if (!novoComentarioTexto.trim()) return
+    setErro('')
     try {
       setEnviandoComentario(true)
       const { error } = await supabase.from('tarefas_comentarios').insert({
@@ -478,7 +513,7 @@ export default function TarefaModal({
       })
       if (error) {
         logErro('Erro ao comentar:', error)
-        alert('Erro ao comentar: ' + (error.message || 'sem mensagem'))
+        setErro('Erro ao comentar: ' + (error.message || 'sem mensagem'))
         return
       }
       await notificar(destinatariosNotificacao(), 'comentario', novoComentarioTexto.trim())
@@ -487,7 +522,7 @@ export default function TarefaModal({
       onComentario?.()
     } catch (err: any) {
       logErro('Erro ao comentar (exceção):', err)
-      alert('Erro ao comentar: ' + (err?.message || 'desconhecido'))
+      setErro('Erro ao comentar: ' + (err?.message || 'desconhecido'))
     } finally {
       setEnviandoComentario(false)
     }
@@ -541,7 +576,7 @@ export default function TarefaModal({
               </p>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             {/* Instância de recorrência: só edita pela recorrência (título,
                 envolvidos etc. são do molde, não da instância — editar a
                 instância direto deixava campos como Envolvidos sempre em
@@ -550,7 +585,7 @@ export default function TarefaModal({
             {podeEditar && !recorrenciaData && (
               <button
                 onClick={() => setEditando(true)}
-                className="p-2 hover:bg-gray-100 rounded-lg text-gray-500"
+                className="p-3 hover:bg-gray-100 rounded-lg text-gray-500"
                 title="Editar tarefa"
               >
                 <Pencil size={18} />
@@ -559,7 +594,7 @@ export default function TarefaModal({
             {recorrenciaData && ehAdmin && (
               <button
                 onClick={() => setMostrarEditarRecorrencia(true)}
-                className="p-2 hover:bg-gray-100 rounded-lg text-blue-600"
+                className="p-3 hover:bg-gray-100 rounded-lg text-blue-600"
                 title="Editar recorrência"
               >
                 <RotateCw size={18} />
@@ -567,7 +602,7 @@ export default function TarefaModal({
             )}
             <button
               onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg"
+              className="p-3 hover:bg-gray-100 rounded-lg"
             >
               <X size={20} />
             </button>
@@ -576,6 +611,12 @@ export default function TarefaModal({
 
         {/* Conteúdo */}
         <div className="p-4 space-y-4">
+          {erro && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+              {erro}
+            </div>
+          )}
+
           {/* Status */}
           <div className="flex items-center gap-3">
             <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusInfo.color}`}>
@@ -634,8 +675,107 @@ export default function TarefaModal({
                 </div>
               ) : (
                 <p className="text-sm text-blue-700">
-                  Sem foto (tarefa não exigia evidência).
+                  {tarefa.foto_obrigatoria
+                    ? 'Foto era obrigatória, mas nenhuma evidência foi encontrada pra essa tentativa.'
+                    : 'Sem foto (tarefa não exigia evidência).'}
                 </p>
+              )}
+            </div>
+          )}
+
+          {/* Revisão do gestor (admin, tarefa pronta_revisao) — logo depois da
+              evidência, já que é a ação mais frequente de quem revisa; antes
+              a pessoa precisava rolar por descrição/comentários pra chegar
+              aqui. */}
+          {podeRevisar && (
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-gray-600">
+                Revisão do gestor
+              </p>
+
+              {!mostrarRefazer ? (
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleAprovar}
+                    disabled={fazendoUpload}
+                    className="flex-1 py-3 rounded-lg font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {fazendoUpload ? (
+                      <Loader size={18} className="animate-spin" />
+                    ) : (
+                      '✓ Aprovar'
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const prazo = calcularPrazoRefazer(setorTipo)
+                      setPrazoData(prazo.data)
+                      setPrazoHora(prazo.hora)
+                      setMostrarRefazer(true)
+                    }}
+                    disabled={fazendoUpload}
+                    className="flex-1 py-3 rounded-lg font-semibold bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+                  >
+                    ✗ Refazer
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <textarea
+                    value={feedbackTexto}
+                    onChange={(e) => setFeedbackTexto(e.target.value)}
+                    rows={3}
+                    placeholder="Descreva o que precisa ser refeito..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Novo prazo
+                      </label>
+                      <input
+                        type="date"
+                        value={prazoData}
+                        onChange={(e) => setPrazoData(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Hora limite
+                      </label>
+                      <input
+                        type="time"
+                        value={prazoHora}
+                        onChange={(e) => setPrazoHora(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleRefazer}
+                      disabled={fazendoUpload || !feedbackTexto.trim()}
+                      className="flex-1 py-2.5 rounded-lg font-semibold text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {fazendoUpload ? (
+                        <Loader size={16} className="animate-spin" />
+                      ) : (
+                        'Enviar e devolver'
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMostrarRefazer(false)
+                        setFeedbackTexto('')
+                      }}
+                      disabled={fazendoUpload}
+                      className="flex-1 py-2.5 rounded-lg font-medium text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                    >
+                      Voltar
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -660,14 +800,14 @@ export default function TarefaModal({
             </p>
           </div>
 
-          {/* Evidências anteriores */}
-          {evidencias.length > 0 && (
+          {/* Evidências de tentativas anteriores */}
+          {evidenciasAnteriores.length > 0 && (
             <div>
               <p className="text-xs font-semibold text-gray-600 mb-2">
-                Fotos Anteriores
+                Fotos de tentativas anteriores
               </p>
               <div className="grid grid-cols-3 gap-2">
-                {evidencias.map((ev) => (
+                {evidenciasAnteriores.map((ev) => (
                   <a
                     key={ev.id}
                     href={ev.foto_url}
@@ -774,7 +914,12 @@ export default function TarefaModal({
                   className="hidden"
                 />
 
-                {previewFoto ? (
+                {comprimindoFoto ? (
+                  <div className="flex flex-col items-center gap-2 text-gray-500 py-2">
+                    <Loader size={20} className="animate-spin" />
+                    <span className="text-sm">Preparando foto...</span>
+                  </div>
+                ) : previewFoto ? (
                   <div className="space-y-2">
                     <img
                       src={previewFoto}
@@ -782,11 +927,7 @@ export default function TarefaModal({
                       className="w-full max-h-40 object-cover rounded"
                     />
                     <button
-                      onClick={() => {
-                        setFotoUpload(null)
-                        setPreviewFoto(null)
-                        if (inputFileRef.current) inputFileRef.current.value = ''
-                      }}
+                      onClick={removerFoto}
                       className="text-xs text-gray-600 hover:text-red-600"
                     >
                       Remover foto
@@ -811,9 +952,9 @@ export default function TarefaModal({
           {podeConluir && (
             <button
               onClick={handleConcluir}
-              disabled={fazendoUpload || (tarefa.foto_obrigatoria && !fotoUpload && evidencias.length === 0)}
+              disabled={fazendoUpload || comprimindoFoto || (tarefa.foto_obrigatoria && !fotoComprimida && evidencias.length === 0)}
               className={`w-full py-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all ${
-                fazendoUpload || (tarefa.foto_obrigatoria && !fotoUpload && evidencias.length === 0)
+                fazendoUpload || comprimindoFoto || (tarefa.foto_obrigatoria && !fotoComprimida && evidencias.length === 0)
                   ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
                   : 'bg-green-600 text-white hover:bg-green-700'
               }`}
@@ -865,100 +1006,6 @@ export default function TarefaModal({
                       className="flex-1 py-2.5 rounded-lg font-semibold text-sm bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                       {fazendoUpload ? <Loader size={16} className="animate-spin" /> : '✓ Concluir'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Revisão do gestor (admin, tarefa pronta_revisao) */}
-          {podeRevisar && (
-            <div className="border-t border-gray-200 pt-4 space-y-3">
-              <p className="text-xs font-semibold text-gray-600">
-                Revisão do gestor
-              </p>
-
-              {!mostrarRefazer ? (
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleAprovar}
-                    disabled={fazendoUpload}
-                    className="flex-1 py-3 rounded-lg font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {fazendoUpload ? (
-                      <Loader size={18} className="animate-spin" />
-                    ) : (
-                      '✓ Aprovar'
-                    )}
-                  </button>
-                  <button
-                    onClick={() => {
-                      const prazo = calcularPrazoRefazer(setorTipo)
-                      setPrazoData(prazo.data)
-                      setPrazoHora(prazo.hora)
-                      setMostrarRefazer(true)
-                    }}
-                    disabled={fazendoUpload}
-                    className="flex-1 py-3 rounded-lg font-semibold bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
-                  >
-                    ✗ Refazer
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <textarea
-                    value={feedbackTexto}
-                    onChange={(e) => setFeedbackTexto(e.target.value)}
-                    rows={3}
-                    placeholder="Descreva o que precisa ser refeito..."
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        Novo prazo
-                      </label>
-                      <input
-                        type="date"
-                        value={prazoData}
-                        onChange={(e) => setPrazoData(e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">
-                        Hora limite
-                      </label>
-                      <input
-                        type="time"
-                        value={prazoHora}
-                        onChange={(e) => setPrazoHora(e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleRefazer}
-                      disabled={fazendoUpload || !feedbackTexto.trim()}
-                      className="flex-1 py-2.5 rounded-lg font-semibold text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      {fazendoUpload ? (
-                        <Loader size={16} className="animate-spin" />
-                      ) : (
-                        'Enviar e devolver'
-                      )}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setMostrarRefazer(false)
-                        setFeedbackTexto('')
-                      }}
-                      disabled={fazendoUpload}
-                      className="flex-1 py-2.5 rounded-lg font-medium text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
-                    >
-                      Voltar
                     </button>
                   </div>
                 </div>
