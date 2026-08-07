@@ -123,38 +123,43 @@ function TarefasContent() {
     const setorAtual = setores.find((s) => s.id === setorSelecionado)
     const vendoComoGestor = usuario?.role === 'admin' && setorAtual?.tipo === 'administrativo'
 
-    let query = supabase.from('tarefas').select('*')
+    // Evidências/comentários/envolvidos vêm embutidos na mesma consulta (join
+    // do PostgREST) em vez de uma segunda busca com `.in('tarefa_id', ids)`.
+    // Com meses de tarefas recorrentes acumuladas no setor, aquela lista de
+    // ids passava de várias centenas e a URL da requisição estourava o
+    // limite do servidor — que rejeitava com 400 silenciosamente (o código
+    // só fazia `if (data) setEvidencias(data)`, sem checar erro), esvaziando
+    // evidências/comentários/envolvidos da tela inteira, não só de uma
+    // tarefa. Join não tem esse limite: não existe lista de ids na URL.
+    let query = supabase
+      .from('tarefas')
+      .select('*, tarefas_evidencias(*), tarefas_comentarios(*), tarefas_envolvidos(*)')
     query = vendoComoGestor
       ? query.or(`setor_id.eq.${setorSelecionado},responsavel_atual_id.eq.${usuario!.id}`)
       : query.eq('setor_id', setorSelecionado)
 
-    const { data: tarefasData } = await query.order('data_vencimento')
+    const { data: tarefasData, error: erroTarefas } = await query
+      .order('data_vencimento')
+      .order('data_upload', { foreignTable: 'tarefas_evidencias', ascending: false })
+      .order('created_at', { foreignTable: 'tarefas_comentarios', ascending: false })
+
+    if (erroTarefas) {
+      console.error('Erro ao carregar tarefas:', erroTarefas)
+      return
+    }
 
     if (tarefasData) {
-      setTarefas(tarefasData)
-      const ids = tarefasData.map((t) => t.id)
+      const evidenciasData = tarefasData.flatMap((t: any) => t.tarefas_evidencias || [])
+      const comentariosData = tarefasData.flatMap((t: any) => t.tarefas_comentarios || [])
+      const envolvidosData = tarefasData.flatMap((t: any) => t.tarefas_envolvidos || [])
+      const tarefasLimpas = tarefasData.map(
+        ({ tarefas_evidencias, tarefas_comentarios, tarefas_envolvidos, ...resto }: any) => resto
+      )
 
-      const [{ data: evidenciasData }, { data: comentariosData }, { data: envolvidosData }] =
-        await Promise.all([
-          supabase
-            .from('tarefas_evidencias')
-            .select('*')
-            .in('tarefa_id', ids)
-            .order('data_upload', { ascending: false }),
-          supabase
-            .from('tarefas_comentarios')
-            .select('*')
-            .in('tarefa_id', ids)
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('tarefas_envolvidos')
-            .select('*')
-            .in('tarefa_id', ids),
-        ])
-
-      if (evidenciasData) setEvidencias(evidenciasData)
-      if (comentariosData) setComentarios(comentariosData)
-      if (envolvidosData) setEnvolvidos(envolvidosData)
+      setTarefas(tarefasLimpas)
+      setEvidencias(evidenciasData)
+      setComentarios(comentariosData)
+      setEnvolvidos(envolvidosData)
     }
   }
 
