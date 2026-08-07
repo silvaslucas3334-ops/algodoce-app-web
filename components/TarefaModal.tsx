@@ -1,7 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { Tarefa, TarefaEvidencia, TarefaComentario, TarefaEnvolvido } from '@/lib/types'
-import { formatData, formatHora, compressImage, uploadFoto, STATUS_INFO, calcularPrazoRefazer } from '@/lib/tarefas-utils'
+import { formatData, formatHora, compressImage, uploadFoto, hashArquivo, fotoJaEnviada, STATUS_INFO, calcularPrazoRefazer } from '@/lib/tarefas-utils'
 import { supabase } from '@/lib/supabase'
 import { X, Upload, Loader, MessageSquare, Pencil, RotateCw } from 'lucide-react'
 import EditarTarefaModal from './EditarTarefaModal'
@@ -313,10 +313,16 @@ export default function TarefaModal({
       setFazendoUpload(true)
 
       let fotoUrl = null
+      let fotoHash: string | null = null
 
       // Upload da foto se selecionada
       if (fotoUpload) {
         const compressedBlob = await compressImage(fotoUpload)
+        fotoHash = await hashArquivo(compressedBlob)
+        if (await fotoJaEnviada(usuarioAtualId, fotoHash)) {
+          alert('Essa foto já foi usada como evidência antes. Tire uma foto nova.')
+          return
+        }
         fotoUrl = await uploadFoto(
           tarefa.setor_id,
           tarefa.id,
@@ -359,9 +365,17 @@ export default function TarefaModal({
             tentativa_num: tarefa.tentativa_num,
             foto_url: fotoUrl,
             uploaded_by: usuarioAtualId,
+            hash_arquivo: fotoHash,
           })
 
         if (evidError) {
+          // 23505 = a constraint única (uploaded_by, hash_arquivo) pegou uma
+          // foto repetida que passou pela checagem antecipada (corrida rara
+          // entre duas abas/dispositivos) — avisa em vez de engolir, já que
+          // a tarefa segue concluída mas sem essa evidência registrada.
+          if ((evidError as any).code === '23505') {
+            alert('Essa foto já tinha sido usada como evidência antes. A tarefa foi concluída, mas sem essa foto — envie uma evidência nova se precisar.')
+          }
           logErro('Concluiu, mas falhou ao gravar evidência:', evidError)
         }
       }

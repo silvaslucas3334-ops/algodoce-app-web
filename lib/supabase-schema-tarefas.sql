@@ -199,7 +199,13 @@ CREATE TABLE IF NOT EXISTS tarefas_evidencias (
   tentativa_num INT NOT NULL CHECK (tentativa_num >= 1),
   foto_url TEXT NOT NULL,
   data_upload TIMESTAMPTZ DEFAULT now(),
-  uploaded_by UUID NOT NULL REFERENCES usuarios(id)
+  uploaded_by UUID NOT NULL REFERENCES usuarios(id),
+  -- SHA-256 do arquivo (já comprimido) — trava reenvio da mesma foto pelo
+  -- mesmo usuário (ver lib/migrations/tarefas-evidencia-hash-duplicada.sql).
+  -- NULL não conflita com NULL numa UNIQUE, então fica opcional sem quebrar
+  -- linhas antigas.
+  hash_arquivo TEXT,
+  CONSTRAINT tarefas_evidencias_uploader_hash_unico UNIQUE (uploaded_by, hash_arquivo)
 );
 
 -- Índices

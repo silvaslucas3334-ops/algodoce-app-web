@@ -162,6 +162,42 @@ export async function uploadFoto(
 }
 
 /**
+ * Hash SHA-256 do arquivo (já comprimido) — a mesma imagem sempre produz o
+ * mesmo hash, mesmo reenviada do zero em tarefas/tentativas diferentes.
+ * Usado pra travar reenvio da mesma foto como evidência ("maquiar" a
+ * evidência mandando de novo uma foto antiga em vez de tirar uma nova).
+ */
+export async function hashArquivo(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer()
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+/**
+ * Essa foto (pelo conteúdo, não pelo nome/caminho) já foi enviada como
+ * evidência por este mesmo usuário antes, em qualquer tarefa? Checagem
+ * antecipada pra travar ANTES de gastar upload no Storage — a garantia de
+ * verdade é a constraint única no banco (uploaded_by, hash_arquivo);
+ * se essa checagem falhar por qualquer motivo, deixa passar sem travar
+ * (a constraint pega o caso raro que escapar daqui).
+ */
+export async function fotoJaEnviada(usuarioId: string, hash: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('tarefas_evidencias')
+    .select('id')
+    .eq('uploaded_by', usuarioId)
+    .eq('hash_arquivo', hash)
+    .limit(1)
+  if (error) {
+    console.error('Erro ao checar foto duplicada:', error)
+    return false
+  }
+  return (data?.length || 0) > 0
+}
+
+/**
  * Formata data para exibição (pt-BR)
  */
 export function formatData(data: string): string {

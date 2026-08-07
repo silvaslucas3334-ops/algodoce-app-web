@@ -103,6 +103,7 @@ export interface TarefaEvidencia {
   foto_url: string
   data_upload: string
   uploaded_by: string
+  hash_arquivo?: string | null // SHA-256 do arquivo — trava reenvio da mesma foto pelo mesmo usuário
 }
 
 export interface TarefaHistorico {
