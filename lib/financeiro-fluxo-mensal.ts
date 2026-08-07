@@ -919,7 +919,9 @@ export async function buscarResumoHubFinanceiro(): Promise<ResumoHubFinanceiro> 
 
 export interface FluxoMensalAtrasadoItem {
   lancamentoId: string
+  parteId: string | null
   parteNome: string
+  contaId: string | null
   contaNome: string
   tipo: TipoLancamento
   valor: number
@@ -938,7 +940,7 @@ export async function buscarAtrasados(unidade: VisaoFluxoMensal): Promise<FluxoM
   const unidades = unidade === 'consolidado' ? ['loja1', 'loja2', 'rateio'] : [unidade]
   const { data, error } = await supabase
     .from('financeiro_lancamentos')
-    .select('id, valor_total, tipo, data_vencimento, parte:financeiro_partes!parte_id(nome), conta:financeiro_contas(nome)')
+    .select('id, valor_total, tipo, data_vencimento, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome)')
     .in('unidade', unidades)
     .eq('status', 'aberto')
     .lt('data_vencimento', hoje)
@@ -947,7 +949,9 @@ export async function buscarAtrasados(unidade: VisaoFluxoMensal): Promise<FluxoM
 
   const itens: FluxoMensalAtrasadoItem[] = (data || []).map((l: any) => ({
     lancamentoId: l.id,
+    parteId: l.parte_id || null,
     parteNome: l.parte?.nome || 'Sem beneficiário',
+    contaId: l.conta_id || null,
     contaNome: l.conta?.nome || 'Sem classificação',
     tipo: l.tipo,
     valor: l.valor_total,
@@ -956,4 +960,65 @@ export async function buscarAtrasados(unidade: VisaoFluxoMensal): Promise<FluxoM
   }))
 
   return { total: itens.reduce((s, i) => s + i.valor, 0), quantidade: itens.length, itens }
+}
+
+// --- Modo Simulado: "e se eu pagasse esses atrasados em tal data?" ----------
+
+/** Um atrasado escolhido pra simulação + a data em que o usuário pretende pagar. */
+export interface SimulacaoAtrasadoItem extends FluxoMensalAtrasadoItem {
+  dataSimulada: string // YYYY-MM-DD, sempre >= hoje
+}
+
+/**
+ * Injeta despesas/notas atrasadas (hoje fora do calendário por definição —
+ * ver buscarDespesasFixasFuturas, que só projeta hoje/futuro) na data em
+ * que o usuário simula que vai pagar, e recalcula Saldo do dia/Acumulado
+ * em cima disso. Puramente client-side, em cima do `dados` já buscado —
+ * não sobrescreve o real: `financeiro_lancamentos` continua com o status
+ * e vencimento originais, isso aqui não escreve nada no banco.
+ *
+ * Saídas por grupo ganha uma linha própria por atrasado simulado (sufixo
+ * "(simulado)"), sem `origem` — em vez de somar dentro do total real da
+ * mesma conta/fornecedor, fica visualmente óbvio o que é hipótese; também
+ * evita o clique no popover de dia tentar buscar por um id que não existe
+ * de verdade (FluxoDiaPopover só fica clicável quando `origem` está setado).
+ */
+export function aplicarSimulacaoAtrasados(
+  dados: FluxoMensalResultado,
+  simulacao: SimulacaoAtrasadoItem[]
+): FluxoMensalResultado {
+  const relevantes = simulacao.filter((s) => dados.dias.includes(s.dataSimulada))
+  if (relevantes.length === 0) return dados
+
+  const saidasAjustadas = [...dados.saidasPorDia]
+  relevantes.forEach((s) => {
+    const indice = dados.dias.indexOf(s.dataSimulada)
+    saidasAjustadas[indice] += s.valor
+  })
+
+  const gruposSimulados: FluxoMensalLinhaGrupo[] = relevantes.map((s) => {
+    const porDia = dados.dias.map(() => 0)
+    porDia[dados.dias.indexOf(s.dataSimulada)] = s.valor
+    return {
+      id: `simulado-${s.lancamentoId}`,
+      nome: `${s.tipo === 'despesa' ? s.contaNome : s.parteNome} (simulado)`,
+      porDia,
+      total: s.valor,
+    }
+  })
+
+  const { saldoDiaPorDia, saldoAcumuladoPorDia } = calcularSaldoDiarioEAcumulado(
+    dados.entradasCaixaPorDia,
+    saidasAjustadas,
+    dados.saldoInicial
+  )
+
+  return {
+    ...dados,
+    saidasPorDia: saidasAjustadas,
+    saidasPorGrupo: [...dados.saidasPorGrupo, ...gruposSimulados].sort((a, b) => b.total - a.total),
+    totalSaidas: saidasAjustadas.reduce((s, v) => s + v, 0),
+    saldoDiaPorDia,
+    saldoAcumuladoPorDia,
+  }
 }

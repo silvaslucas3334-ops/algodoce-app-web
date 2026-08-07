@@ -8,18 +8,21 @@ import FluxoMensalTabela from '@/components/FluxoMensalTabela'
 import FluxoMensalDrilldownModal, { LinhaDrilldown } from '@/components/FluxoMensalDrilldownModal'
 import NovaReceitaDinheiroModal from '@/components/NovaReceitaDinheiroModal'
 import InformarFaturamentoDiarioModal from '@/components/InformarFaturamentoDiarioModal'
+import ModoSimuladoModal from '@/components/ModoSimuladoModal'
 import {
   buscarFluxoMensal,
   buscarAtrasados,
   calcularSaldoDiarioEAcumulado,
+  aplicarSimulacaoAtrasados,
   FluxoMensalResultado,
   FluxoMensalAtrasados,
+  SimulacaoAtrasadoItem,
 } from '@/lib/financeiro-fluxo-mensal'
 import { formatBRL } from '@/lib/ofx'
 import { hojeISO } from '@/lib/financeiro-utils'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark, AlertTriangle, Receipt } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader, Settings, Plus, Landmark, AlertTriangle, Receipt, FlaskConical } from 'lucide-react'
 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -51,6 +54,12 @@ function FluxoCaixaContent() {
   // trocar de mês (é uma leitura do "agora", não faz sentido persistir pro
   // histórico).
   const [ignorarAbertoHoje, setIgnorarAbertoHoje] = useState(false)
+  // Modo Simulado: "e se eu pagasse esses atrasados em tal data?" — ao
+  // contrário do toggle acima, NÃO reseta ao trocar de mês, já que a ideia é
+  // justamente poder navegar pra frente e ver o efeito se propagando no
+  // saldo acumulado. Não escreve nada no banco (lib/financeiro-fluxo-mensal.ts).
+  const [simulacao, setSimulacao] = useState<SimulacaoAtrasadoItem[]>([])
+  const [modalSimulacao, setModalSimulacao] = useState(false)
 
   useEffect(() => {
     if (aba === 'mensal') carregar()
@@ -86,22 +95,42 @@ function FluxoCaixaContent() {
   }
 
   // Recalculado 100% no client, em cima do que já veio de buscarFluxoMensal —
-  // sem novo fetch. Só as linhas de Saldo mudam (Saídas continua mostrando o
-  // comprometido de verdade); ver comentário de saidasAbertasHoje na lib.
+  // sem novo fetch. Duas camadas independentes, nessa ordem:
+  // 1) Modo Simulado injeta os atrasados escolhidos de verdade em
+  //    saidasPorDia/saidasPorGrupo (a ideia é ver o impacto real no
+  //    schedule, não só no saldo).
+  // 2) "Ignorar aberto de hoje" só ajusta Saldo do dia/Acumulado por cima do
+  //    resultado já simulado — Saídas continua mostrando o comprometido de
+  //    verdade (+ simulação); ver comentário de saidasAbertasHoje na lib.
   const dadosExibidos: FluxoMensalResultado | null = useMemo(() => {
-    if (!dados || !ignorarAbertoHoje || dados.saidasAbertasHoje === 0) return dados
-    const indiceHoje = dados.dias.indexOf(hojeISO())
-    if (indiceHoje < 0) return dados
-    const saidasAjustadas = dados.saidasPorDia.map((v, i) => (i === indiceHoje ? v - dados.saidasAbertasHoje : v))
-    const { saldoDiaPorDia, saldoAcumuladoPorDia } = calcularSaldoDiarioEAcumulado(
-      dados.entradasCaixaPorDia,
-      saidasAjustadas,
-      dados.saldoInicial
-    )
-    return { ...dados, saldoDiaPorDia, saldoAcumuladoPorDia }
-  }, [dados, ignorarAbertoHoje])
+    if (!dados) return null
+    let ajustado = aplicarSimulacaoAtrasados(dados, simulacao)
+    if (ignorarAbertoHoje && dados.saidasAbertasHoje > 0) {
+      const indiceHoje = dados.dias.indexOf(hojeISO())
+      if (indiceHoje >= 0) {
+        const saidasParaSaldo = ajustado.saidasPorDia.map((v, i) => (i === indiceHoje ? v - dados.saidasAbertasHoje : v))
+        const { saldoDiaPorDia, saldoAcumuladoPorDia } = calcularSaldoDiarioEAcumulado(
+          ajustado.entradasCaixaPorDia,
+          saidasParaSaldo,
+          ajustado.saldoInicial
+        )
+        ajustado = { ...ajustado, saldoDiaPorDia, saldoAcumuladoPorDia }
+      }
+    }
+    return ajustado
+  }, [dados, ignorarAbertoHoje, simulacao])
 
-  const saldoAjustadoAtivo = ignorarAbertoHoje && !!dados && dados.saidasAbertasHoje > 0
+  const simulacaoAtiva = simulacao.length > 0
+  const abertoHojeAtivo = ignorarAbertoHoje && !!dados && dados.saidasAbertasHoje > 0
+  const saldoAjustadoAtivo = simulacaoAtiva || abertoHojeAtivo
+  const saldoAjustadoAviso = saldoAjustadoAtivo
+    ? `visão ajustada (${[
+        simulacaoAtiva && `modo simulado, ${simulacao.length} atrasado${simulacao.length > 1 ? 's' : ''}`,
+        abertoHojeAtivo && 'hoje sem contar aberto',
+      ]
+        .filter(Boolean)
+        .join('; ')})`
+    : undefined
   const saldoFinal =
     dadosExibidos && dadosExibidos.saldoAcumuladoPorDia.length > 0
       ? dadosExibidos.saldoAcumuladoPorDia[dadosExibidos.saldoAcumuladoPorDia.length - 1]
@@ -146,6 +175,16 @@ function FluxoCaixaContent() {
                 >
                   <Landmark size={16} /> Conciliar Extrato
                 </button>
+                <button
+                  onClick={() => setModalSimulacao(true)}
+                  className={`rounded-lg px-3 py-2 font-semibold flex items-center gap-1.5 text-sm ${
+                    simulacaoAtiva
+                      ? 'bg-amber-600 text-white hover:bg-amber-700'
+                      : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <FlaskConical size={16} /> Modo Simulado{simulacaoAtiva ? ` (${simulacao.length})` : ''}
+                </button>
               </div>
             ) : undefined
           }
@@ -183,6 +222,24 @@ function FluxoCaixaContent() {
                 </div>
               )}
 
+              {simulacaoAtiva && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 flex items-center justify-between gap-3 text-sm text-amber-800">
+                  <span className="flex items-center gap-2">
+                    <FlaskConical size={16} className="flex-shrink-0" />
+                    Modo Simulado ativo — {simulacao.length} despesa{simulacao.length > 1 ? 's' : ''} atrasada
+                    {simulacao.length > 1 ? 's' : ''} incluída{simulacao.length > 1 ? 's' : ''} no planejamento.
+                  </span>
+                  <div className="flex gap-3 flex-shrink-0">
+                    <button onClick={() => setModalSimulacao(true)} className="font-semibold underline hover:text-amber-900">
+                      Editar
+                    </button>
+                    <button onClick={() => setSimulacao([])} className="font-semibold underline hover:text-amber-900">
+                      Sair
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {loading ? (
                 <div className="flex items-center justify-center py-12 gap-2 text-gray-400">
                   <Loader size={20} className="animate-spin" /> Carregando...
@@ -195,8 +252,11 @@ function FluxoCaixaContent() {
                       <p className="text-lg font-bold text-green-600 mt-1">{formatBRL(dados.totalEntradasCaixa)}</p>
                     </div>
                     <div className="bg-white rounded-xl p-4 border border-gray-100">
-                      <p className="text-xs text-gray-500 uppercase font-semibold">Saídas</p>
-                      <p className="text-lg font-bold text-red-600 mt-1">{formatBRL(dados.totalSaidas)}</p>
+                      <p className="text-xs text-gray-500 uppercase font-semibold">
+                        Saídas
+                        {simulacaoAtiva && <span className="ml-1.5 text-[10px] font-semibold text-amber-600 normal-case">simulado</span>}
+                      </p>
+                      <p className="text-lg font-bold text-red-600 mt-1">{formatBRL((dadosExibidos || dados).totalSaidas)}</p>
                     </div>
                     <div className="bg-white rounded-xl p-4 border border-gray-100">
                       <p className="text-xs text-gray-500 uppercase font-semibold">
@@ -238,7 +298,7 @@ function FluxoCaixaContent() {
 
                   <FluxoMensalTabela
                     dados={dadosExibidos || dados}
-                    saldoAjustadoAviso={saldoAjustadoAtivo ? 'visão ajustada (hoje sem contar aberto)' : undefined}
+                    saldoAjustadoAviso={saldoAjustadoAviso}
                   />
                 </>
               ) : null}
@@ -248,6 +308,15 @@ function FluxoCaixaContent() {
 
         {modalDrilldown && (
           <FluxoMensalDrilldownModal titulo={modalDrilldown.titulo} linhas={modalDrilldown.linhas} onClose={() => setModalDrilldown(null)} />
+        )}
+
+        {modalSimulacao && (
+          <ModoSimuladoModal
+            atrasados={atrasados?.itens || []}
+            simulacaoAtual={simulacao}
+            onClose={() => setModalSimulacao(false)}
+            onAplicar={setSimulacao}
+          />
         )}
 
         {modalNovaReceita && usuario && (
