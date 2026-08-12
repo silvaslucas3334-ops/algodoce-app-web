@@ -382,16 +382,19 @@ CREATE POLICY financeiro_materias_primas_update_admin ON financeiro_materias_pri
 DROP POLICY IF EXISTS financeiro_materias_primas_delete_blocked ON financeiro_materias_primas;
 CREATE POLICY financeiro_materias_primas_delete_blocked ON financeiro_materias_primas FOR DELETE USING (false);
 
--- lancamentos: admin tudo; loja/cozinha só a própria unidade, edição só em aberto.
+-- lancamentos: admin tudo; loja/cozinha só o que ela mesma lançou (não a
+-- unidade inteira — despesa lançada por outra pessoa da mesma unidade pode
+-- ser salário/retirada de sócio, informação confidencial que não é pra
+-- circular entre a equipe). Edição também só em aberto.
 DROP POLICY IF EXISTS financeiro_lancamentos_select ON financeiro_lancamentos;
 CREATE POLICY financeiro_lancamentos_select ON financeiro_lancamentos FOR SELECT TO authenticated
   USING (
     (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
-    OR unidade = financeiro_unidade_do_usuario()
+    OR criado_por = auth.uid()
   );
 -- CRIAÇÃO liberada pra qualquer unidade, pra qualquer role — várias
 -- pessoas de unidades diferentes lançam despesa/nota. A EDIÇÃO (abaixo)
--- continua travada por unidade pra não-admin.
+-- continua travada por criador pra não-admin.
 DROP POLICY IF EXISTS financeiro_lancamentos_insert ON financeiro_lancamentos;
 CREATE POLICY financeiro_lancamentos_insert ON financeiro_lancamentos FOR INSERT TO authenticated
   WITH CHECK (criado_por = auth.uid());
@@ -399,11 +402,11 @@ DROP POLICY IF EXISTS financeiro_lancamentos_update ON financeiro_lancamentos;
 CREATE POLICY financeiro_lancamentos_update ON financeiro_lancamentos FOR UPDATE TO authenticated
   USING (
     (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
-    OR (unidade = financeiro_unidade_do_usuario() AND status = 'aberto')
+    OR (criado_por = auth.uid() AND status = 'aberto')
   )
   WITH CHECK (
     (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
-    OR (unidade = financeiro_unidade_do_usuario() AND status = 'aberto')
+    OR (criado_por = auth.uid() AND status = 'aberto')
   );
 DROP POLICY IF EXISTS financeiro_lancamentos_delete_blocked ON financeiro_lancamentos;
 CREATE POLICY financeiro_lancamentos_delete_blocked ON financeiro_lancamentos FOR DELETE USING (false);
@@ -417,7 +420,7 @@ CREATE POLICY financeiro_lancamento_itens_select ON financeiro_lancamento_itens 
       WHERE l.id = lancamento_id
         AND (
           (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
-          OR l.unidade = financeiro_unidade_do_usuario()
+          OR l.criado_por = auth.uid()
         )
     )
   );
@@ -441,7 +444,7 @@ CREATE POLICY financeiro_lancamento_itens_update ON financeiro_lancamento_itens 
       WHERE l.id = lancamento_id
         AND (
           (SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin'
-          OR (l.unidade = financeiro_unidade_do_usuario() AND l.status = 'aberto')
+          OR (l.criado_por = auth.uid() AND l.status = 'aberto')
         )
     )
   );
