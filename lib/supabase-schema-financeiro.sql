@@ -121,6 +121,12 @@ CREATE TABLE IF NOT EXISTS financeiro_materias_primas (
   -- continua só via unidade_compra/fator_conversao). Ambos opcionais.
   unidade_fornecedor TEXT,
   fator_unidade_fornecedor NUMERIC CHECK (fator_unidade_fornecedor IS NULL OR fator_unidade_fornecedor > 0), -- unidade_compra por 1 unidade_fornecedor (1 pacote=5kg -> 5)
+  -- Custo manual por unidade_compra pra itens sem histórico de compra no
+  -- sistema (ex: sal, azeite comprados antes desse módulo existir). IS NOT
+  -- NULL é o próprio toggle; quando preenchido, sempre tem prioridade sobre
+  -- o custo calculado (ver lib/financeiro-cmv.ts). Convertido pra custo por
+  -- unidade_medida via fator_conversao, igual valor_unitario da nota.
+  custo_manual_por_unidade_compra NUMERIC CHECK (custo_manual_por_unidade_compra IS NULL OR custo_manual_por_unidade_compra >= 0),
   conta_id UUID REFERENCES financeiro_contas(id), -- classificação contábil padrão do item; itens da nota herdam
   descricao TEXT,
   ativo BOOLEAN NOT NULL DEFAULT true,

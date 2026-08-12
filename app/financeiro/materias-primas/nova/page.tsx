@@ -14,6 +14,7 @@ export default function NovaMateriaPrimaPage() {
   const [fatorConversao, setFatorConversao] = useState('1000')
   const [unidadeFornecedor, setUnidadeFornecedor] = useState('')
   const [fatorUnidadeFornecedor, setFatorUnidadeFornecedor] = useState('')
+  const [custoManual, setCustoManual] = useState('')
   const [contaId, setContaId] = useState('')
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [descricao, setDescricao] = useState('')
@@ -50,6 +51,7 @@ export default function NovaMateriaPrimaPage() {
         fator_conversao: Number(fatorConversao),
         unidade_fornecedor: fornecedorCompleto ? unidadeFornecedor.trim() : null,
         fator_unidade_fornecedor: fornecedorCompleto ? Number(fatorUnidadeFornecedor) : null,
+        custo_manual_por_unidade_compra: custoManual.trim() ? Number(custoManual) : null,
         conta_id: contaId || null,
         descricao: descricao.trim() || null,
       })
@@ -150,6 +152,24 @@ export default function NovaMateriaPrimaPage() {
                   Quantas "{unidadeCompra || 'compra'}" tem em 1 "{unidadeFornecedor || 'fornecedor'}". Ex: 1 pacote = 5 kg → 5.
                 </p>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Custo manual (opcional) — R$ por {unidadeCompra || 'unidade de compra'}
+              </label>
+              <input
+                type="number"
+                step="any"
+                min={0}
+                value={custoManual}
+                onChange={(e) => setCustoManual(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                placeholder="Ex: 8.50"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Pra itens sem nota ainda (ex: sal, azeite comprados antes do sistema) — dá um custo de partida até a primeira compra real ser lançada.
+              </p>
             </div>
 
             <div>

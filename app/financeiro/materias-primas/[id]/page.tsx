@@ -8,6 +8,8 @@ import { useRouter, useParams } from 'next/navigation'
 import { Loader } from 'lucide-react'
 import { FinanceiroMateriaPrima, FinanceiroConta, FinanceiroCustoMedioMensal, FinanceiroCustoPorFornecedor } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
+import { buscarCustosAtuaisMateriasPrimas, CustoAtualMateriaPrima } from '@/lib/financeiro-cmv'
+import CustoAtualBadges, { labelMesReferencia } from '@/components/CustoAtualBadge'
 
 export default function DetalheMateriaPrimaPage() {
   const router = useRouter()
@@ -19,6 +21,7 @@ export default function DetalheMateriaPrimaPage() {
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [custosMensais, setCustosMensais] = useState<FinanceiroCustoMedioMensal[]>([])
   const [custosPorFornecedor, setCustosPorFornecedor] = useState<FinanceiroCustoPorFornecedor[]>([])
+  const [custoAtual, setCustoAtual] = useState<CustoAtualMateriaPrima | null>(null)
   const [unidadeTravada, setUnidadeTravada] = useState(false)
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
@@ -66,6 +69,7 @@ export default function DetalheMateriaPrimaPage() {
     setCustosMensais(custosData || [])
     setCustosPorFornecedor(custosFornecedorData || [])
     setUnidadeTravada((usoEmPrePreparo || 0) > 0 || (usoEmProdutoFinal || 0) > 0)
+    setCustoAtual((await buscarCustosAtuaisMateriasPrimas([materiaId])).get(materiaId) ?? null)
     setLoading(false)
   }
 
@@ -85,6 +89,7 @@ export default function DetalheMateriaPrimaPage() {
           fator_conversao: materia.fator_conversao,
           unidade_fornecedor: fornecedorCompleto ? materia.unidade_fornecedor!.trim() : null,
           fator_unidade_fornecedor: fornecedorCompleto ? materia.fator_unidade_fornecedor : null,
+          custo_manual_por_unidade_compra: materia.custo_manual_por_unidade_compra ?? null,
           conta_id: materia.conta_id || null,
           descricao: materia.descricao || null,
           ativo: materia.ativo,
@@ -197,6 +202,30 @@ export default function DetalheMateriaPrimaPage() {
               </div>
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Custo manual (opcional) — R$ por {materia.unidade_compra}
+              </label>
+              <input
+                type="number"
+                step="any"
+                min={0}
+                value={materia.custo_manual_por_unidade_compra ?? ''}
+                onChange={(e) =>
+                  setMateria({ ...materia, custo_manual_por_unidade_compra: e.target.value ? Number(e.target.value) : undefined })
+                }
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                placeholder="Ex: 8.50"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Preenchido = sempre usado no lugar do custo calculado por compras, em toda a Ficha Técnica. Deixe vazio pra usar o cálculo automático.
+              </p>
+              {materia.custo_manual_por_unidade_compra != null && custosMensais.length > 0 && (
+                <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2">
+                  Já existem compras registradas para este item — considere usar o cálculo automático (limpe o campo acima).
+                </p>
+              )}
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Conta contábil do item</label>
               <select
                 value={materia.conta_id || ''}
@@ -234,6 +263,25 @@ export default function DetalheMateriaPrimaPage() {
             >
               {salvando ? 'Salvando...' : 'Salvar Alterações'}
             </button>
+          </div>
+
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+            <h2 className="font-semibold text-gray-800 mb-3">Custo atual</h2>
+            {custoAtual ? (
+              <>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-2xl font-bold text-gray-900">
+                    {formatBRL(custoAtual.custo)}<span className="text-sm font-normal text-gray-400">/{materia.unidade_medida}</span>
+                  </p>
+                  <CustoAtualBadges custo={custoAtual} />
+                </div>
+                {custoAtual.origem === 'calculado' && custoAtual.mesReferencia && (
+                  <p className="text-xs text-gray-500 mt-1">Preço de {labelMesReferencia(custoAtual.mesReferencia)}</p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-gray-400">Sem custo conhecido — nenhuma compra registrada e nenhum custo manual definido.</p>
+            )}
           </div>
 
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">

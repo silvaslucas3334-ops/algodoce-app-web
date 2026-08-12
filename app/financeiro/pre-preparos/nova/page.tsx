@@ -9,7 +9,8 @@ import { useRouter } from 'next/navigation'
 import { Plus, Trash2 } from 'lucide-react'
 import { FinanceiroMateriaPrima } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
-import { criarPrePreparo, salvarItensPrePreparo, buscarCustosAtuaisMateriasPrimas } from '@/lib/financeiro-cmv'
+import { criarPrePreparo, salvarItensPrePreparo, buscarCustosAtuaisMateriasPrimas, CustoAtualMateriaPrima } from '@/lib/financeiro-cmv'
+import CustoAtualBadges from '@/components/CustoAtualBadge'
 
 export default function NovoPrePreparoPage() {
   const { usuario } = useAuth()
@@ -23,7 +24,7 @@ export default function NovoPrePreparoPage() {
 
   const [itens, setItens] = useState<ItemReceitaForm[]>([])
   const [modalAberto, setModalAberto] = useState(false)
-  const [custosMP, setCustosMP] = useState<Map<string, number>>(new Map())
+  const [custosMP, setCustosMP] = useState<Map<string, CustoAtualMateriaPrima>>(new Map())
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -58,8 +59,8 @@ export default function NovoPrePreparoPage() {
   const podeSalvar = nome.trim() && unidadeMedida.trim() && rendimentoNum > 0 && itens.length > 0
 
   const custoTotalConhecido = itens.reduce((soma, item) => {
-    const custo = item.materia_prima_id ? custosMP.get(item.materia_prima_id) : undefined
-    return custo != null ? soma + item.quantidade * custo : soma
+    const entry = item.materia_prima_id ? custosMP.get(item.materia_prima_id) : undefined
+    return entry != null ? soma + item.quantidade * entry.custo : soma
   }, 0)
   const itensSemCusto = itens.filter((i) => i.materia_prima_id && custosMP.get(i.materia_prima_id) == null)
 
@@ -187,14 +188,15 @@ export default function NovoPrePreparoPage() {
             ) : (
               <div className="space-y-2">
                 {itens.map((item, i) => {
-                  const custo = item.materia_prima_id ? custosMP.get(item.materia_prima_id) : undefined
+                  const entry = item.materia_prima_id ? custosMP.get(item.materia_prima_id) : undefined
                   return (
                     <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">
                       <div>
                         <p className="font-medium text-gray-800">{item.nome}</p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-gray-500 flex items-center gap-1">
                           {item.quantidade} {item.unidade_medida}
-                          {custo != null ? ` · ${formatBRL(item.quantidade * custo)}` : ' · custo desconhecido'}
+                          {entry != null ? ` · ${formatBRL(item.quantidade * entry.custo)}` : ' · custo desconhecido'}
+                          {entry && <CustoAtualBadges custo={entry} />}
                         </p>
                       </div>
                       <button onClick={() => removerItem(i)} className="text-red-600 hover:text-red-700">
@@ -203,9 +205,19 @@ export default function NovoPrePreparoPage() {
                     </div>
                   )
                 })}
-                <div className="flex justify-between items-center px-3 pt-2 border-t border-gray-200 text-sm">
-                  <span className="font-semibold text-gray-700">Custo total conhecido</span>
-                  <span className="font-bold text-gray-900">{formatBRL(custoTotalConhecido)}</span>
+                <div className="pt-2 border-t border-gray-200 space-y-1">
+                  {rendimentoNum > 0 && (
+                    <div className="flex justify-between items-center px-3 text-sm">
+                      <span className="font-semibold text-gray-700">
+                        Custo por {unidadeMedida || 'unidade'}{itensSemCusto.length > 0 ? ' (parcial)' : ''}
+                      </span>
+                      <span className="font-bold text-gray-900">{formatBRL(custoTotalConhecido / rendimentoNum)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center px-3 text-xs text-gray-500">
+                    <span>Custo total conhecido</span>
+                    <span>{formatBRL(custoTotalConhecido)}</span>
+                  </div>
                 </div>
                 {itensSemCusto.length > 0 && (
                   <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2">

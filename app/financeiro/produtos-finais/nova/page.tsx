@@ -14,7 +14,9 @@ import {
   salvarItensProdutoFinal,
   buscarCustosAtuaisMateriasPrimas,
   calcularCustoPrePreparo,
+  CustoAtualMateriaPrima,
 } from '@/lib/financeiro-cmv'
+import CustoAtualBadges from '@/components/CustoAtualBadge'
 
 export default function NovoProdutoFinalPage() {
   const { usuario } = useAuth()
@@ -30,7 +32,7 @@ export default function NovoProdutoFinalPage() {
 
   const [itens, setItens] = useState<ItemReceitaForm[]>([])
   const [modalAberto, setModalAberto] = useState(false)
-  const [custosMP, setCustosMP] = useState<Map<string, number>>(new Map())
+  const [custosMP, setCustosMP] = useState<Map<string, CustoAtualMateriaPrima>>(new Map())
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -76,8 +78,8 @@ export default function NovoProdutoFinalPage() {
 
   function custoDaLinha(item: ItemReceitaForm): number | null {
     if (item.materia_prima_id) {
-      const custo = custosMP.get(item.materia_prima_id)
-      return custo != null ? item.quantidade * custo : null
+      const entry = custosMP.get(item.materia_prima_id)
+      return entry != null ? item.quantidade * entry.custo : null
     }
     if (item.pre_preparo_id) {
       const pp = prePreparos.find((p) => p.id === item.pre_preparo_id)
@@ -227,6 +229,7 @@ export default function NovoProdutoFinalPage() {
               <div className="space-y-2">
                 {itens.map((item, i) => {
                   const custoLinha = custoDaLinha(item)
+                  const entry = item.materia_prima_id ? custosMP.get(item.materia_prima_id) : undefined
                   return (
                     <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">
                       <div>
@@ -234,9 +237,10 @@ export default function NovoProdutoFinalPage() {
                           {item.nome}
                           {item.pre_preparo_id && <span className="ml-1.5 text-[10px] font-semibold text-purple-700 bg-purple-100 rounded-full px-2 py-0.5">Pré-preparo</span>}
                         </p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-gray-500 flex items-center gap-1">
                           {item.quantidade} {item.unidade_medida}
                           {custoLinha != null ? ` · ${formatBRL(custoLinha)}` : ' · custo desconhecido'}
+                          {entry && <CustoAtualBadges custo={entry} />}
                         </p>
                       </div>
                       <button onClick={() => removerItem(i)} className="text-red-600 hover:text-red-700">
@@ -245,16 +249,20 @@ export default function NovoProdutoFinalPage() {
                     </div>
                   )
                 })}
-                <div className="flex justify-between items-center px-3 pt-2 border-t border-gray-200 text-sm">
-                  <span className="font-semibold text-gray-700">Custo total conhecido</span>
-                  <span className="font-bold text-gray-900">{formatBRL(custoTotalConhecido)}</span>
-                </div>
-                {rendimentoNum > 1 && itensSemCusto.length === 0 && (
-                  <div className="flex justify-between items-center px-3 text-sm text-gray-600">
-                    <span>Custo por porção ({rendimentoNum})</span>
-                    <span>{formatBRL(custoTotalConhecido / rendimentoNum)}</span>
+                <div className="pt-2 border-t border-gray-200 space-y-1">
+                  {rendimentoNum > 0 && (
+                    <div className="flex justify-between items-center px-3 text-sm">
+                      <span className="font-semibold text-gray-700">
+                        Custo por porção ({rendimentoNum}){itensSemCusto.length > 0 ? ' (parcial)' : ''}
+                      </span>
+                      <span className="font-bold text-gray-900">{formatBRL(custoTotalConhecido / rendimentoNum)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center px-3 text-xs text-gray-500">
+                    <span>Custo total conhecido</span>
+                    <span>{formatBRL(custoTotalConhecido)}</span>
                   </div>
-                )}
+                </div>
                 {itensSemCusto.length > 0 && (
                   <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2">
                     {itensSemCusto.length === 1 ? 'Este item' : `Estes ${itensSemCusto.length} itens`} ainda não têm custo conhecido

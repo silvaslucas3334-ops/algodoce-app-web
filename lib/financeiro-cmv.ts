@@ -1,27 +1,81 @@
 import { supabase } from './supabase'
 import { FinanceiroPrePreparo, FinanceiroProdutoFinal, StatusFichaTecnica } from './types'
+import { diferencaEmMeses, hojeISO } from './financeiro-utils'
 
 // --- custo atual das matérias-primas -----------------------------------
 
+export interface CustoAtualMateriaPrima {
+  custo: number
+  origem: 'manual' | 'calculado'
+  mesReferencia: string | null // YYYY-MM-01; null quando origem='manual'
+  mesesAtras: number | null
+  desatualizado: boolean // origem==='calculado' && mesesAtras >= 2
+  temComprasRegistradas: boolean // true mesmo com origem='manual', se já há histórico (aciona o aviso pra trocar pro cálculo automático)
+}
+
 /**
- * Custo mais recente por matéria-prima, a partir de
- * financeiro_custo_medio_mensal (única fonte de "quanto custa" — não
- * existe preço estático em lugar nenhum). Busca em lote (não N+1): uma
- * query com .in(), ordenada por mes_referencia DESC, e fica só com a
- * primeira ocorrência (mais recente) de cada id.
+ * Custo atual por matéria-prima, com proveniência — fonte única usada em
+ * TODO lugar que mostra "quanto custa" (lista, detalhe, Ficha Técnica).
+ * Regra: custo manual (financeiro_materias_primas.custo_manual_por_unidade_compra)
+ * sempre GANHA e nem passa pelo fallback de mês — curto-circuita antes.
+ * Sem override, cai no cálculo de sempre: mês mais recente com QUALQUER
+ * compra em financeiro_custo_medio_mensal, por antigo que seja, com
+ * mesesAtras/desatualizado calculados a partir dele. Busca em lote (não
+ * N+1): duas queries com .in(), nunca uma por item.
  */
-export async function buscarCustosAtuaisMateriasPrimas(ids: string[]): Promise<Map<string, number>> {
-  const mapa = new Map<string, number>()
+export async function buscarCustosAtuaisMateriasPrimas(ids: string[]): Promise<Map<string, CustoAtualMateriaPrima>> {
+  const mapa = new Map<string, CustoAtualMateriaPrima>()
   if (ids.length === 0) return mapa
-  const { data, error } = await supabase
-    .from('financeiro_custo_medio_mensal')
-    .select('materia_prima_id, mes_referencia, custo_medio_por_unidade_medida')
-    .in('materia_prima_id', ids)
-    .order('mes_referencia', { ascending: false })
-  if (error) throw new Error(error.message)
-  ;(data || []).forEach((row: any) => {
-    if (!mapa.has(row.materia_prima_id)) mapa.set(row.materia_prima_id, row.custo_medio_por_unidade_medida)
+
+  const [{ data: materias, error: erroManual }, { data: mensal, error: erroMensal }] = await Promise.all([
+    supabase.from('financeiro_materias_primas').select('id, custo_manual_por_unidade_compra, fator_conversao').in('id', ids),
+    supabase
+      .from('financeiro_custo_medio_mensal')
+      .select('materia_prima_id, mes_referencia, custo_medio_por_unidade_medida')
+      .in('materia_prima_id', ids)
+      .order('mes_referencia', { ascending: false }),
+  ])
+  if (erroManual) throw new Error(erroManual.message)
+  if (erroMensal) throw new Error(erroMensal.message)
+
+  const maisRecentePorId = new Map<string, { mes_referencia: string; custo: number }>()
+  const temComprasPorId = new Set<string>()
+  ;(mensal || []).forEach((row: any) => {
+    temComprasPorId.add(row.materia_prima_id)
+    if (!maisRecentePorId.has(row.materia_prima_id)) {
+      maisRecentePorId.set(row.materia_prima_id, { mes_referencia: row.mes_referencia, custo: row.custo_medio_por_unidade_medida })
+    }
   })
+
+  ;(materias || []).forEach((mp: any) => {
+    const temCompras = temComprasPorId.has(mp.id)
+
+    if (mp.custo_manual_por_unidade_compra != null) {
+      mapa.set(mp.id, {
+        custo: mp.custo_manual_por_unidade_compra / mp.fator_conversao,
+        origem: 'manual',
+        mesReferencia: null,
+        mesesAtras: null,
+        desatualizado: false,
+        temComprasRegistradas: temCompras,
+      })
+      return
+    }
+
+    const recente = maisRecentePorId.get(mp.id)
+    if (!recente) return // sem custo manual e sem nenhuma compra -> fica de fora do mapa (custo desconhecido)
+
+    const mesesAtras = diferencaEmMeses(recente.mes_referencia, hojeISO())
+    mapa.set(mp.id, {
+      custo: recente.custo,
+      origem: 'calculado',
+      mesReferencia: recente.mes_referencia,
+      mesesAtras,
+      desatualizado: mesesAtras >= 2,
+      temComprasRegistradas: true,
+    })
+  })
+
   return mapa
 }
 
@@ -48,18 +102,18 @@ export interface CustoCalculado {
  */
 export function calcularCustoPrePreparo(
   prePreparo: FinanceiroPrePreparo,
-  custosMP: Map<string, number>
+  custosMP: Map<string, CustoAtualMateriaPrima>
 ): CustoCalculado & { custoPorUnidade: number | null } {
   const itens = prePreparo.itens || []
   let custoConhecidoParcial = 0
   const itensSemCusto: ItemSemCusto[] = []
 
   for (const item of itens) {
-    const custo = custosMP.get(item.materia_prima_id)
-    if (custo == null) {
+    const entry = custosMP.get(item.materia_prima_id)
+    if (entry == null) {
       itensSemCusto.push({ tipo: 'materia_prima', id: item.materia_prima_id, nome: item.materia_prima?.nome || 'Matéria-prima' })
     } else {
-      custoConhecidoParcial += item.quantidade * custo
+      custoConhecidoParcial += item.quantidade * entry.custo
     }
   }
 
@@ -77,7 +131,7 @@ export function calcularCustoPrePreparo(
  */
 export function calcularCustoProdutoFinal(
   produtoFinal: FinanceiroProdutoFinal,
-  custosMP: Map<string, number>,
+  custosMP: Map<string, CustoAtualMateriaPrima>,
   custosPP: Map<string, CustoCalculado & { custoPorUnidade: number | null }>
 ): CustoCalculado & { custoPorPorcao: number | null } {
   const itens = produtoFinal.itens || []
@@ -86,11 +140,11 @@ export function calcularCustoProdutoFinal(
 
   for (const item of itens) {
     if (item.materia_prima_id) {
-      const custo = custosMP.get(item.materia_prima_id)
-      if (custo == null) {
+      const entry = custosMP.get(item.materia_prima_id)
+      if (entry == null) {
         itensSemCusto.push({ tipo: 'materia_prima', id: item.materia_prima_id, nome: item.materia_prima?.nome || 'Matéria-prima' })
       } else {
-        custoConhecidoParcial += item.quantidade * custo
+        custoConhecidoParcial += item.quantidade * entry.custo
       }
     } else if (item.pre_preparo_id) {
       const custoPP = custosPP.get(item.pre_preparo_id)

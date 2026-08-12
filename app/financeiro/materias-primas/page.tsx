@@ -5,13 +5,15 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { Plus, Search, BarChart3 } from 'lucide-react'
+import { Plus, Search, BarChart3, Receipt } from 'lucide-react'
 import { FinanceiroMateriaPrima } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
+import { buscarCustosAtuaisMateriasPrimas, CustoAtualMateriaPrima } from '@/lib/financeiro-cmv'
+import CustoAtualBadges, { labelMesReferencia } from '@/components/CustoAtualBadge'
 
 export default function MateriasPrimasPage() {
   const [materias, setMaterias] = useState<FinanceiroMateriaPrima[]>([])
-  const [custos, setCustos] = useState<Record<string, number>>({})
+  const [custos, setCustos] = useState<Map<string, CustoAtualMateriaPrima>>(new Map())
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
 
@@ -23,18 +25,7 @@ export default function MateriasPrimasPage() {
     setLoading(true)
     const { data } = await supabase.from('financeiro_materias_primas').select('*').order('nome')
     setMaterias(data || [])
-
-    const mesAtual = new Date()
-    const mesRef = `${mesAtual.getFullYear()}-${String(mesAtual.getMonth() + 1).padStart(2, '0')}-01`
-    const { data: custoData } = await supabase
-      .from('financeiro_custo_medio_mensal')
-      .select('materia_prima_id, custo_medio_por_unidade_medida')
-      .eq('mes_referencia', mesRef)
-    const mapa: Record<string, number> = {}
-    ;(custoData || []).forEach((c: any) => {
-      mapa[c.materia_prima_id] = c.custo_medio_por_unidade_medida
-    })
-    setCustos(mapa)
+    setCustos(await buscarCustosAtuaisMateriasPrimas((data || []).map((m: any) => m.id)))
     setLoading(false)
   }
 
@@ -54,6 +45,12 @@ export default function MateriasPrimasPage() {
                 className="border border-pink-700 text-pink-700 rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-2 hover:bg-pink-50"
               >
                 <BarChart3 size={16} /> Melhor Compra
+              </Link>
+              <Link
+                href="/financeiro/materias-primas/compras"
+                className="border border-pink-700 text-pink-700 rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-2 hover:bg-pink-50"
+              >
+                <Receipt size={16} /> Compras
               </Link>
               <Link
                 href="/financeiro/materias-primas/nova"
@@ -97,12 +94,18 @@ export default function MateriasPrimasPage() {
                         </p>
                       </div>
                       <div className="text-right">
-                        {custos[m.id] != null ? (
-                          <p className="text-sm font-semibold text-gray-800">
-                            {formatBRL(custos[m.id])}<span className="text-xs text-gray-400">/{m.unidade_medida}</span>
-                          </p>
+                        {custos.get(m.id) ? (
+                          <>
+                            <p className="text-sm font-semibold text-gray-800">
+                              {formatBRL(custos.get(m.id)!.custo)}<span className="text-xs text-gray-400">/{m.unidade_medida}</span>
+                            </p>
+                            {custos.get(m.id)!.origem === 'calculado' && custos.get(m.id)!.mesReferencia && (
+                              <p className="text-[11px] text-gray-400">preço de {labelMesReferencia(custos.get(m.id)!.mesReferencia!)}</p>
+                            )}
+                            <div className="mt-0.5"><CustoAtualBadges custo={custos.get(m.id)!} /></div>
+                          </>
                         ) : (
-                          <p className="text-xs text-gray-400">Sem compras no mês</p>
+                          <p className="text-xs text-gray-400">Sem custo conhecido</p>
                         )}
                         {!m.ativo && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Inativo</span>}
                       </div>

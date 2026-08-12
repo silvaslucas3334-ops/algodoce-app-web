@@ -11,7 +11,8 @@ import { Loader, Plus, Trash2, CheckCircle } from 'lucide-react'
 import { FinanceiroPrePreparo, FinanceiroMateriaPrima } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { STATUS_FICHA_TECNICA_LABEL, STATUS_FICHA_TECNICA_COLOR } from '@/lib/constants'
-import { buscarCustosAtuaisMateriasPrimas, calcularCustoPrePreparo, salvarItensPrePreparo } from '@/lib/financeiro-cmv'
+import { buscarCustosAtuaisMateriasPrimas, calcularCustoPrePreparo, salvarItensPrePreparo, CustoAtualMateriaPrima } from '@/lib/financeiro-cmv'
+import CustoAtualBadges from '@/components/CustoAtualBadge'
 
 export default function DetalhePrePreparoPage() {
   const { usuario } = useAuth()
@@ -22,7 +23,7 @@ export default function DetalhePrePreparoPage() {
   const [prePreparo, setPrePreparo] = useState<FinanceiroPrePreparo | null>(null)
   const [materias, setMaterias] = useState<FinanceiroMateriaPrima[]>([])
   const [itens, setItens] = useState<ItemReceitaForm[]>([])
-  const [custosMP, setCustosMP] = useState<Map<string, number>>(new Map())
+  const [custosMP, setCustosMP] = useState<Map<string, CustoAtualMateriaPrima>>(new Map())
   const [unidadeTravada, setUnidadeTravada] = useState(false)
   const [modalAberto, setModalAberto] = useState(false)
 
@@ -265,14 +266,15 @@ export default function DetalhePrePreparoPage() {
             ) : (
               <div className="space-y-2">
                 {itens.map((item, i) => {
-                  const custo = item.materia_prima_id ? custosMP.get(item.materia_prima_id) : undefined
+                  const entry = item.materia_prima_id ? custosMP.get(item.materia_prima_id) : undefined
                   return (
                     <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">
                       <div>
                         <p className="font-medium text-gray-800">{item.nome}</p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-gray-500 flex items-center gap-1">
                           {item.quantidade} {item.unidade_medida}
-                          {custo != null ? ` · ${formatBRL(item.quantidade * custo)}` : ' · custo desconhecido'}
+                          {entry != null ? ` · ${formatBRL(item.quantidade * entry.custo)}` : ' · custo desconhecido'}
+                          {entry && <CustoAtualBadges custo={entry} />}
                         </p>
                       </div>
                       <button onClick={() => removerItem(i)} className="text-red-600 hover:text-red-700">
@@ -286,16 +288,18 @@ export default function DetalhePrePreparoPage() {
 
             {custoCalculado && (
               <div className="pt-2 border-t border-gray-200 space-y-1">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="font-semibold text-gray-700">Custo total {custoCalculado.completo ? '' : '(conhecido, parcial)'}</span>
-                  <span className="font-bold text-gray-900">{formatBRL(custoCalculado.custoConhecidoParcial)}</span>
-                </div>
-                {custoCalculado.completo && rendimentoNum > 0 && (
-                  <div className="flex justify-between items-center text-sm text-gray-600">
-                    <span>Custo por {prePreparo.unidade_medida}</span>
-                    <span>{formatBRL(custoCalculado.custoConhecidoParcial / rendimentoNum)}</span>
+                {rendimentoNum > 0 && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="font-semibold text-gray-700">
+                      Custo por {prePreparo.unidade_medida}{custoCalculado.completo ? '' : ' (parcial)'}
+                    </span>
+                    <span className="font-bold text-gray-900">{formatBRL(custoCalculado.custoConhecidoParcial / rendimentoNum)}</span>
                   </div>
                 )}
+                <div className="flex justify-between items-center text-xs text-gray-500">
+                  <span>Custo total {custoCalculado.completo ? '' : '(conhecido, parcial)'}</span>
+                  <span>{formatBRL(custoCalculado.custoConhecidoParcial)}</span>
+                </div>
                 {!custoCalculado.completo && (
                   <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
                     Custo incompleto — sem compra registrada ainda para: {custoCalculado.itensSemCusto.map((i) => i.nome).join(', ')}.

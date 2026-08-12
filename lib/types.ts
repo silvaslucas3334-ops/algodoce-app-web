@@ -234,6 +234,7 @@ export interface FinanceiroMateriaPrima {
   fator_conversao: number
   unidade_fornecedor?: string // ex: "pct" — só pra cotação (pedido/preço), nunca entra em custo/CMV
   fator_unidade_fornecedor?: number // unidade_compra por 1 unidade_fornecedor (1 pacote=5kg -> 5)
+  custo_manual_por_unidade_compra?: number // preenchido = sempre usado no lugar do custo calculado por compras
   conta_id?: string // conta contábil padrão do item; cada compra herda esta conta no lançamento
   conta?: FinanceiroConta
   descricao?: string
