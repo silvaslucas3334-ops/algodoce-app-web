@@ -40,7 +40,6 @@ export default function SelecionarMateriaPrimaModal({ materias, itemInicial, onA
   const [fatorConversao, setFatorConversao] = useState(itemInicial ? String(itemInicial.fator_conversao) : '')
   const [valorUnitario, setValorUnitario] = useState(itemInicial ? String(itemInicial.valor_unitario) : '')
   const [valorTotal, setValorTotal] = useState(itemInicial ? String(itemInicial.valor_total) : '')
-  const [valorTotalEditadoManualmente, setValorTotalEditadoManualmente] = useState(editando)
 
   const filtradas = materias.filter((m) =>
     m.nome.toLowerCase().includes(busca.trim().toLowerCase()) ||
@@ -59,11 +58,15 @@ export default function SelecionarMateriaPrimaModal({ materias, itemInicial, onA
     }
   }, [unidadeNota, selecionada, unidadeBateComCadastro])
 
+  // Valor total nunca é digitado — sempre o resultado de quantidade ×
+  // valor unitário, pra nunca ficar dessincronizado do que o usuário vê
+  // nesses dois campos (era exatamente esse descompasso que gerava
+  // lançamento errado: o campo ficava travado em "editado manualmente"
+  // assim que se abria um item existente pra editar, e uma correção no
+  // valor unitário não refletia no total).
   useEffect(() => {
-    if (!valorTotalEditadoManualmente && quantidade && valorUnitario) {
-      setValorTotal((Number(quantidade) * Number(valorUnitario)).toFixed(2))
-    }
-  }, [quantidade, valorUnitario, valorTotalEditadoManualmente])
+    setValorTotal(quantidade && valorUnitario ? (Number(quantidade) * Number(valorUnitario)).toFixed(2) : '')
+  }, [quantidade, valorUnitario])
 
   function escolher(m: FinanceiroMateriaPrima) {
     setSelecionada(m)
@@ -72,7 +75,6 @@ export default function SelecionarMateriaPrimaModal({ materias, itemInicial, onA
     setQuantidade('')
     setValorUnitario('')
     setValorTotal('')
-    setValorTotalEditadoManualmente(false)
   }
 
   const itemValido =
@@ -216,21 +218,13 @@ export default function SelecionarMateriaPrimaModal({ materias, itemInicial, onA
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Valor total (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={valorTotal}
-                  onChange={(e) => {
-                    setValorTotal(e.target.value)
-                    setValorTotalEditadoManualmente(true)
-                  }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-                />
+                <div className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-600">
+                  {valorTotal ? formatBRL(Number(valorTotal)) : '—'}
+                </div>
               </div>
             </div>
             <p className="text-xs text-gray-400">
-              Valor total calculado automaticamente — ajuste para bater com o "custo total" impresso na nota (impostos inclusos).
+              Valor total = quantidade × valor unitário — calculado automaticamente, não dá pra digitar direto.
             </p>
 
             {Number(quantidade) > 0 && Number(valorTotal) > 0 && Number(fatorConversao) > 0 && (
