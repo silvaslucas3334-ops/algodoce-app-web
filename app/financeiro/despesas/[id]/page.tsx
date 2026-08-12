@@ -254,6 +254,10 @@ function DetalheDespesaContent() {
       setErro('Esta despesa já está vinculada a uma transação do extrato — desfaça a conciliação antes de marcar como aberta de novo.')
       return
     }
+    if (!!lancamento.valor_pago_conciliado && lancamento.valor_pago_conciliado > 0) {
+      setErro('Esta despesa já tem pagamentos parciais conciliados — não dá pra editar o valor ou o status por aqui.')
+      return
+    }
 
     setProcessando(true)
     setErro('')
@@ -293,6 +297,7 @@ function DetalheDespesaContent() {
     ehAdmin &&
     lancamento?.status === 'aberto' &&
     !lancamento?.extrato_transacao_id &&
+    !(lancamento?.valor_pago_conciliado && lancamento.valor_pago_conciliado > 0) &&
     (!lancamento?.parcela_total || lancamento.parcela_total === 1)
 
   async function confirmarParcelamento() {
@@ -449,7 +454,7 @@ function DetalheDespesaContent() {
     )
   }
 
-  const st = statusExibicao(lancamento.status, lancamento.data_vencimento)
+  const st = statusExibicao(lancamento.status, lancamento.data_vencimento, lancamento.valor_pago_conciliado)
 
   return (
     <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
@@ -504,6 +509,14 @@ function DetalheDespesaContent() {
                   <div className="flex justify-between">
                     <span className="text-red-600 text-xs">Juros/multa por atraso</span>
                     <span className="text-red-600 text-xs font-medium">+ {formatBRL(lancamento.valor_juros_multa)}</span>
+                  </div>
+                )}
+                {!!lancamento.valor_pago_conciliado && lancamento.valor_pago_conciliado > 0 && lancamento.status === 'aberto' && (
+                  <div className="flex justify-between">
+                    <span className="text-blue-600 text-xs">Pago até agora (conciliação parcial)</span>
+                    <span className="text-blue-600 text-xs font-medium">
+                      {formatBRL(lancamento.valor_pago_conciliado)} · faltam {formatBRL(lancamento.valor_total - lancamento.valor_pago_conciliado)}
+                    </span>
                   </div>
                 )}
                 <div className="flex justify-between"><span className="text-gray-500">Valor</span><span className="font-semibold text-gray-800">{formatBRL(lancamento.valor_total)}</span></div>

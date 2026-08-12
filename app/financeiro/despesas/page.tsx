@@ -189,7 +189,7 @@ export default function DespesasPage() {
   const grupos = filtro === 'aberto' ? (agrupamento === 'mes' ? agruparPorMes(filtradas) : agruparPorEtiqueta(filtradas)) : null
 
   function renderCard(l: FinanceiroLancamento) {
-    const st = statusExibicao(l.status, l.data_vencimento)
+    const st = statusExibicao(l.status, l.data_vencimento, l.valor_pago_conciliado)
     return (
       <div key={l.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all">
         <div className="flex items-start justify-between gap-3">
@@ -217,6 +217,11 @@ export default function DespesasPage() {
             {!!l.valor_juros_multa && l.valor_juros_multa > 0 && (
               <p className="text-[11px] text-red-600 font-medium">
                 + {formatBRL(l.valor_juros_multa)} juros/multa
+              </p>
+            )}
+            {!!l.valor_pago_conciliado && l.valor_pago_conciliado > 0 && l.status === 'aberto' && (
+              <p className="text-[11px] text-blue-600 font-medium">
+                pago {formatBRL(l.valor_pago_conciliado)} · faltam {formatBRL(l.valor_total - l.valor_pago_conciliado)}
               </p>
             )}
             <p className="font-semibold text-gray-800">{formatBRL(l.valor_total)}</p>

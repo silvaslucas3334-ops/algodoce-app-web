@@ -109,11 +109,18 @@ export function mesEncerrado(ano: number, mes: number): boolean {
 
 /**
  * Rótulo de status para exibição: "aberto" vira Planejada ou Atrasada
- * conforme o vencimento (calculado, não persistido).
+ * conforme o vencimento (calculado, não persistido). "Parcialmente paga"
+ * também é calculado, não persistido — status continua 'aberto' enquanto
+ * a despesa está sendo paga aos poucos (conciliação parcial).
  */
-export function statusExibicao(status: string, dataVencimento: string): { label: string; cor: string } {
+export function statusExibicao(
+  status: string,
+  dataVencimento: string,
+  valorPagoConciliado?: number
+): { label: string; cor: string } {
   if (status === 'pago') return { label: 'Paga', cor: 'bg-green-100 text-green-700' }
   if (status === 'cancelado') return { label: 'Cancelada', cor: 'bg-gray-100 text-gray-500' }
+  if ((valorPagoConciliado || 0) > 0) return { label: 'Parcialmente paga', cor: 'bg-blue-100 text-blue-700' }
   if (dataVencimento < hojeISO()) return { label: 'Atrasada', cor: 'bg-red-100 text-red-700' }
   return { label: 'Planejada', cor: 'bg-amber-100 text-amber-700' }
 }

@@ -4,6 +4,8 @@ import {
   buscarDespesasParaVinculoManual,
   sugerirCombinacaoDespesas,
   confirmarConciliacaoManual,
+  confirmarConciliacaoParcial,
+  saldoRestante,
 } from '@/lib/financeiro-reconciliacao'
 import { formatBRL } from '@/lib/ofx'
 import { normalizarTitulo } from '@/lib/tarefas-utils'
@@ -72,10 +74,14 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
   })
 
   const listaSelecionada = candidatos.filter((l) => selecionados.has(l.id))
-  const soma = listaSelecionada.reduce((acc, l) => acc + l.valor_total, 0)
+  const soma = listaSelecionada.reduce((acc, l) => acc + saldoRestante(l), 0)
   const diferenca = valorTransacao - soma
   const bateExato = Math.abs(diferenca) < 0.01
   const jurosAplicavel = selecionados.size === 1 && diferenca > 0.01 && diferenca <= TETO_JUROS_MULTA
+  // Banco pagou menos do que ainda falta desta despesa — é o caso de conta
+  // sem saldo pro valor total, debitando aos poucos. Só faz sentido com 1
+  // despesa selecionada (com várias, "qual delas ficou parcial?" é ambíguo).
+  const pagamentoParcialAplicavel = selecionados.size === 1 && diferenca < -0.01
 
   function alternar(id: string) {
     setSelecionados((prev) => {
@@ -91,11 +97,15 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
     setProcessando(true)
     setErro('')
     try {
-      const ajuste =
-        jurosAplicavel && aplicarJuros
-          ? { lancamentoId: listaSelecionada[0].id, valor: diferenca }
-          : undefined
-      await confirmarConciliacaoManual(transacao.id, Array.from(selecionados), transacao.data, ajuste)
+      if (pagamentoParcialAplicavel) {
+        await confirmarConciliacaoParcial(transacao.id, listaSelecionada[0].id, valorTransacao, transacao.data)
+      } else {
+        const ajuste =
+          jurosAplicavel && aplicarJuros
+            ? { lancamentoId: listaSelecionada[0].id, valor: diferenca }
+            : undefined
+        await confirmarConciliacaoManual(transacao.id, Array.from(selecionados), transacao.data, ajuste)
+      }
       onResolvido()
       onClose()
     } catch (err: any) {
@@ -176,6 +186,11 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
                     {l.parte?.nome} · lançada em {new Date(l.data_lancamento + 'T00:00:00').toLocaleDateString('pt-BR')}
                     {l.status === 'pago' ? ' · já pago' : ''}
                   </p>
+                  {(l.valor_pago_conciliado || 0) > 0 && (
+                    <p className="text-xs text-blue-600 font-medium">
+                      já pago {formatBRL(l.valor_pago_conciliado || 0)} · faltam {formatBRL(saldoRestante(l))}
+                    </p>
+                  )}
                 </div>
                 <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">{formatBRL(l.valor_total)}</span>
               </label>
@@ -191,8 +206,16 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
             <span className="font-semibold text-gray-800">{formatBRL(soma)}</span>
           </div>
           {selecionados.size > 0 && !bateExato && (
-            <div className={`text-sm rounded-lg px-3 py-2 ${diferenca > 0 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
-              Diferença de {formatBRL(Math.abs(diferenca))} {diferenca > 0 ? '(banco pagou mais)' : '(banco pagou menos)'}
+            <div
+              className={`text-sm rounded-lg px-3 py-2 ${
+                pagamentoParcialAplicavel ? 'bg-blue-50 text-blue-700' : diferenca > 0 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'
+              }`}
+            >
+              {pagamentoParcialAplicavel ? (
+                <>Conta sem saldo pro valor todo? Essa despesa fica em aberto e ainda faltam {formatBRL(Math.abs(diferenca))}.</>
+              ) : (
+                <>Diferença de {formatBRL(Math.abs(diferenca))} {diferenca > 0 ? '(banco pagou mais)' : '(banco pagou menos)'}</>
+              )}
               {jurosAplicavel && (
                 <label className="flex items-center gap-2 mt-1.5 text-xs font-medium">
                   <input
@@ -210,10 +233,12 @@ export default function ConciliarManualModal({ transacao, onClose, onResolvido }
           <button
             onClick={confirmar}
             disabled={processando || selecionados.size === 0}
-            className="w-full bg-green-600 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+            className={`w-full text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2 ${
+              pagamentoParcialAplicavel ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'
+            }`}
           >
             {processando ? <Loader size={16} className="animate-spin" /> : <CheckCircle size={16} />}
-            Confirmar conciliação
+            {pagamentoParcialAplicavel ? `Registrar pagamento parcial (faltam ${formatBRL(Math.abs(diferenca))})` : 'Confirmar conciliação'}
           </button>
         </div>
       </div>

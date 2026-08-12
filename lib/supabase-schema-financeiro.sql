@@ -228,6 +228,12 @@ CREATE TABLE IF NOT EXISTS financeiro_lancamentos (
   -- por atraso), aplicada via conciliação manual — nunca embutida em
   -- silêncio dentro de valor_total. Ver lib/migrations/financeiro-conciliacao-manual.sql.
   valor_juros_multa NUMERIC DEFAULT 0,
+  -- Soma dos débitos bancários já conciliados quando a despesa é paga em
+  -- mais de uma vez (saldo insuficiente pro valor total de uma vez só).
+  -- status continua 'aberto' enquanto valor_pago_conciliado < valor_total —
+  -- "parcialmente paga" é estado derivado, não persistido. Ver
+  -- lib/migrations/financeiro-conciliacao-parcial.sql.
+  valor_pago_conciliado NUMERIC NOT NULL DEFAULT 0,
   observacoes TEXT,
   -- Recado rápido entre os admins que mexem no financeiro, pra coordenar
   -- prioridade de pagamento (não é o workflow de pagamento — isso é

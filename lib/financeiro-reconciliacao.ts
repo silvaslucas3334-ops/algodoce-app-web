@@ -560,6 +560,15 @@ export function sugerirCombinacaoDespesas(candidatos: FinanceiroLancamento[], va
   return []
 }
 
+// Saldo restante (valor_total menos o que já foi conciliado em débitos
+// parciais anteriores), não o valor_total bruto — senão uma despesa em
+// pagamento parcial entraria numa combinação ou soma pelo valor cheio, como
+// se nada tivesse sido pago ainda. Exportada — reaproveitada também por
+// ConciliarManualModal.tsx.
+export function saldoRestante(l: FinanceiroLancamento): number {
+  return l.valor_total - (l.valor_pago_conciliado || 0)
+}
+
 function buscarCombo(
   pool: FinanceiroLancamento[],
   tamanho: number,
@@ -572,7 +581,7 @@ function buscarCombo(
     if (soma > valorAlvo + 0.01) return null // valores são positivos — já passou do alvo, poda
     for (let i = inicio; i < pool.length; i++) {
       atual.push(pool[i])
-      const achado = backtrack(i + 1, soma + pool[i].valor_total)
+      const achado = backtrack(i + 1, soma + saldoRestante(pool[i]))
       atual.pop()
       if (achado) return achado
     }
@@ -662,6 +671,77 @@ export async function confirmarConciliacaoManual(
       .eq('id', ajusteJurosMulta.lancamentoId)
     if (erroAjuste) throw new Error(erroAjuste.message)
   }
+}
+
+/**
+ * Vincula uma transação a UMA despesa quando o banco pagou menos do que o
+ * saldo restante — a despesa está sendo paga aos poucos, em mais de um
+ * débito, porque a conta não tinha saldo pro valor total de uma vez.
+ * status continua 'aberto' até a soma dos débitos vinculados atingir
+ * valor_total; só nesse momento vira 'pago' (mesma guarda por
+ * status='aberto' + conferência de linha afetada de toda função de
+ * confirmação aqui). "Parcialmente paga" nunca é persistido como estado —
+ * é status='aberto' com valor_pago_conciliado>0, calculado por quem exibe.
+ * Ver lib/migrations/financeiro-conciliacao-parcial.sql.
+ */
+export async function confirmarConciliacaoParcial(
+  transacaoId: string,
+  lancamentoId: string,
+  valorTransacao: number,
+  dataPagamento: string
+): Promise<{ quitado: boolean; saldoRestante: number }> {
+  const { data: lancamentoAtual, error: erroLancamentoAtual } = await supabase
+    .from('financeiro_lancamentos')
+    .select('parte_id, valor_total, valor_pago_conciliado')
+    .eq('id', lancamentoId)
+    .single()
+  if (erroLancamentoAtual) throw new Error(erroLancamentoAtual.message)
+
+  const { data: transacaoAtualizada, error: erroTransacao } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .update({ status_conciliacao: 'conciliado', lancamento_id: lancamentoId, parte_id: lancamentoAtual.parte_id })
+    .eq('id', transacaoId)
+    .eq('status_conciliacao', 'pendente')
+    .select('id')
+  if (erroTransacao) throw new Error(erroTransacao.message)
+  if (!transacaoAtualizada || transacaoAtualizada.length === 0) {
+    throw new Error('Transação já foi conciliada em outra sessão.')
+  }
+
+  const valorTotal = Number(lancamentoAtual.valor_total)
+  const novoPago = Number(lancamentoAtual.valor_pago_conciliado || 0) + Math.abs(valorTransacao)
+  const saldoRestante = valorTotal - novoPago
+
+  if (saldoRestante <= 0.01) {
+    const { data: quitado, error: erroQuitar } = await supabase
+      .from('financeiro_lancamentos')
+      .update({
+        status: 'pago',
+        data_pagamento: dataPagamento,
+        valor_pago_conciliado: valorTotal,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', lancamentoId)
+      .eq('status', 'aberto')
+      .select('id')
+    if (erroQuitar) throw new Error(erroQuitar.message)
+    if (!quitado || quitado.length === 0) {
+      throw new Error('Este lançamento já foi marcado como pago em outra sessão.')
+    }
+    return { quitado: true, saldoRestante: 0 }
+  }
+
+  const { data: atualizado, error: erroParcial } = await supabase
+    .from('financeiro_lancamentos')
+    .update({ valor_pago_conciliado: novoPago, updated_at: new Date().toISOString() })
+    .eq('id', lancamentoId)
+    .eq('status', 'aberto')
+    .select('id')
+  if (erroParcial) throw new Error(erroParcial.message)
+  if (!atualizado || atualizado.length === 0) {
+    throw new Error('Este lançamento mudou de status em outra sessão — atualize a tela e tente de novo.')
+  }
+  return { quitado: false, saldoRestante }
 }
 
 export async function ignorarTransacao(transacaoId: string): Promise<void> {

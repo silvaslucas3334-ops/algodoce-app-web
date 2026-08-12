@@ -454,7 +454,7 @@ export async function buscarDespesasFixasFuturas(
   const [{ data: abertosFuturos, error: erroAbertos }, { data: recorrenciasAtivas, error: erroRecorrencias }] = await Promise.all([
     supabase
       .from('financeiro_lancamentos')
-      .select('id, valor_total, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
+      .select('id, valor_total, valor_pago_conciliado, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
       .in('unidade', unidadesDespesa)
       .eq('status', 'aberto')
       .eq('tipo', 'despesa')
@@ -486,7 +486,7 @@ export async function buscarDespesasFixasFuturas(
   const itens: LinhaDespesaFixaFutura[] = (abertosFuturos || []).map((l: any) => ({
     id: l.id,
     data: l.data_vencimento,
-    valor: l.valor_total,
+    valor: l.valor_total - (l.valor_pago_conciliado || 0),
     parteId: l.parte_id || 'sem-parte',
     parteNome: l.parte?.nome || 'Sem beneficiário',
     contaId: l.conta_id || 'sem-conta',
@@ -547,7 +547,7 @@ export async function buscarLancamentosDoDiaSaida(
   function baseQuery() {
     return supabase
       .from('financeiro_lancamentos')
-      .select('id, descricao, valor_total, status, numero_documento, parte:financeiro_partes!parte_id(nome)')
+      .select('id, descricao, valor_total, valor_pago_conciliado, status, numero_documento, parte:financeiro_partes!parte_id(nome)')
       .in('unidade', unidadesDespesa)
       .eq('tipo', tipo)
       .eq(coluna, grupoId)
@@ -563,7 +563,9 @@ export async function buscarLancamentosDoDiaSaida(
   return [...(pagos || []), ...(abertos || [])].map((l: any) => ({
     id: l.id,
     descricao: l.descricao,
-    valor_total: l.valor_total,
+    // 'pago' já quitou o valor cheio; 'aberto' mostra só o que ainda falta
+    // (pode estar em pagamento parcial — ver valor_pago_conciliado).
+    valor_total: l.status === 'pago' ? l.valor_total : l.valor_total - (l.valor_pago_conciliado || 0),
     status: l.status,
     numero_documento: l.numero_documento,
     parte_nome: l.parte?.nome || 'Sem beneficiário',
@@ -679,7 +681,7 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
         .lte('data_pagamento', fim),
       supabase
         .from('financeiro_lancamentos')
-        .select('valor_total, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
+        .select('valor_total, valor_pago_conciliado, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
         .in('unidade', unidadesDespesa)
         .eq('status', 'aberto')
         .eq('tipo', 'compra_insumos')
@@ -720,7 +722,7 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
   ;(abertosVariavelFuturos || []).forEach((l: any) => {
     linhasVariavel.push({
       data: l.data_vencimento,
-      valor: l.valor_total,
+      valor: l.valor_total - (l.valor_pago_conciliado || 0),
       parteId: l.parte_id || 'sem-parte',
       parteNome: l.parte?.nome || 'Sem beneficiário',
       contaId: l.conta_id || 'sem-conta',
@@ -940,7 +942,7 @@ export async function buscarAtrasados(unidade: VisaoFluxoMensal): Promise<FluxoM
   const unidades = unidade === 'consolidado' ? ['loja1', 'loja2', 'rateio'] : [unidade]
   const { data, error } = await supabase
     .from('financeiro_lancamentos')
-    .select('id, valor_total, tipo, data_vencimento, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome)')
+    .select('id, valor_total, valor_pago_conciliado, tipo, data_vencimento, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome)')
     .in('unidade', unidades)
     .eq('status', 'aberto')
     .lt('data_vencimento', hoje)
@@ -954,7 +956,7 @@ export async function buscarAtrasados(unidade: VisaoFluxoMensal): Promise<FluxoM
     contaId: l.conta_id || null,
     contaNome: l.conta?.nome || 'Sem classificação',
     tipo: l.tipo,
-    valor: l.valor_total,
+    valor: l.valor_total - (l.valor_pago_conciliado || 0),
     dataVencimento: l.data_vencimento,
     diasAtraso: Math.round((new Date(hoje + 'T00:00:00').getTime() - new Date(l.data_vencimento + 'T00:00:00').getTime()) / 86400000),
   }))

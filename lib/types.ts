@@ -332,6 +332,7 @@ export interface FinanceiroLancamento {
   extrato_transacao_id?: string
   extrato_transacao?: { status_conciliacao: StatusConciliacao }
   valor_juros_multa?: number // diferença entre valor lançado e valor pago (atraso), aplicada na conciliação manual
+  valor_pago_conciliado?: number // soma dos débitos já conciliados quando a despesa é paga em mais de uma vez
   observacoes?: string
   etiqueta_aprovacao?: EtiquetaAprovacao | null
   criado_por: string
