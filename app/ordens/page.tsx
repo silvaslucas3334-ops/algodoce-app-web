@@ -10,6 +10,9 @@ import { useRouter } from 'next/navigation'
 import { Plus, Search } from 'lucide-react'
 import EmptyState from '@/components/EmptyState'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
+import NotificacoesPainelOrdens from '@/components/NotificacoesPainelOrdens'
+import NotificacoesModalOrdens from '@/components/NotificacoesModalOrdens'
+import { useOrdensNotificacoes } from '@/hooks/useOrdensNotificacoes'
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   pendente: { label: 'Pendente', color: 'bg-amber-100 text-amber-700' },
@@ -21,6 +24,7 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
 export default function OrdensPage() {
   const { usuario } = useAuth()
   const router = useRouter()
+  const { notificacoes, naoLidas, carregando: notificacoesCarregando, marcarComoLidas } = useOrdensNotificacoes(usuario?.id)
   const [filtro, setFiltro] = useState('pendente')
   const [ordens, setOrdens] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -106,6 +110,14 @@ export default function OrdensPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      {/* Checagem diária forçada das notificações (ordem cancelada) */}
+      <NotificacoesModalOrdens
+        usuarioId={usuario?.id}
+        notificacoes={notificacoes}
+        carregando={notificacoesCarregando}
+        onFechar={marcarComoLidas}
+      />
+
       <div className="bg-gradient-to-r from-slate-500 to-slate-600 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center justify-between h-20">
         <div className="flex items-center gap-4">
           <OluquinhasLogo size="md" variant="oluquinhas" color="branco" />
@@ -115,11 +127,20 @@ export default function OrdensPage() {
             <p className="text-xs text-slate-100">Minhas Ordens</p>
           </div>
         </div>
-        {podecriarOrdens && (
-          <Link href="/ordens/nova" className="bg-white text-slate-600 rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-slate-50 shadow-md">
-            <Plus size={18} /> Nova
-          </Link>
-        )}
+        <div className="flex items-center gap-2">
+          <NotificacoesPainelOrdens
+            notificacoes={notificacoes}
+            naoLidas={naoLidas}
+            marcarComoLidas={marcarComoLidas}
+            onAbrirOrdem={(ordemId) => router.push(`/ordens/${ordemId}`)}
+            botaoClassName="text-white hover:bg-white/10 rounded-lg p-2"
+          />
+          {podecriarOrdens && (
+            <Link href="/ordens/nova" className="bg-white text-slate-600 rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-slate-50 shadow-md">
+              <Plus size={18} /> Nova
+            </Link>
+          )}
+        </div>
       </div>
 
       <div className="p-4">

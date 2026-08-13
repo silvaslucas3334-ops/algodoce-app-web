@@ -148,6 +148,23 @@ export interface TarefaNotificacao {
   tarefa?: { titulo: string; responsavel_atual_id: string; criado_por: string }
 }
 
+// Notificação pra quem pediu uma ordem de produção (loja) quando ela é
+// cancelada — espelha TarefaNotificacao (mesmo desenho), mas é uma tabela
+// própria (ordens_notificacoes) porque ordens_producao.solicitado_por
+// nunca foi um usuário de verdade, só texto livre. Ver
+// lib/migrations/ordens-cancelamento-notificacao.sql.
+export interface OrdemNotificacao {
+  id: string
+  ordem_id: string
+  usuario_id: string
+  tipo: 'cancelada'
+  mensagem: string | null
+  criado_por: string | null
+  lida_em: string | null
+  created_at: string
+  ordem?: { numero_ordem: number; produto?: { nome: string } | null }
+}
+
 export type FrequenciaRecorrencia = 'diaria' | 'semanal' | 'mensal'
 
 export interface TarefaRecorrencia {

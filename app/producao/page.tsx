@@ -9,6 +9,7 @@ import { Plus, Play, AlertCircle } from 'lucide-react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
 import OrdemNotificationStack from '@/components/OrdemNotificationStack'
+import CancelarOrdemModal from '@/components/CancelarOrdemModal'
 
 const STATUS_INFO = {
   pendente: { label: 'Pendente', emoji: '⏳', color: 'bg-amber-100 text-amber-700 border-amber-300', bgContent: 'bg-amber-50' },
@@ -32,6 +33,7 @@ function ProducaoContent() {
   const [ordens, setOrdens] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [destinoFiltro, setDestinoFiltro] = useState<string>('todas')
+  const [ordemParaCancelar, setOrdemParaCancelar] = useState<any>(null)
 
   useEffect(() => {
     carregarOrdens()
@@ -96,15 +98,23 @@ function ProducaoContent() {
       </div>
 
       {!isAdmin && ordem.status === 'pendente' && (
-        <button
-          onClick={async () => {
-            await atualizarStatus(ordem.id, 'em_producao')
-            window.open(`/producao/imprimir/${ordem.id}`, '_blank')
-          }}
-          className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-blue-700 shadow-sm"
-        >
-          <Play size={16} /> Iniciar Produção
-        </button>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={async () => {
+              await atualizarStatus(ordem.id, 'em_producao')
+              window.open(`/producao/imprimir/${ordem.id}`, '_blank')
+            }}
+            className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-semibold flex items-center justify-center gap-2 hover:bg-blue-700 shadow-sm"
+          >
+            <Play size={16} /> Iniciar Produção
+          </button>
+          <button
+            onClick={() => setOrdemParaCancelar(ordem)}
+            className="w-full bg-red-100 text-red-700 rounded-lg py-2 text-sm font-medium hover:bg-red-200"
+          >
+            ✕ Cancelar
+          </button>
+        </div>
       )}
 
       {!isAdmin && ordem.status === 'em_producao' && (
@@ -123,7 +133,7 @@ function ProducaoContent() {
               ⏳ Reagendar
             </button>
             <button
-              onClick={() => atualizarStatus(ordem.id, 'cancelada')}
+              onClick={() => setOrdemParaCancelar(ordem)}
               className="flex-1 bg-red-100 text-red-700 rounded-lg py-2 text-sm font-medium hover:bg-red-200"
             >
               ✕ Cancelar
@@ -231,6 +241,23 @@ function ProducaoContent() {
           </div>
         )}
       </div>
+
+      {ordemParaCancelar && usuario && (
+        <CancelarOrdemModal
+          ordem={{
+            id: ordemParaCancelar.id,
+            numero_ordem: ordemParaCancelar.numero_ordem,
+            produto_nome: ordemParaCancelar.produto?.nome || 'Produto',
+            quantidade: ordemParaCancelar.quantidade,
+          }}
+          usuarioQueCancela={{ id: usuario.id, nome: usuario.nome }}
+          onClose={() => setOrdemParaCancelar(null)}
+          onCancelado={() => {
+            setOrdemParaCancelar(null)
+            carregarOrdens()
+          }}
+        />
+      )}
     </div>
   )
 }

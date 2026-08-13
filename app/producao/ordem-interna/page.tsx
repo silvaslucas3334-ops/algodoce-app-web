@@ -98,6 +98,7 @@ export default function NovaOrdemInternaPage() {
         quantidade: item.quantidade,
         loja_destino: 'cozinha',
         solicitado_por,
+        solicitado_por_id: usuario?.id || null,
         observacao: item.observacao || null,
         data_solicitacao: hoje,
         data_entrega,

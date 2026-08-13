@@ -339,6 +339,12 @@ export default function DetalhesOrdemPage() {
           </span>
         </div>
         {ordem.observacao && <p className="text-sm text-gray-600 italic">Obs: {ordem.observacao}</p>}
+        {ordem.status === 'cancelada' && ordem.motivo_cancelamento && (
+          <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3">
+            <p className="text-xs font-semibold text-red-700">Motivo do cancelamento</p>
+            <p className="text-sm text-red-700 mt-0.5">{ordem.motivo_cancelamento}</p>
+          </div>
+        )}
       </div>
 
       {/* TIMELINE ÚNICA DE RASTREABILIDADE */}

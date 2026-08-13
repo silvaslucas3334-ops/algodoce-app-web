@@ -24,6 +24,50 @@ create table ordens_producao (
   updated_at timestamptz default now()
 );
 
+-- ============================================================
+-- Cancelamento com motivo + notificação de quem pediu — ver
+-- lib/migrations/ordens-cancelamento-notificacao.sql (mirror aqui).
+-- Nota: este arquivo é o schema original (nunca foi mantido em dia com
+-- todas as colunas incrementais já em produção, ex: numero_ordem,
+-- data_entrega, hora_inicio_prod) — este bloco documenta só a mudança
+-- desta rodada, não o schema completo atual de ordens_producao.
+-- ============================================================
+ALTER TABLE ordens_producao
+  ADD COLUMN IF NOT EXISTS solicitado_por_id UUID REFERENCES usuarios(id),
+  ADD COLUMN IF NOT EXISTS motivo_cancelamento TEXT;
+
+CREATE TABLE IF NOT EXISTS ordens_notificacoes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ordem_id UUID NOT NULL REFERENCES ordens_producao(id) ON DELETE CASCADE,
+  usuario_id UUID NOT NULL REFERENCES usuarios(id),
+  tipo TEXT NOT NULL DEFAULT 'cancelada',
+  mensagem TEXT,
+  criado_por TEXT,
+  lida_em TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ordens_notificacoes_usuario_nao_lida
+  ON ordens_notificacoes(usuario_id) WHERE lida_em IS NULL;
+CREATE INDEX IF NOT EXISTS idx_ordens_notificacoes_usuario_created
+  ON ordens_notificacoes(usuario_id, created_at DESC);
+
+ALTER TABLE ordens_notificacoes ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS ordens_notificacoes_select_own ON ordens_notificacoes;
+CREATE POLICY ordens_notificacoes_select_own ON ordens_notificacoes
+FOR SELECT TO authenticated USING (usuario_id = auth.uid());
+
+DROP POLICY IF EXISTS ordens_notificacoes_insert ON ordens_notificacoes;
+CREATE POLICY ordens_notificacoes_insert ON ordens_notificacoes
+FOR INSERT TO authenticated
+WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'cozinha'));
+
+DROP POLICY IF EXISTS ordens_notificacoes_update_own ON ordens_notificacoes;
+CREATE POLICY ordens_notificacoes_update_own ON ordens_notificacoes
+FOR UPDATE TO authenticated
+USING (usuario_id = auth.uid())
+WITH CHECK (usuario_id = auth.uid());
+
 -- Lotes produzidos pela cozinha
 create table lotes_producao (
   id uuid primary key default gen_random_uuid(),
