@@ -14,11 +14,13 @@ import {
   PrecoEstimado,
   ItemParaEstimar,
 } from '@/lib/financeiro-cotacoes'
+import { buscarQuantidadeCompradaUltimosDias } from '@/lib/financeiro-compras-relatorio'
 import { useRouter } from 'next/navigation'
-import { Plus, Trash2, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, AlertCircle, ChevronDown } from 'lucide-react'
 import { FinanceiroParte, FinanceiroMateriaPrima, UnidadeFinanceiro, TipoCotacao } from '@/lib/types'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
+import { formatarQuantidade } from '@/lib/financeiro-utils'
 
 export default function NovaCotacaoPage() {
   const { usuario } = useAuth()
@@ -38,6 +40,12 @@ export default function NovaCotacaoPage() {
   const [fornecedorEstimativaId, setFornecedorEstimativaId] = useState('')
   const [estimativas, setEstimativas] = useState<Map<string, PrecoEstimado>>(new Map())
   const [calculandoEstimativa, setCalculandoEstimativa] = useState(false)
+  // Preço que o usuário editou à mão pra um item, por materia_prima_id —
+  // tem prioridade sobre a estimativa automática (mesmo princípio de
+  // "manual sempre vence" do custo_manual_por_unidade_compra).
+  const [precosEditados, setPrecosEditados] = useState<Map<string, number>>(new Map())
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
+  const [ultimaSemana, setUltimaSemana] = useState<Map<string, number | 'carregando'>>(new Map())
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -60,6 +68,43 @@ export default function NovaCotacaoPage() {
 
   function removerItem(indice: number) {
     setItens((prev) => prev.filter((_, i) => i !== indice))
+  }
+
+  function alterarQuantidadeItem(indice: number, novaQuantidade: number) {
+    if (!novaQuantidade || novaQuantidade <= 0) return
+    setItens((prev) => prev.map((it, i) => (i === indice ? { ...it, quantidade: novaQuantidade } : it)))
+  }
+
+  // Preço efetivo de um item: o que o usuário editou à mão, senão a
+  // estimativa automática (histórico com o fornecedor escolhido).
+  function valorUnitarioEfetivo(item: ItemCotacaoForm): number | null {
+    return precosEditados.get(item.materia_prima_id) ?? estimativas.get(item.materia_prima_id)?.valor_unitario ?? null
+  }
+
+  function alterarPrecoEditado(materiaPrimaId: string, valor: number) {
+    setPrecosEditados((prev) => {
+      const novo = new Map(prev)
+      if (valor > 0) novo.set(materiaPrimaId, valor)
+      else novo.delete(materiaPrimaId)
+      return novo
+    })
+  }
+
+  // Mesmo padrão do painel "última semana" da tela de detalhe: busca sob
+  // demanda na primeira expansão de cada matéria-prima, cacheado no Map.
+  function alternarExpandido(materiaPrimaId: string) {
+    setExpandidos((prev) => {
+      const novo = new Set(prev)
+      if (novo.has(materiaPrimaId)) novo.delete(materiaPrimaId)
+      else novo.add(materiaPrimaId)
+      return novo
+    })
+    if (!ultimaSemana.has(materiaPrimaId)) {
+      setUltimaSemana((prev) => new Map(prev).set(materiaPrimaId, 'carregando'))
+      buscarQuantidadeCompradaUltimosDias(materiaPrimaId, 7).then((qtd) => {
+        setUltimaSemana((prev) => new Map(prev).set(materiaPrimaId, qtd))
+      })
+    }
   }
 
   function alternarFornecedor(id: string) {
@@ -96,8 +141,11 @@ export default function NovaCotacaoPage() {
     }
   }, [tipo, fornecedorEstimativaId, itens, materias])
 
-  const totalEstimado = itens.reduce((acc, i) => acc + (estimativas.get(i.materia_prima_id)?.valor_total ?? 0), 0)
-  const itensSemEstimativa = itens.filter((i) => estimativas.get(i.materia_prima_id)?.valor_unitario == null).length
+  const totalEstimado = itens.reduce((acc, i) => {
+    const vu = valorUnitarioEfetivo(i)
+    return acc + (vu != null ? vu * i.quantidade : 0)
+  }, 0)
+  const itensSemEstimativa = itens.filter((i) => valorUnitarioEfetivo(i) == null).length
 
   const podeSalvar =
     titulo.trim() && itens.length > 0 && (tipo === 'fornecedores' ? fornecedoresSelecionados.size > 0 : !!fornecedorEstimativaId)
@@ -123,7 +171,15 @@ export default function NovaCotacaoPage() {
       const id =
         tipo === 'fornecedores'
           ? await criarCotacao(titulo.trim(), unidade, itensPayload, Array.from(fornecedoresSelecionados), usuario.id, dataEntregaPlanejada || undefined)
-          : await criarCotacaoEstimativa(titulo.trim(), unidade, itensPayload, fornecedorEstimativaId, usuario.id, dataEntregaPlanejada || undefined)
+          : await criarCotacaoEstimativa(
+              titulo.trim(),
+              unidade,
+              itensPayload,
+              fornecedorEstimativaId,
+              usuario.id,
+              dataEntregaPlanejada || undefined,
+              precosEditados
+            )
       router.push(`/financeiro/cotacoes/${id}`)
     } catch (err: any) {
       console.error('Erro ao criar cotação:', err)
@@ -256,7 +312,7 @@ export default function NovaCotacaoPage() {
               <div className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center text-sm text-gray-400">
                 Nenhum item ainda — clique em "Adicionar item" para pesquisar no cadastro de matérias-primas.
               </div>
-            ) : (
+            ) : tipo === 'fornecedores' ? (
               <div className="space-y-2">
                 {itens.map((item, i) => (
                   <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">
@@ -272,6 +328,87 @@ export default function NovaCotacaoPage() {
                     </button>
                   </div>
                 ))}
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {itens.map((item, i) => {
+                  const materia = materias.find((m) => m.id === item.materia_prima_id)
+                  const vu = valorUnitarioEfetivo(item)
+                  const fatorConversao = materia?.fator_conversao ?? 1
+                  const unidadeMedida = materia?.unidade_medida ?? ''
+                  const quantidadeConvertida = item.quantidade * fatorConversao
+                  const precoPorUnidadeMedida = vu != null && fatorConversao ? vu / fatorConversao : null
+                  const total = vu != null ? vu * item.quantidade : null
+                  const expandido = expandidos.has(item.materia_prima_id)
+                  const semanaValor = ultimaSemana.get(item.materia_prima_id)
+                  return (
+                    <div key={i} className="py-2 border-b border-gray-50 last:border-0 bg-gray-50 rounded-lg px-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => alternarExpandido(item.materia_prima_id)}
+                          className="flex-1 min-w-0 flex items-center gap-1 text-left"
+                        >
+                          <ChevronDown size={14} className={`flex-shrink-0 text-gray-400 transition-transform ${expandido ? 'rotate-180' : ''}`} />
+                          <span className="min-w-0">
+                            <p className="font-medium text-gray-800 truncate">{item.materia_prima_nome}</p>
+                            {item.observacao && <p className="text-xs text-gray-400 truncate">{item.observacao}</p>}
+                          </span>
+                        </button>
+                        <input
+                          key={`${i}-qtd-${item.quantidade}`}
+                          type="number"
+                          step="any"
+                          min={0}
+                          defaultValue={item.quantidade}
+                          onBlur={(e) => alterarQuantidadeItem(i, Number(e.target.value))}
+                          className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right"
+                        />
+                        <span className="text-xs text-gray-500 w-8">{item.unidade_cotacao}</span>
+                        <button onClick={() => removerItem(i)} className="text-red-600 hover:text-red-700 flex-shrink-0">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 pl-5 text-xs text-gray-500">
+                        <div className="flex items-center gap-1">
+                          <span>R$</span>
+                          <input
+                            key={`${item.materia_prima_id}-preco-${vu ?? ''}`}
+                            type="number"
+                            step="any"
+                            min={0}
+                            defaultValue={vu ?? ''}
+                            placeholder="—"
+                            onBlur={(e) => alterarPrecoEditado(item.materia_prima_id, Number(e.target.value))}
+                            className="w-16 border border-gray-300 rounded-lg px-1.5 py-1 text-right"
+                          />
+                          <span>/{item.unidade_cotacao}</span>
+                        </div>
+                        {unidadeMedida && fatorConversao !== 1 && (
+                          <span>
+                            = {formatarQuantidade(quantidadeConvertida, unidadeMedida)}
+                            {precoPorUnidadeMedida != null && ` · ${formatBRL(precoPorUnidadeMedida)}/${unidadeMedida}`}
+                          </span>
+                        )}
+                        <span className="ml-auto font-medium text-gray-800">
+                          {total != null ? formatBRL(total) : <span className="text-amber-600">sem estimativa</span>}
+                        </span>
+                      </div>
+
+                      {expandido && (
+                        <div className="mt-1.5 pl-5 text-xs text-gray-500">
+                          Comprado nos últimos 7 dias:{' '}
+                          {semanaValor === 'carregando' || semanaValor == null ? (
+                            'Calculando...'
+                          ) : (
+                            <span className="font-medium text-gray-700">{formatarQuantidade(semanaValor, unidadeMedida || item.unidade_cotacao)}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

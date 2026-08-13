@@ -181,6 +181,11 @@ export async function estimarPrecosCotacao(
  * persiste via a RPC financeiro_cotacao_responder já existente (marca o
  * fornecedor como 'respondido' de quebra — aceitável, é o único
  * fornecedor e não há resposta manual nesse fluxo).
+ *
+ * precosManuais (opcional): preços que o usuário já editou à mão na tela
+ * de criação, por materia_prima_id — têm prioridade sobre a estimativa
+ * automática (mesma lógica de "manual sempre vence" usada em
+ * financeiro-cmv.ts pro custo_manual_por_unidade_compra).
  */
 export async function criarCotacaoEstimativa(
   titulo: string,
@@ -188,7 +193,8 @@ export async function criarCotacaoEstimativa(
   itens: NovoItemCotacao[],
   fornecedorId: string,
   usuarioId: string,
-  dataEntregaPlanejada?: string
+  dataEntregaPlanejada?: string,
+  precosManuais?: Map<string, number>
 ): Promise<string> {
   const cotacaoId = await criarCotacao(titulo, unidade, itens, [fornecedorId], usuarioId, dataEntregaPlanejada, 'estimativa')
 
@@ -215,12 +221,13 @@ export async function criarCotacaoEstimativa(
   const estimativas = await estimarPrecosCotacao(paraEstimar, fornecedorId)
 
   const precos: RespostaItemCotacao[] = (itensInseridos || []).map((i: any) => {
-    const est = estimativas.get(i.materia_prima_id) ?? { valor_unitario: null, valor_total: null }
+    const manual = precosManuais?.get(i.materia_prima_id)
+    const valorUnitario = manual ?? estimativas.get(i.materia_prima_id)?.valor_unitario ?? null
     return {
       cotacao_item_id: i.id,
-      valor_unitario: est.valor_unitario,
-      valor_total: est.valor_total,
-      disponivel: est.valor_unitario != null,
+      valor_unitario: valorUnitario,
+      valor_total: valorUnitario != null ? Number((valorUnitario * i.quantidade).toFixed(2)) : null,
+      disponivel: valorUnitario != null,
       fator_conversao_fornecedor: null,
     }
   })
