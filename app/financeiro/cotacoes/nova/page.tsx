@@ -6,11 +6,18 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
 import SelecionarItemCotacaoModal, { ItemCotacaoForm } from '@/components/SelecionarItemCotacaoModal'
 import NovaParteRapidaModal from '@/components/NovaParteRapidaModal'
-import { criarCotacao } from '@/lib/financeiro-cotacoes'
+import {
+  criarCotacao,
+  criarCotacaoEstimativa,
+  estimarPrecosCotacao,
+  PrecoEstimado,
+  ItemParaEstimar,
+} from '@/lib/financeiro-cotacoes'
 import { useRouter } from 'next/navigation'
-import { Plus, Trash2 } from 'lucide-react'
-import { FinanceiroParte, FinanceiroMateriaPrima, UnidadeFinanceiro } from '@/lib/types'
+import { Plus, Trash2, AlertCircle } from 'lucide-react'
+import { FinanceiroParte, FinanceiroMateriaPrima, UnidadeFinanceiro, TipoCotacao } from '@/lib/types'
 import { UNIDADE_LABEL } from '@/lib/constants'
+import { formatBRL } from '@/lib/ofx'
 
 export default function NovaCotacaoPage() {
   const { usuario } = useAuth()
@@ -25,6 +32,10 @@ export default function NovaCotacaoPage() {
   const [modalAberto, setModalAberto] = useState(false)
   const [modalNovoFornecedor, setModalNovoFornecedor] = useState(false)
   const [fornecedoresSelecionados, setFornecedoresSelecionados] = useState<Set<string>>(new Set())
+
+  const [tipo, setTipo] = useState<TipoCotacao>('fornecedores')
+  const [fornecedorEstimativaId, setFornecedorEstimativaId] = useState('')
+  const [estimativas, setEstimativas] = useState<Map<string, PrecoEstimado>>(new Map())
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -58,29 +69,55 @@ export default function NovaCotacaoPage() {
     })
   }
 
-  const podeSalvar = titulo.trim() && itens.length > 0 && fornecedoresSelecionados.size > 0
+  // Estimativa ao vivo enquanto a lista é montada — "ter noção de quanto
+  // vai gastar" já antes de salvar, não só depois.
+  useEffect(() => {
+    if (tipo !== 'estimativa' || !fornecedorEstimativaId || itens.length === 0) {
+      setEstimativas(new Map())
+      return
+    }
+    let cancelado = false
+    const paraEstimar: ItemParaEstimar[] = itens.map((i) => ({
+      materia_prima_id: i.materia_prima_id,
+      quantidade: i.quantidade,
+      fator_conversao: materias.find((m) => m.id === i.materia_prima_id)?.fator_conversao ?? 1,
+    }))
+    estimarPrecosCotacao(paraEstimar, fornecedorEstimativaId).then((mapa) => {
+      if (!cancelado) setEstimativas(mapa)
+    })
+    return () => {
+      cancelado = true
+    }
+  }, [tipo, fornecedorEstimativaId, itens, materias])
+
+  const totalEstimado = itens.reduce((acc, i) => acc + (estimativas.get(i.materia_prima_id)?.valor_total ?? 0), 0)
+  const itensSemEstimativa = itens.filter((i) => estimativas.get(i.materia_prima_id)?.valor_unitario == null).length
+
+  const podeSalvar =
+    titulo.trim() && itens.length > 0 && (tipo === 'fornecedores' ? fornecedoresSelecionados.size > 0 : !!fornecedorEstimativaId)
 
   async function salvar() {
     if (!podeSalvar || !usuario) {
-      setErro('Preencha um título, adicione ao menos um item e convide ao menos um fornecedor.')
+      setErro(
+        tipo === 'fornecedores'
+          ? 'Preencha um título, adicione ao menos um item e convide ao menos um fornecedor.'
+          : 'Preencha um título, adicione ao menos um item e escolha o fornecedor.'
+      )
       return
     }
     setSalvando(true)
     setErro('')
     try {
-      const id = await criarCotacao(
-        titulo.trim(),
-        unidade,
-        itens.map((i) => ({
-          materia_prima_id: i.materia_prima_id,
-          quantidade: i.quantidade,
-          unidade_cotacao: i.unidade_cotacao,
-          observacao: i.observacao,
-        })),
-        Array.from(fornecedoresSelecionados),
-        usuario.id,
-        dataEntregaPlanejada || undefined
-      )
+      const itensPayload = itens.map((i) => ({
+        materia_prima_id: i.materia_prima_id,
+        quantidade: i.quantidade,
+        unidade_cotacao: i.unidade_cotacao,
+        observacao: i.observacao,
+      }))
+      const id =
+        tipo === 'fornecedores'
+          ? await criarCotacao(titulo.trim(), unidade, itensPayload, Array.from(fornecedoresSelecionados), usuario.id, dataEntregaPlanejada || undefined)
+          : await criarCotacaoEstimativa(titulo.trim(), unidade, itensPayload, fornecedorEstimativaId, usuario.id, dataEntregaPlanejada || undefined)
       router.push(`/financeiro/cotacoes/${id}`)
     } catch (err: any) {
       console.error('Erro ao criar cotação:', err)
@@ -96,6 +133,35 @@ export default function NovaCotacaoPage() {
 
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}
+
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-3">
+            <h2 className="font-semibold text-gray-800">Tipo de cotação</h2>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setTipo('fornecedores')}
+                className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold border-2 ${
+                  tipo === 'fornecedores' ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'
+                }`}
+              >
+                Cotação com fornecedores
+              </button>
+              <button
+                type="button"
+                onClick={() => setTipo('estimativa')}
+                className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold border-2 ${
+                  tipo === 'estimativa' ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'
+                }`}
+              >
+                Lista de compras (estimativa)
+              </button>
+            </div>
+            {tipo === 'estimativa' && (
+              <p className="text-xs text-gray-400">
+                Lista simples pra compra à vista (ex: supermercado) — preço estimado a partir do histórico com o fornecedor escolhido, sem pedido formal.
+              </p>
+            )}
+          </div>
 
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
             <h2 className="font-semibold text-gray-800">Dados da cotação</h2>
@@ -173,36 +239,83 @@ export default function NovaCotacaoPage() {
             )}
           </div>
 
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-gray-800">Fornecedores convidados</h2>
-              <button type="button" onClick={() => setModalNovoFornecedor(true)} className="text-xs font-medium text-pink-700 hover:text-pink-800">
-                + Cadastrar novo
-              </button>
+          {tipo === 'fornecedores' ? (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-gray-800">Fornecedores convidados</h2>
+                <button type="button" onClick={() => setModalNovoFornecedor(true)} className="text-xs font-medium text-pink-700 hover:text-pink-800">
+                  + Cadastrar novo
+                </button>
+              </div>
+              {fornecedores.length === 0 ? (
+                <p className="text-xs text-amber-600">Nenhum fornecedor cadastrado ainda.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {fornecedores.map((f) => {
+                    const ativo = fornecedoresSelecionados.has(f.id)
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => alternarFornecedor(f.id)}
+                        className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm text-left transition-all ${
+                          ativo ? 'border-pink-600 bg-pink-50 text-pink-800 font-semibold' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                        }`}
+                      >
+                        <span className={`w-4 h-4 rounded border-2 flex-shrink-0 ${ativo ? 'border-pink-600 bg-pink-600' : 'border-gray-300'}`} />
+                        {f.nome}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
-            {fornecedores.length === 0 ? (
-              <p className="text-xs text-amber-600">Nenhum fornecedor cadastrado ainda.</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                {fornecedores.map((f) => {
-                  const ativo = fornecedoresSelecionados.has(f.id)
-                  return (
+          ) : (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-gray-800">Fornecedor</h2>
+                <button type="button" onClick={() => setModalNovoFornecedor(true)} className="text-xs font-medium text-pink-700 hover:text-pink-800">
+                  + Cadastrar novo
+                </button>
+              </div>
+              {fornecedores.length === 0 ? (
+                <p className="text-xs text-amber-600">Nenhum fornecedor cadastrado ainda.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {fornecedores.map((f) => (
                     <button
                       key={f.id}
                       type="button"
-                      onClick={() => alternarFornecedor(f.id)}
-                      className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm text-left transition-all ${
-                        ativo ? 'border-pink-600 bg-pink-50 text-pink-800 font-semibold' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                      onClick={() => setFornecedorEstimativaId(f.id)}
+                      className={`px-3 py-2 rounded-lg border-2 text-sm text-left ${
+                        fornecedorEstimativaId === f.id ? 'border-pink-600 bg-pink-50 text-pink-800 font-semibold' : 'border-gray-200 bg-white text-gray-700'
                       }`}
                     >
-                      <span className={`w-4 h-4 rounded border-2 flex-shrink-0 ${ativo ? 'border-pink-600 bg-pink-600' : 'border-gray-300'}`} />
                       {f.nome}
                     </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tipo === 'estimativa' && itens.length > 0 && (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-2">
+              <h2 className="font-semibold text-gray-800">Total estimado</h2>
+              {!fornecedorEstimativaId ? (
+                <p className="text-xs text-gray-400">Escolha um fornecedor para calcular a estimativa.</p>
+              ) : (
+                <>
+                  <p className="text-2xl font-bold text-gray-800">{formatBRL(totalEstimado)}</p>
+                  {itensSemEstimativa > 0 && (
+                    <p className="text-xs text-amber-600 flex items-center gap-1">
+                      <AlertCircle size={12} /> {itensSemEstimativa} de {itens.length} sem histórico de preço — estimativa parcial.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           <button
             onClick={salvar}
@@ -229,7 +342,8 @@ export default function NovaCotacaoPage() {
           onClose={() => setModalNovoFornecedor(false)}
           onCreated={(novo) => {
             setFornecedores((prev) => [...prev, novo].sort((a, b) => a.nome.localeCompare(b.nome)))
-            setFornecedoresSelecionados((prev) => new Set(prev).add(novo.id))
+            if (tipo === 'fornecedores') setFornecedoresSelecionados((prev) => new Set(prev).add(novo.id))
+            else setFornecedorEstimativaId(novo.id)
           }}
         />
       )}

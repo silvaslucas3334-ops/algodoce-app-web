@@ -500,17 +500,21 @@ export interface FinanceiroCustoPorFornecedor {
   ultima_compra: string
 }
 
-// Cotações (RFQ) — comparar preços de fornecedores para os mesmos itens
-// antes de decidir a compra. unidade só pré-preenche a nota ao fechar,
-// não é usada para RLS (cotações são admin-only, ponto).
+// Cotações — comparar preços de fornecedores para os mesmos itens antes de
+// decidir a compra (tipo='fornecedores'), ou uma lista de compra à vista
+// com preço auto-estimado do histórico (tipo='estimativa'). unidade só
+// pré-preenche a nota ao fechar, não é usada para RLS — colaborativo,
+// qualquer role (admin/loja/cozinha) cria/edita.
 export type StatusCotacao = 'aberta' | 'fechada' | 'cancelada'
 export type StatusCotacaoFornecedor = 'aguardando' | 'respondido' | 'sem_resposta'
+export type TipoCotacao = 'fornecedores' | 'estimativa'
 
 export interface FinanceiroCotacao {
   id: string
   titulo: string
   unidade: UnidadeFinanceiro
   status: StatusCotacao
+  tipo: TipoCotacao
   fornecedor_vencedor_id?: string
   fornecedor_vencedor?: FinanceiroParte
   data_entrega_planejada?: string // prazo pedido ao fornecedor, impresso no PDF
@@ -528,6 +532,7 @@ export interface FinanceiroCotacaoItem {
   quantidade: number
   unidade_cotacao: string
   observacao?: string
+  comprado: boolean
 }
 
 export interface FinanceiroCotacaoFornecedor {

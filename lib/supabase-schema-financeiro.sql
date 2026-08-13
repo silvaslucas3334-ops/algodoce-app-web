@@ -858,6 +858,13 @@ SELECT tablename, rowsecurity FROM pg_tables WHERE tablename LIKE 'financeiro_pd
 CREATE TABLE IF NOT EXISTS financeiro_cotacoes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   titulo TEXT NOT NULL,
+  -- 'fornecedores' = RFQ tradicional (pede preço a N fornecedores, compara,
+  -- fecha com o vencedor). 'estimativa' = lista de compra à vista pra UM
+  -- fornecedor só (ex: supermercado) — preço auto-estimado a partir do
+  -- histórico (lib/financeiro-cotacoes.ts: estimarPrecosCotacao), sem
+  -- pedido formal nem resposta manual; serve de orçamento prévio +
+  -- checklist físico de compra.
+  tipo TEXT NOT NULL DEFAULT 'fornecedores' CHECK (tipo IN ('fornecedores', 'estimativa')),
   -- Só pré-preenche a unidade da nota ao fechar — NÃO é usada para RLS
   -- (diferente de financeiro_lancamentos.unidade, que escopa
   -- financeiro_unidade_do_usuario()). Cotações é colaborativo: qualquer
@@ -883,6 +890,7 @@ CREATE TABLE IF NOT EXISTS financeiro_cotacao_itens (
   quantidade NUMERIC NOT NULL CHECK (quantidade > 0),
   unidade_cotacao TEXT NOT NULL, -- snapshot de unidade_compra no momento da criação
   observacao TEXT,
+  comprado BOOLEAN NOT NULL DEFAULT false, -- checklist físico de compra (marcado durante a compra) — vale pros dois tipos de cotação
   UNIQUE (cotacao_id, materia_prima_id) -- evita item duplicado por clique duplo
 );
 
@@ -995,8 +1003,17 @@ DROP POLICY IF EXISTS financeiro_cotacao_itens_update ON financeiro_cotacao_iten
 CREATE POLICY financeiro_cotacao_itens_update ON financeiro_cotacao_itens FOR UPDATE TO authenticated
   USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'))
   WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha'));
+-- Diferente das outras 3 tabelas do módulo (fornecedores/preços seguem
+-- bloqueados) — remover um item errado da lista antes de fechar é uma
+-- correção legítima (edição geral de cotação aberta); depois de fechada,
+-- os itens viram histórico e o DELETE volta a ficar bloqueado.
 DROP POLICY IF EXISTS financeiro_cotacao_itens_delete_blocked ON financeiro_cotacao_itens;
-CREATE POLICY financeiro_cotacao_itens_delete_blocked ON financeiro_cotacao_itens FOR DELETE USING (false);
+DROP POLICY IF EXISTS financeiro_cotacao_itens_delete ON financeiro_cotacao_itens;
+CREATE POLICY financeiro_cotacao_itens_delete ON financeiro_cotacao_itens FOR DELETE TO authenticated
+  USING (
+    (SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'loja', 'cozinha')
+    AND EXISTS (SELECT 1 FROM financeiro_cotacoes c WHERE c.id = cotacao_id AND c.status = 'aberta')
+  );
 
 DROP POLICY IF EXISTS financeiro_cotacao_fornecedores_select ON financeiro_cotacao_fornecedores;
 CREATE POLICY financeiro_cotacao_fornecedores_select ON financeiro_cotacao_fornecedores FOR SELECT TO authenticated

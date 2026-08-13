@@ -5,10 +5,20 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
 import NotFoundState from '@/components/NotFoundState'
 import ResponderCotacaoModal from '@/components/ResponderCotacaoModal'
-import { fecharCotacao } from '@/lib/financeiro-cotacoes'
+import SelecionarItemCotacaoModal, { ItemCotacaoForm } from '@/components/SelecionarItemCotacaoModal'
+import {
+  fecharCotacao,
+  adicionarItemCotacao,
+  atualizarQuantidadeItemCotacao,
+  removerItemCotacao,
+  marcarItemComprado,
+  estimarPrecosCotacao,
+  responderCotacaoFornecedor,
+  ItemParaEstimar,
+} from '@/lib/financeiro-cotacoes'
 import { useRouter, useParams } from 'next/navigation'
-import { Loader, FileText, CheckCircle, AlertCircle } from 'lucide-react'
-import { FinanceiroCotacao, FinanceiroCotacaoItem, FinanceiroCotacaoFornecedor, FinanceiroCotacaoPreco } from '@/lib/types'
+import { Loader, FileText, CheckCircle, AlertCircle, Plus, Trash2 } from 'lucide-react'
+import { FinanceiroCotacao, FinanceiroCotacaoItem, FinanceiroCotacaoFornecedor, FinanceiroCotacaoPreco, FinanceiroMateriaPrima } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
 
@@ -27,10 +37,21 @@ export default function DetalheCotacaoPage() {
   const [fechando, setFechando] = useState(false)
   const [fornecedorEscolhido, setFornecedorEscolhido] = useState('')
   const [erro, setErro] = useState('')
+  const [materias, setMaterias] = useState<FinanceiroMateriaPrima[]>([])
+  const [modalAdicionarItem, setModalAdicionarItem] = useState(false)
 
   useEffect(() => {
     carregar()
   }, [cotacaoId])
+
+  useEffect(() => {
+    supabase
+      .from('financeiro_materias_primas')
+      .select('*, conta:financeiro_contas(codigo, nome)')
+      .eq('ativo', true)
+      .order('nome')
+      .then(({ data }) => setMaterias(data || []))
+  }, [])
 
   async function carregar() {
     setLoading(true)
@@ -111,6 +132,83 @@ export default function DetalheCotacaoPage() {
     }
   }
 
+  async function confirmarFechamentoEstimativa(fornecedorParteId: string) {
+    setFechando(true)
+    setErro('')
+    try {
+      await fecharCotacao(cotacaoId, fornecedorParteId)
+      router.push(`/financeiro/compras/nova?cotacaoId=${cotacaoId}`)
+    } catch (err: any) {
+      setErro('Erro ao fechar cotação: ' + (err?.message || 'desconhecido'))
+      setFechando(false)
+    }
+  }
+
+  async function adicionarItem(item: ItemCotacaoForm) {
+    setErro('')
+    try {
+      const novoItem = await adicionarItemCotacao(cotacaoId, {
+        materia_prima_id: item.materia_prima_id,
+        quantidade: item.quantidade,
+        unidade_cotacao: item.unidade_cotacao,
+        observacao: item.observacao,
+      })
+      setItens((prev) => [...prev, novoItem])
+      if (cotacao?.tipo === 'estimativa' && fornecedores[0]) {
+        const estimativas = await estimarPrecosCotacao(
+          [{ materia_prima_id: item.materia_prima_id, quantidade: item.quantidade, fator_conversao: novoItem.materia_prima?.fator_conversao ?? 1 }],
+          fornecedores[0].parte_id
+        )
+        const est = estimativas.get(item.materia_prima_id) ?? { valor_unitario: null, valor_total: null }
+        await responderCotacaoFornecedor(fornecedores[0].id, [
+          {
+            cotacao_item_id: novoItem.id,
+            valor_unitario: est.valor_unitario,
+            valor_total: est.valor_total,
+            disponivel: est.valor_unitario != null,
+            fator_conversao_fornecedor: null,
+          },
+        ])
+        await carregar()
+      }
+    } catch (err: any) {
+      setErro('Erro ao adicionar item: ' + (err?.message || 'desconhecido'))
+    }
+  }
+
+  async function alterarQuantidade(item: FinanceiroCotacaoItem, novaQuantidade: number) {
+    if (!novaQuantidade || novaQuantidade <= 0 || novaQuantidade === item.quantidade) return
+    const anterior = item.quantidade
+    setItens((prev) => prev.map((i) => (i.id === item.id ? { ...i, quantidade: novaQuantidade } : i)))
+    try {
+      await atualizarQuantidadeItemCotacao(item.id, novaQuantidade)
+    } catch (err: any) {
+      setItens((prev) => prev.map((i) => (i.id === item.id ? { ...i, quantidade: anterior } : i)))
+      setErro('Erro ao atualizar quantidade: ' + (err?.message || 'desconhecido'))
+    }
+  }
+
+  async function excluirItem(itemId: string) {
+    if (!window.confirm('Remover este item da cotação?')) return
+    setErro('')
+    try {
+      await removerItemCotacao(itemId)
+      setItens((prev) => prev.filter((i) => i.id !== itemId))
+    } catch (err: any) {
+      setErro('Erro ao remover item: ' + (err?.message || 'desconhecido'))
+    }
+  }
+
+  async function alternarComprado(item: FinanceiroCotacaoItem) {
+    setItens((prev) => prev.map((i) => (i.id === item.id ? { ...i, comprado: !i.comprado } : i)))
+    try {
+      await marcarItemComprado(item.id, !item.comprado)
+    } catch (err: any) {
+      setItens((prev) => prev.map((i) => (i.id === item.id ? { ...i, comprado: item.comprado } : i)))
+      setErro('Erro ao marcar item: ' + (err?.message || 'desconhecido'))
+    }
+  }
+
   if (loading) {
     return (
       <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
@@ -149,15 +247,48 @@ export default function DetalheCotacaoPage() {
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}
 
+          {cotacao.tipo === 'fornecedores' && (
+          <>
           {/* Itens */}
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <h2 className="font-semibold text-gray-800 mb-3">Itens ({itens.length})</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-gray-800">Itens ({itens.length})</h2>
+              {cotacao.status === 'aberta' && (
+                <button
+                  onClick={() => setModalAdicionarItem(true)}
+                  className="bg-pink-700 text-white rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-1.5 hover:bg-pink-800"
+                >
+                  <Plus size={16} /> Adicionar item
+                </button>
+              )}
+            </div>
             <div className="space-y-1">
               {itens.map((item) => (
-                <p key={item.id} className="text-sm text-gray-700">
-                  {item.materia_prima?.nome} — {item.quantidade} {item.unidade_cotacao}
-                  {item.observacao && <span className="text-gray-400"> · {item.observacao}</span>}
-                </p>
+                <div key={item.id} className="flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0">
+                  <div className="flex-1 min-w-0 text-sm text-gray-700">
+                    {item.materia_prima?.nome}
+                    {item.observacao && <span className="text-gray-400"> · {item.observacao}</span>}
+                  </div>
+                  {cotacao.status === 'aberta' ? (
+                    <input
+                      key={`${item.id}-${item.quantidade}`}
+                      type="number"
+                      step="any"
+                      min={0}
+                      defaultValue={item.quantidade}
+                      onBlur={(e) => alterarQuantidade(item, Number(e.target.value))}
+                      className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right"
+                    />
+                  ) : (
+                    <span className="text-sm text-gray-600">{item.quantidade}</span>
+                  )}
+                  <span className="text-xs text-gray-500 w-10">{item.unidade_cotacao}</span>
+                  {cotacao.status === 'aberta' && (
+                    <button onClick={() => excluirItem(item.id)} className="text-red-600 hover:text-red-700 flex-shrink-0">
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -297,6 +428,91 @@ export default function DetalheCotacaoPage() {
               </button>
             </div>
           )}
+          </>
+          )}
+
+          {cotacao.tipo === 'estimativa' && (() => {
+            const fornecedor = fornecedores[0]
+            const precoPorItem = (item: FinanceiroCotacaoItem) => {
+              const p = fornecedor?.precos.find((x) => x.cotacao_item_id === item.id)
+              return p?.valor_unitario != null ? p.valor_unitario * item.quantidade : null
+            }
+            const totalEstimado = itens.reduce((acc, i) => acc + (precoPorItem(i) ?? 0), 0)
+            const comprados = itens.filter((i) => i.comprado).length
+            return (
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-semibold text-gray-800">Lista de compras ({itens.length})</h2>
+                  {cotacao.status === 'aberta' && (
+                    <button
+                      onClick={() => setModalAdicionarItem(true)}
+                      className="bg-pink-700 text-white rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-1.5 hover:bg-pink-800"
+                    >
+                      <Plus size={16} /> Adicionar item
+                    </button>
+                  )}
+                </div>
+                {fornecedor && <p className="text-xs text-gray-500 mb-3">Fornecedor: {fornecedor.parte?.nome}</p>}
+                <div className="space-y-1">
+                  {itens.map((item) => {
+                    const preco = precoPorItem(item)
+                    return (
+                      <div
+                        key={item.id}
+                        className={`flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 ${item.comprado ? 'opacity-50' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.comprado}
+                          onChange={() => alternarComprado(item)}
+                          className="w-4 h-4 rounded flex-shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm text-gray-700 truncate ${item.comprado ? 'line-through' : ''}`}>{item.materia_prima?.nome}</p>
+                          {item.observacao && <p className="text-xs text-gray-400 truncate">{item.observacao}</p>}
+                        </div>
+                        {cotacao.status === 'aberta' ? (
+                          <input
+                            key={`${item.id}-${item.quantidade}`}
+                            type="number"
+                            step="any"
+                            min={0}
+                            defaultValue={item.quantidade}
+                            onBlur={(e) => alterarQuantidade(item, Number(e.target.value))}
+                            className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right"
+                          />
+                        ) : (
+                          <span className="text-sm text-gray-600">{item.quantidade}</span>
+                        )}
+                        <span className="text-xs text-gray-500 w-8">{item.unidade_cotacao}</span>
+                        <span className="text-sm font-medium text-gray-800 w-24 text-right">
+                          {preco != null ? formatBRL(preco) : <span className="text-xs text-gray-300">sem estimativa</span>}
+                        </span>
+                        {cotacao.status === 'aberta' && (
+                          <button onClick={() => excluirItem(item.id)} className="text-red-600 hover:text-red-700 flex-shrink-0">
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex items-center justify-between mt-4 pt-3 border-t-2 border-gray-200">
+                  <p className="text-sm text-gray-600">{comprados} de {itens.length} comprados</p>
+                  <p className="text-lg font-bold text-gray-800">{formatBRL(totalEstimado)}</p>
+                </div>
+                {cotacao.status === 'aberta' && fornecedor && (
+                  <button
+                    onClick={() => confirmarFechamentoEstimativa(fornecedor.parte_id)}
+                    disabled={fechando}
+                    className="w-full bg-green-600 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2 mt-4"
+                  >
+                    <CheckCircle size={16} /> {fechando ? 'Fechando...' : 'Fechar e lançar nota'}
+                  </button>
+                )}
+              </div>
+            )
+          })()}
         </div>
       </div>
 
@@ -307,6 +523,18 @@ export default function DetalheCotacaoPage() {
           precosExistentes={modalResponder.precos}
           onClose={() => setModalResponder(null)}
           onResolvido={carregar}
+        />
+      )}
+
+      {modalAdicionarItem && (
+        <SelecionarItemCotacaoModal
+          materias={materias}
+          onAdd={(item) => {
+            adicionarItem(item)
+            setModalAdicionarItem(false)
+          }}
+          onClose={() => setModalAdicionarItem(false)}
+          onMateriaPrimaCriada={(nova) => setMaterias((prev) => [...prev, nova].sort((a, b) => a.nome.localeCompare(b.nome)))}
         />
       )}
     </ProtectedRoute>
