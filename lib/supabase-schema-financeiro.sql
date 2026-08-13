@@ -494,6 +494,22 @@ CREATE POLICY financeiro_extrato_transacoes_delete_admin_pendente ON financeiro_
     AND status_conciliacao = 'pendente'
   );
 
+-- Extrato é admin-only (acima), mas o Fluxo de Caixa (loja/cozinha também
+-- veem) precisa saber quando cada pagamento PARCIAL de uma despesa saiu de
+-- verdade, pra não mascarar Saídas/Saldo — essa function devolve só
+-- (lancamento_id, data, valor) já conciliados, nunca a linha crua do
+-- extrato. Ver lib/migrations/financeiro-extrato-por-lancamentos-rpc.sql.
+CREATE OR REPLACE FUNCTION financeiro_extrato_por_lancamentos(p_lancamento_ids UUID[])
+RETURNS TABLE (lancamento_id UUID, data DATE, valor NUMERIC) AS $$
+  SELECT lancamento_id, data, ABS(valor) AS valor
+  FROM financeiro_extrato_transacoes
+  WHERE status_conciliacao = 'conciliado'
+    AND lancamento_id = ANY(p_lancamento_ids);
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+GRANT EXECUTE ON FUNCTION financeiro_extrato_por_lancamentos(UUID[]) TO authenticated;
+  );
+
 -- financeiro_ofx_contas_conhecidas: só admin, mesmo padrão do extrato.
 -- DELETE fica bloqueado — mapeamento errado se autocorrige via upsert.
 ALTER TABLE financeiro_ofx_contas_conhecidas ENABLE ROW LEVEL SECURITY;

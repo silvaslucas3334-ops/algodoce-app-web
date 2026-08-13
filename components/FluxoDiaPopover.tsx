@@ -105,9 +105,9 @@ export default function FluxoDiaPopover({ dia, tituloGrupo, origem, grupoId, uni
 
         {!erro && lancamentos && lancamentos.length > 0 && (
           <div className="space-y-1">
-            {lancamentos.map((l) => (
+            {lancamentos.map((l, i) => (
               <Link
-                key={l.id}
+                key={`${l.id}-${i}`}
                 href={`/financeiro/despesas/${l.id}`}
                 className="block p-2 rounded-lg hover:bg-gray-50 text-sm"
               >
@@ -117,8 +117,12 @@ export default function FluxoDiaPopover({ dia, tituloGrupo, origem, grupoId, uni
                 </div>
                 <div className="flex items-center justify-between gap-2 text-[11px] text-gray-400">
                   <span className="truncate">{l.parte_nome}</span>
-                  <span className={l.status === 'pago' ? 'text-green-600' : 'text-amber-600'}>
-                    {l.status === 'pago' ? 'Pago' : 'Em aberto'}
+                  <span
+                    className={
+                      l.situacao === 'pago' ? 'text-green-600' : l.situacao === 'pago_parcial' ? 'text-blue-600' : 'text-amber-600'
+                    }
+                  >
+                    {l.situacao === 'pago' ? 'Pago' : l.situacao === 'pago_parcial' ? 'Pago (parcial)' : 'Em aberto'}
                   </span>
                 </div>
               </Link>

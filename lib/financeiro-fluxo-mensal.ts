@@ -520,7 +520,12 @@ export interface LancamentoDoDiaSaida {
   id: string
   descricao: string
   valor_total: number
-  status: 'aberto' | 'pago'
+  // 'pago': quitado, este valor saiu nesse dia (pode ser só um pedaço, se
+  // o resto já tinha saído em dias anteriores). 'pago_parcial': lançamento
+  // ainda 'aberto', este valor é uma parcela que já saiu nesse dia.
+  // 'previsto': ainda não saiu — é o saldo restante, projetado no
+  // vencimento (mesma linha de sempre, antes da conciliação parcial).
+  situacao: 'pago' | 'pago_parcial' | 'previsto'
   numero_documento: string | null
   parte_nome: string
 }
@@ -533,6 +538,12 @@ export interface LancamentoDoDiaSaida {
  * materializada+previsão-de-orçamento sem id real). Se vier vazio mas a
  * célula clicada mostra valor, é 100% previsão (recorrência ou orçamento)
  * sem lançamento real ainda — quem chama trata esse caso.
+ *
+ * Espelha a mesma lógica de buscarFluxoMensal (pago = transações do dia +
+ * resíduo na data_pagamento; parcial = transações do dia; previsto = saldo
+ * restante no vencimento) pra bater com o total da célula clicada — sem
+ * isso, o popover ficaria com um número diferente do calendário sempre que
+ * houver pagamento parcial no dia.
  */
 export async function buscarLancamentosDoDiaSaida(
   unidade: VisaoFluxoMensal,
@@ -547,29 +558,107 @@ export async function buscarLancamentosDoDiaSaida(
   function baseQuery() {
     return supabase
       .from('financeiro_lancamentos')
-      .select('id, descricao, valor_total, valor_pago_conciliado, status, numero_documento, parte:financeiro_partes!parte_id(nome)')
+      .select(
+        'id, descricao, valor_total, valor_pago_conciliado, status, numero_documento, data_pagamento, parte:financeiro_partes!parte_id(nome)'
+      )
       .in('unidade', unidadesDespesa)
       .eq('tipo', tipo)
       .eq(coluna, grupoId)
   }
 
-  const [{ data: pagos, error: erroPagos }, { data: abertos, error: erroAbertos }] = await Promise.all([
-    baseQuery().eq('status', 'pago').eq('data_pagamento', dia),
-    baseQuery().eq('status', 'aberto').eq('data_vencimento', dia),
-  ])
+  const [{ data: pagos, error: erroPagos }, { data: parciais, error: erroParciais }, { data: previstos, error: erroPrevistos }] =
+    await Promise.all([
+      baseQuery().eq('status', 'pago').eq('data_pagamento', dia),
+      baseQuery().eq('status', 'aberto').gt('valor_pago_conciliado', 0),
+      baseQuery().eq('status', 'aberto').eq('data_vencimento', dia),
+    ])
   if (erroPagos) throw new Error(erroPagos.message)
-  if (erroAbertos) throw new Error(erroAbertos.message)
+  if (erroParciais) throw new Error(erroParciais.message)
+  if (erroPrevistos) throw new Error(erroPrevistos.message)
 
-  return [...(pagos || []), ...(abertos || [])].map((l: any) => ({
-    id: l.id,
-    descricao: l.descricao,
-    // 'pago' já quitou o valor cheio; 'aberto' mostra só o que ainda falta
-    // (pode estar em pagamento parcial — ver valor_pago_conciliado).
-    valor_total: l.status === 'pago' ? l.valor_total : l.valor_total - (l.valor_pago_conciliado || 0),
-    status: l.status,
-    numero_documento: l.numero_documento,
-    parte_nome: l.parte?.nome || 'Sem beneficiário',
-  }))
+  const pagamentosPorLancamento = await buscarPagamentosPorLancamentos([
+    ...(pagos || []).map((l: any) => l.id),
+    ...(parciais || []).map((l: any) => l.id),
+  ])
+
+  const resultado: LancamentoDoDiaSaida[] = []
+
+  ;(pagos || []).forEach((l: any) => {
+    const todasTransacoes = pagamentosPorLancamento.get(l.id) || []
+    const somaTransacoes = todasTransacoes.reduce((s, t) => s + t.valor, 0)
+    const residual = Number((l.valor_total - somaTransacoes).toFixed(2))
+    let valorHoje = todasTransacoes.filter((t) => t.data === dia).reduce((s, t) => s + t.valor, 0)
+    if (residual > 0.01 && l.data_pagamento === dia) valorHoje += residual
+    if (valorHoje > 0.01) {
+      resultado.push({
+        id: l.id,
+        descricao: l.descricao,
+        valor_total: Number(valorHoje.toFixed(2)),
+        situacao: 'pago',
+        numero_documento: l.numero_documento,
+        parte_nome: l.parte?.nome || 'Sem beneficiário',
+      })
+    }
+  })
+
+  ;(parciais || []).forEach((l: any) => {
+    const valorHoje = (pagamentosPorLancamento.get(l.id) || [])
+      .filter((t) => t.data === dia)
+      .reduce((s, t) => s + t.valor, 0)
+    if (valorHoje > 0.01) {
+      resultado.push({
+        id: l.id,
+        descricao: l.descricao,
+        valor_total: Number(valorHoje.toFixed(2)),
+        situacao: 'pago_parcial',
+        numero_documento: l.numero_documento,
+        parte_nome: l.parte?.nome || 'Sem beneficiário',
+      })
+    }
+  })
+
+  ;(previstos || []).forEach((l: any) => {
+    resultado.push({
+      id: l.id,
+      descricao: l.descricao,
+      valor_total: l.valor_total - (l.valor_pago_conciliado || 0),
+      situacao: 'previsto',
+      numero_documento: l.numero_documento,
+      parte_nome: l.parte?.nome || 'Sem beneficiário',
+    })
+  })
+
+  return resultado
+}
+
+// --- pagamentos reais (parciais inclusive), por lançamento -------------------
+
+/**
+ * Cada transação bancária já conciliada com um lançamento, agrupada por
+ * lancamento_id — inclui pagamentos PARCIAIS (lançamento continua
+ * 'aberto') com a data real de cada um, não só o pagamento que quitou de
+ * vez. Via RPC porque financeiro_extrato_transacoes é admin-only por RLS
+ * (ver lib/migrations/financeiro-extrato-por-lancamentos-rpc.sql) — a
+ * function expõe só (lancamento_id, data, valor) pros ids que quem chama
+ * já filtrou por unidade, nunca a linha crua do extrato.
+ */
+async function buscarPagamentosPorLancamentos(ids: string[]): Promise<Map<string, { data: string; valor: number }[]>> {
+  const mapa = new Map<string, { data: string; valor: number }[]>()
+  if (ids.length === 0) return mapa
+  const { data, error } = await supabase.rpc('financeiro_extrato_por_lancamentos', { p_lancamento_ids: ids })
+  if (error) {
+    // A function só existe depois da migration
+    // financeiro-extrato-por-lancamentos-rpc.sql rodar no Supabase — até lá,
+    // degrada pro comportamento de antes (sem os pagamentos parciais) em vez
+    // de quebrar o Fluxo de Caixa inteiro pra todo mundo.
+    console.error('financeiro_extrato_por_lancamentos indisponível (migration pendente?):', error.message)
+    return mapa
+  }
+  ;(data || []).forEach((t: any) => {
+    if (!mapa.has(t.lancamento_id)) mapa.set(t.lancamento_id, [])
+    mapa.get(t.lancamento_id)!.push({ data: t.data, valor: t.valor })
+  })
+  return mapa
 }
 
 // --- função principal --------------------------------------------------------
@@ -670,29 +759,51 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
 
   // Despesas orçadas são sempre consolidadas — um balde só ('geral'), sem
   // distinção de loja/rateio (a empresa tratada como uma unidade só).
-  const [{ data: pagos, error: erroPagos }, { data: abertosVariavelFuturos, error: erroAbertos }, despesasFixasFuturas, orcamentoGeral] =
-    await Promise.all([
-      supabase
-        .from('financeiro_lancamentos')
-        .select('valor_total, tipo, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_pagamento')
-        .in('unidade', unidadesDespesa)
-        .eq('status', 'pago')
-        .gte('data_pagamento', inicio)
-        .lte('data_pagamento', fim),
-      supabase
-        .from('financeiro_lancamentos')
-        .select('valor_total, valor_pago_conciliado, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
-        .in('unidade', unidadesDespesa)
-        .eq('status', 'aberto')
-        .eq('tipo', 'compra_insumos')
-        .gte('data_vencimento', hoje)
-        .lte('data_vencimento', fim),
-      buscarDespesasFixasFuturas(unidade, ano, mes),
-      buscarOrcamento(ano, mes, 'geral'),
-    ])
+  const [
+    { data: pagos, error: erroPagos },
+    { data: lancamentosParciais, error: erroParciais },
+    { data: abertosVariavelFuturos, error: erroAbertos },
+    despesasFixasFuturas,
+    orcamentoGeral,
+  ] = await Promise.all([
+    supabase
+      .from('financeiro_lancamentos')
+      .select('id, valor_total, tipo, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_pagamento')
+      .in('unidade', unidadesDespesa)
+      .eq('status', 'pago')
+      .gte('data_pagamento', inicio)
+      .lte('data_pagamento', fim),
+    // Ainda 'aberto' (não quitou), mas já com pagamento(s) parcial(is)
+    // conciliado(s) — sem esse dinheiro já saiu de verdade e não aparecia
+    // em lugar nenhum das Saídas. Sem filtro de data: o vencimento não diz
+    // nada sobre quando a parcela já paga realmente saiu (isso vem de
+    // buscarPagamentosPorLancamentos, abaixo).
+    supabase
+      .from('financeiro_lancamentos')
+      .select('id, tipo, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome)')
+      .in('unidade', unidadesDespesa)
+      .eq('status', 'aberto')
+      .gt('valor_pago_conciliado', 0),
+    supabase
+      .from('financeiro_lancamentos')
+      .select('valor_total, valor_pago_conciliado, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
+      .in('unidade', unidadesDespesa)
+      .eq('status', 'aberto')
+      .eq('tipo', 'compra_insumos')
+      .gte('data_vencimento', hoje)
+      .lte('data_vencimento', fim),
+    buscarDespesasFixasFuturas(unidade, ano, mes),
+    buscarOrcamento(ano, mes, 'geral'),
+  ])
   if (erroPagos) throw new Error(erroPagos.message)
+  if (erroParciais) throw new Error(erroParciais.message)
   if (erroAbertos) throw new Error(erroAbertos.message)
   const todosItens = orcamentoGeral?.itens || []
+
+  const pagamentosPorLancamento = await buscarPagamentosPorLancamentos([
+    ...(pagos || []).map((l: any) => l.id),
+    ...(lancamentosParciais || []).map((l: any) => l.id),
+  ])
 
   interface LinhaSaida {
     data: string
@@ -706,17 +817,60 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
   const linhasFixo: LinhaSaida[] = []
   const linhasVariavel: LinhaSaida[] = []
 
+  // Pagamento(s) parcial(is) já conciliado(s) de um lançamento ainda
+  // 'aberto' — cada transação bancária entra na SUA data real (pode ter
+  // saído em qualquer mês, não só no vencimento).
+  ;(lancamentosParciais || []).forEach((l: any) => {
+    const transacoes = (pagamentosPorLancamento.get(l.id) || []).filter((t) => t.data >= inicio && t.data <= fim)
+    transacoes.forEach((t) => {
+      const linha: LinhaSaida = {
+        data: t.data,
+        valor: t.valor,
+        parteId: l.parte_id || 'sem-parte',
+        parteNome: l.parte?.nome || 'Sem beneficiário',
+        contaId: l.conta_id || 'sem-conta',
+        contaNome: l.conta?.nome || 'Sem classificação',
+      }
+      if (l.tipo === 'despesa') linhasFixo.push(linha)
+      else linhasVariavel.push(linha)
+    })
+  })
+
+  // 'pago' (quitado) — o valor_total inteiro já saiu de verdade, mas pode
+  // ter saído em pedaços em datas diferentes (pagamento parcial concluído
+  // agora com a última parcela). Cada transação conciliada desse
+  // lançamento entra na sua própria data; o que sobra sem transação
+  // vinculada (pago em dinheiro, marcado manualmente sem conciliação
+  // bancária) entra em data_pagamento, mesmo comportamento de sempre.
   ;(pagos || []).forEach((l: any) => {
-    const linha: LinhaSaida = {
-      data: l.data_pagamento,
-      valor: l.valor_total,
-      parteId: l.parte_id || 'sem-parte',
-      parteNome: l.parte?.nome || 'Sem beneficiário',
-      contaId: l.conta_id || 'sem-conta',
-      contaNome: l.conta?.nome || 'Sem classificação',
+    const todasTransacoes = pagamentosPorLancamento.get(l.id) || []
+    const somaTransacoes = todasTransacoes.reduce((s, t) => s + t.valor, 0)
+    const residual = Number((l.valor_total - somaTransacoes).toFixed(2))
+
+    const linhasDoLancamento: LinhaSaida[] = todasTransacoes
+      .filter((t) => t.data >= inicio && t.data <= fim)
+      .map((t) => ({
+        data: t.data,
+        valor: t.valor,
+        parteId: l.parte_id || 'sem-parte',
+        parteNome: l.parte?.nome || 'Sem beneficiário',
+        contaId: l.conta_id || 'sem-conta',
+        contaNome: l.conta?.nome || 'Sem classificação',
+      }))
+    if (residual > 0.01) {
+      linhasDoLancamento.push({
+        data: l.data_pagamento,
+        valor: residual,
+        parteId: l.parte_id || 'sem-parte',
+        parteNome: l.parte?.nome || 'Sem beneficiário',
+        contaId: l.conta_id || 'sem-conta',
+        contaNome: l.conta?.nome || 'Sem classificação',
+      })
     }
-    if (l.tipo === 'despesa') linhasFixo.push(linha)
-    else linhasVariavel.push(linha)
+    linhasDoLancamento.forEach((linha) => {
+      if (l.tipo === 'despesa') linhasFixo.push(linha)
+      else linhasVariavel.push(linha)
+    })
   })
 
   ;(abertosVariavelFuturos || []).forEach((l: any) => {
