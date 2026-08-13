@@ -69,7 +69,7 @@ export default function CotacoesPage() {
           ) : cotacoes.length === 0 ? (
             <EmptyState
               title="Nenhuma cotação ainda"
-              description="Crie uma cotação para comparar preços de fornecedores antes de comprar"
+              description="Crie uma cotação para comparar preços de fornecedores antes de comprar, ou uma lista de compras estimada para compras à vista"
             />
           ) : (
             <div className="space-y-2">
@@ -88,9 +88,14 @@ export default function CotacoesPage() {
                       )}
                     </p>
                   </div>
-                  <span className={`text-xs px-2 py-1 rounded-full font-semibold ${STATUS_COLOR[c.status]}`}>
-                    {STATUS_LABEL[c.status]}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {c.tipo === 'estimativa' && (
+                      <span className="text-xs px-2 py-1 rounded-full font-semibold bg-blue-100 text-blue-700">Lista de compras</span>
+                    )}
+                    <span className={`text-xs px-2 py-1 rounded-full font-semibold ${STATUS_COLOR[c.status]}`}>
+                      {STATUS_LABEL[c.status]}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>

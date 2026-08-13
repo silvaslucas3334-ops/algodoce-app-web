@@ -96,6 +96,24 @@ export function hojeISO(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
 }
 
+// g/ml viram kg/L pra leitura mais fácil quando o valor já passa de 1 unidade
+// maior — é só formatação de exibição, nunca muda o que está armazenado
+// (sempre em g/ml/unidade cadastrada na matéria-prima).
+function unidadeAmigavel(unidade: string): { unidade: string; fator: number } | null {
+  if (unidade === 'g') return { unidade: 'kg', fator: 1000 }
+  if (unidade === 'ml') return { unidade: 'L', fator: 1000 }
+  return null
+}
+
+/** Ex: formatarQuantidade(2500, 'g') -> "2,5 kg"; formatarQuantidade(50, 'g') -> "50 g" (fica pequeno, não vale converter). */
+export function formatarQuantidade(valor: number, unidade: string): string {
+  const amigavel = unidadeAmigavel(unidade)
+  if (amigavel && Math.abs(valor) >= amigavel.fator) {
+    return `${(valor / amigavel.fator).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${amigavel.unidade}`
+  }
+  return `${valor.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${unidade}`
+}
+
 /**
  * Mês (ano, mes) já encerrado em relação a hoje — o Orçamento vira
  * somente leitura pra esses meses (o passado é a realidade, não se

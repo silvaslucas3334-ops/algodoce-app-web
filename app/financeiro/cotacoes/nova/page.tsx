@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
 import SelecionarItemCotacaoModal, { ItemCotacaoForm } from '@/components/SelecionarItemCotacaoModal'
+import SelecionarFornecedorLista from '@/components/SelecionarFornecedorLista'
 import NovaParteRapidaModal from '@/components/NovaParteRapidaModal'
 import {
   criarCotacao,
@@ -36,6 +37,7 @@ export default function NovaCotacaoPage() {
   const [tipo, setTipo] = useState<TipoCotacao>('fornecedores')
   const [fornecedorEstimativaId, setFornecedorEstimativaId] = useState('')
   const [estimativas, setEstimativas] = useState<Map<string, PrecoEstimado>>(new Map())
+  const [calculandoEstimativa, setCalculandoEstimativa] = useState(false)
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -82,8 +84,12 @@ export default function NovaCotacaoPage() {
       quantidade: i.quantidade,
       fator_conversao: materias.find((m) => m.id === i.materia_prima_id)?.fator_conversao ?? 1,
     }))
+    setCalculandoEstimativa(true)
     estimarPrecosCotacao(paraEstimar, fornecedorEstimativaId).then((mapa) => {
-      if (!cancelado) setEstimativas(mapa)
+      if (!cancelado) {
+        setEstimativas(mapa)
+        setCalculandoEstimativa(false)
+      }
     })
     return () => {
       cancelado = true
@@ -193,15 +199,46 @@ export default function NovaCotacaoPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Data de entrega planejada (opcional)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                {tipo === 'estimativa' ? 'Data planejada da compra (opcional)' : 'Data de entrega planejada (opcional)'}
+              </label>
               <input
                 type="date"
                 value={dataEntregaPlanejada}
                 onChange={(e) => setDataEntregaPlanejada(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
               />
-              <p className="text-xs text-gray-400 mt-1">Prazo pedido ao fornecedor — sai impresso no PDF da cotação.</p>
+              <p className="text-xs text-gray-400 mt-1">
+                {tipo === 'estimativa'
+                  ? 'Pra lembrar quando pretende ir — não aparece em PDF.'
+                  : 'Prazo pedido ao fornecedor — sai impresso no PDF da cotação.'}
+              </p>
             </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-800">{tipo === 'fornecedores' ? 'Fornecedores convidados' : 'Fornecedor'}</h2>
+            </div>
+            {tipo === 'fornecedores' ? (
+              <SelecionarFornecedorLista
+                fornecedores={fornecedores}
+                selecionados={Array.from(fornecedoresSelecionados)}
+                multiplo
+                onAdicionar={(id) => alternarFornecedor(id)}
+                onRemover={(id) => alternarFornecedor(id)}
+                onCadastrarNovo={() => setModalNovoFornecedor(true)}
+              />
+            ) : (
+              <SelecionarFornecedorLista
+                fornecedores={fornecedores}
+                selecionados={fornecedorEstimativaId ? [fornecedorEstimativaId] : []}
+                multiplo={false}
+                onAdicionar={(id) => setFornecedorEstimativaId(id)}
+                onRemover={() => setFornecedorEstimativaId('')}
+                onCadastrarNovo={() => setModalNovoFornecedor(true)}
+              />
+            )}
           </div>
 
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
@@ -239,71 +276,13 @@ export default function NovaCotacaoPage() {
             )}
           </div>
 
-          {tipo === 'fornecedores' ? (
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold text-gray-800">Fornecedores convidados</h2>
-                <button type="button" onClick={() => setModalNovoFornecedor(true)} className="text-xs font-medium text-pink-700 hover:text-pink-800">
-                  + Cadastrar novo
-                </button>
-              </div>
-              {fornecedores.length === 0 ? (
-                <p className="text-xs text-amber-600">Nenhum fornecedor cadastrado ainda.</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {fornecedores.map((f) => {
-                    const ativo = fornecedoresSelecionados.has(f.id)
-                    return (
-                      <button
-                        key={f.id}
-                        type="button"
-                        onClick={() => alternarFornecedor(f.id)}
-                        className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm text-left transition-all ${
-                          ativo ? 'border-pink-600 bg-pink-50 text-pink-800 font-semibold' : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-                        }`}
-                      >
-                        <span className={`w-4 h-4 rounded border-2 flex-shrink-0 ${ativo ? 'border-pink-600 bg-pink-600' : 'border-gray-300'}`} />
-                        {f.nome}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold text-gray-800">Fornecedor</h2>
-                <button type="button" onClick={() => setModalNovoFornecedor(true)} className="text-xs font-medium text-pink-700 hover:text-pink-800">
-                  + Cadastrar novo
-                </button>
-              </div>
-              {fornecedores.length === 0 ? (
-                <p className="text-xs text-amber-600">Nenhum fornecedor cadastrado ainda.</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {fornecedores.map((f) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setFornecedorEstimativaId(f.id)}
-                      className={`px-3 py-2 rounded-lg border-2 text-sm text-left ${
-                        fornecedorEstimativaId === f.id ? 'border-pink-600 bg-pink-50 text-pink-800 font-semibold' : 'border-gray-200 bg-white text-gray-700'
-                      }`}
-                    >
-                      {f.nome}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
           {tipo === 'estimativa' && itens.length > 0 && (
             <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-2">
               <h2 className="font-semibold text-gray-800">Total estimado</h2>
               {!fornecedorEstimativaId ? (
                 <p className="text-xs text-gray-400">Escolha um fornecedor para calcular a estimativa.</p>
+              ) : calculandoEstimativa ? (
+                <p className="text-sm text-gray-400">Calculando...</p>
               ) : (
                 <>
                   <p className="text-2xl font-bold text-gray-800">{formatBRL(totalEstimado)}</p>

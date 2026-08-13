@@ -10,17 +10,19 @@ import {
   fecharCotacao,
   adicionarItemCotacao,
   atualizarQuantidadeItemCotacao,
+  atualizarPrecoItemCotacao,
   removerItemCotacao,
   marcarItemComprado,
   estimarPrecosCotacao,
   responderCotacaoFornecedor,
-  ItemParaEstimar,
 } from '@/lib/financeiro-cotacoes'
+import { buscarQuantidadeCompradaUltimosDias } from '@/lib/financeiro-compras-relatorio'
 import { useRouter, useParams } from 'next/navigation'
-import { Loader, FileText, CheckCircle, AlertCircle, Plus, Trash2 } from 'lucide-react'
+import { Loader, FileText, CheckCircle, AlertCircle, Plus, Trash2, ChevronDown } from 'lucide-react'
 import { FinanceiroCotacao, FinanceiroCotacaoItem, FinanceiroCotacaoFornecedor, FinanceiroCotacaoPreco, FinanceiroMateriaPrima } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
+import { formatarQuantidade } from '@/lib/financeiro-utils'
 
 type FornecedorComPrecos = FinanceiroCotacaoFornecedor & { precos: FinanceiroCotacaoPreco[] }
 
@@ -39,6 +41,8 @@ export default function DetalheCotacaoPage() {
   const [erro, setErro] = useState('')
   const [materias, setMaterias] = useState<FinanceiroMateriaPrima[]>([])
   const [modalAdicionarItem, setModalAdicionarItem] = useState(false)
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
+  const [ultimaSemana, setUltimaSemana] = useState<Map<string, number | 'carregando'>>(new Map())
 
   useEffect(() => {
     carregar()
@@ -209,6 +213,56 @@ export default function DetalheCotacaoPage() {
     }
   }
 
+  // Preço por unidade de compra editável direto na Lista de Compras — igual
+  // ao princípio de ResponderCotacaoModal, só que aqui pra 1 item de cada
+  // vez. Atualização otimista no state de fornecedores; em erro, recarrega
+  // do banco em vez de tentar reconstruir o estado manualmente.
+  async function alterarPrecoUnitario(item: FinanceiroCotacaoItem, novoValorUnitario: number) {
+    const fornecedor = fornecedores[0]
+    if (!fornecedor || novoValorUnitario < 0) return
+    const disponivel = novoValorUnitario > 0
+    const anterior = fornecedor.precos.find((p) => p.cotacao_item_id === item.id)
+    const novoPreco: FinanceiroCotacaoPreco = {
+      id: anterior?.id || '',
+      cotacao_item_id: item.id,
+      cotacao_fornecedor_id: fornecedor.id,
+      valor_unitario: disponivel ? novoValorUnitario : null,
+      valor_total: disponivel ? Number((novoValorUnitario * item.quantidade).toFixed(2)) : null,
+      disponivel,
+      fator_conversao_fornecedor: anterior?.fator_conversao_fornecedor ?? null,
+    }
+    setFornecedores((prev) =>
+      prev.map((f) =>
+        f.id !== fornecedor.id ? f : { ...f, precos: [...f.precos.filter((p) => p.cotacao_item_id !== item.id), novoPreco] }
+      )
+    )
+    setErro('')
+    try {
+      await atualizarPrecoItemCotacao(fornecedor.id, item.id, novoValorUnitario, item.quantidade)
+    } catch (err: any) {
+      setErro('Erro ao atualizar preço: ' + (err?.message || 'desconhecido'))
+      await carregar()
+    }
+  }
+
+  // Expande/recolhe o painel de "comprado na última semana" de um item —
+  // busca sob demanda na primeira abertura de cada matéria-prima, cacheado
+  // pelo Map (não refaz a query se já tem o valor, mesmo fechando/reabrindo).
+  function alternarExpandido(item: FinanceiroCotacaoItem) {
+    setExpandidos((prev) => {
+      const novo = new Set(prev)
+      if (novo.has(item.id)) novo.delete(item.id)
+      else novo.add(item.id)
+      return novo
+    })
+    if (!ultimaSemana.has(item.materia_prima_id)) {
+      setUltimaSemana((prev) => new Map(prev).set(item.materia_prima_id, 'carregando'))
+      buscarQuantidadeCompradaUltimosDias(item.materia_prima_id, 7).then((qtd) => {
+        setUltimaSemana((prev) => new Map(prev).set(item.materia_prima_id, qtd))
+      })
+    }
+  }
+
   if (loading) {
     return (
       <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
@@ -234,9 +288,14 @@ export default function DetalheCotacaoPage() {
           title={cotacao.titulo}
           subtitle={
             <>
+              {cotacao.tipo === 'estimativa' && (
+                <span className="inline-block mr-1.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-blue-700 bg-blue-100 rounded-full px-2 py-0.5">
+                  Lista de compras
+                </span>
+              )}
               {UNIDADE_LABEL[cotacao.unidade]}
               {cotacao.data_entrega_planejada &&
-                ` · Entrega planejada: ${new Date(cotacao.data_entrega_planejada + 'T00:00:00').toLocaleDateString('pt-BR')}`}
+                ` · ${cotacao.tipo === 'estimativa' ? 'Data planejada' : 'Entrega planejada'}: ${new Date(cotacao.data_entrega_planejada + 'T00:00:00').toLocaleDateString('pt-BR')}`}
               {cotacao.status === 'fechada' && cotacao.fornecedor_vencedor?.nome && ` · Fechada com ${cotacao.fornecedor_vencedor.nome}`}
             </>
           }
@@ -433,12 +492,17 @@ export default function DetalheCotacaoPage() {
 
           {cotacao.tipo === 'estimativa' && (() => {
             const fornecedor = fornecedores[0]
-            const precoPorItem = (item: FinanceiroCotacaoItem) => {
+            const valorUnitarioDoItem = (item: FinanceiroCotacaoItem) => {
               const p = fornecedor?.precos.find((x) => x.cotacao_item_id === item.id)
-              return p?.valor_unitario != null ? p.valor_unitario * item.quantidade : null
+              return p?.valor_unitario ?? null
+            }
+            const precoPorItem = (item: FinanceiroCotacaoItem) => {
+              const vu = valorUnitarioDoItem(item)
+              return vu != null ? vu * item.quantidade : null
             }
             const totalEstimado = itens.reduce((acc, i) => acc + (precoPorItem(i) ?? 0), 0)
             const comprados = itens.filter((i) => i.comprado).length
+            const itensSemPreco = itens.filter((i) => valorUnitarioDoItem(i) == null).length
             return (
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
                 <div className="flex items-center justify-between mb-3">
@@ -456,42 +520,93 @@ export default function DetalheCotacaoPage() {
                 <div className="space-y-1">
                   {itens.map((item) => {
                     const preco = precoPorItem(item)
+                    const valorUnitario = valorUnitarioDoItem(item)
+                    const fatorConversao = item.materia_prima?.fator_conversao ?? 1
+                    const unidadeMedida = item.materia_prima?.unidade_medida ?? ''
+                    const quantidadeConvertida = item.quantidade * fatorConversao
+                    const precoPorUnidadeMedida = valorUnitario != null && fatorConversao ? valorUnitario / fatorConversao : null
+                    const expandido = expandidos.has(item.id)
+                    const semanaValor = ultimaSemana.get(item.materia_prima_id)
                     return (
-                      <div
-                        key={item.id}
-                        className={`flex items-center gap-3 py-2 border-b border-gray-50 last:border-0 ${item.comprado ? 'opacity-50' : ''}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={item.comprado}
-                          onChange={() => alternarComprado(item)}
-                          className="w-4 h-4 rounded flex-shrink-0"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm text-gray-700 truncate ${item.comprado ? 'line-through' : ''}`}>{item.materia_prima?.nome}</p>
-                          {item.observacao && <p className="text-xs text-gray-400 truncate">{item.observacao}</p>}
-                        </div>
-                        {cotacao.status === 'aberta' ? (
+                      <div key={item.id} className={`py-2 border-b border-gray-50 last:border-0 ${item.comprado ? 'opacity-50' : ''}`}>
+                        <div className="flex items-center gap-3">
                           <input
-                            key={`${item.id}-${item.quantidade}`}
-                            type="number"
-                            step="any"
-                            min={0}
-                            defaultValue={item.quantidade}
-                            onBlur={(e) => alterarQuantidade(item, Number(e.target.value))}
-                            className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right"
+                            type="checkbox"
+                            checked={item.comprado}
+                            onChange={() => alternarComprado(item)}
+                            className="w-4 h-4 rounded flex-shrink-0"
                           />
-                        ) : (
-                          <span className="text-sm text-gray-600">{item.quantidade}</span>
-                        )}
-                        <span className="text-xs text-gray-500 w-8">{item.unidade_cotacao}</span>
-                        <span className="text-sm font-medium text-gray-800 w-24 text-right">
-                          {preco != null ? formatBRL(preco) : <span className="text-xs text-gray-300">sem estimativa</span>}
-                        </span>
-                        {cotacao.status === 'aberta' && (
-                          <button onClick={() => excluirItem(item.id)} className="text-red-600 hover:text-red-700 flex-shrink-0">
-                            <Trash2 size={16} />
+                          <button
+                            type="button"
+                            onClick={() => alternarExpandido(item)}
+                            className="flex-1 min-w-0 flex items-center gap-1 text-left"
+                          >
+                            <ChevronDown size={14} className={`flex-shrink-0 text-gray-400 transition-transform ${expandido ? 'rotate-180' : ''}`} />
+                            <span className="min-w-0">
+                              <p className={`text-sm text-gray-700 truncate ${item.comprado ? 'line-through' : ''}`}>{item.materia_prima?.nome}</p>
+                              {item.observacao && <p className="text-xs text-gray-400 truncate">{item.observacao}</p>}
+                            </span>
                           </button>
+                          {cotacao.status === 'aberta' ? (
+                            <input
+                              key={`${item.id}-${item.quantidade}`}
+                              type="number"
+                              step="any"
+                              min={0}
+                              defaultValue={item.quantidade}
+                              onBlur={(e) => alterarQuantidade(item, Number(e.target.value))}
+                              className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right"
+                            />
+                          ) : (
+                            <span className="text-sm text-gray-600">{item.quantidade}</span>
+                          )}
+                          <span className="text-xs text-gray-500 w-8">{item.unidade_cotacao}</span>
+                          <span className="text-sm font-medium text-gray-800 w-24 text-right">
+                            {preco != null ? formatBRL(preco) : <span className="text-xs text-amber-600">sem estimativa</span>}
+                          </span>
+                          {cotacao.status === 'aberta' && (
+                            <button onClick={() => excluirItem(item.id)} className="text-red-600 hover:text-red-700 flex-shrink-0">
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 pl-7 text-xs text-gray-500">
+                          <div className="flex items-center gap-1">
+                            <span>R$</span>
+                            {cotacao.status === 'aberta' ? (
+                              <input
+                                key={`${item.id}-preco-${valorUnitario ?? ''}`}
+                                type="number"
+                                step="any"
+                                min={0}
+                                defaultValue={valorUnitario ?? ''}
+                                placeholder="—"
+                                onBlur={(e) => alterarPrecoUnitario(item, Number(e.target.value))}
+                                className="w-16 border border-gray-300 rounded-lg px-1.5 py-1 text-right"
+                              />
+                            ) : (
+                              <span>{valorUnitario != null ? valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '—'}</span>
+                            )}
+                            <span>/{item.unidade_cotacao}</span>
+                          </div>
+                          {unidadeMedida && fatorConversao !== 1 && (
+                            <span>
+                              = {formatarQuantidade(quantidadeConvertida, unidadeMedida)}
+                              {precoPorUnidadeMedida != null && ` · ${formatBRL(precoPorUnidadeMedida)}/${unidadeMedida}`}
+                            </span>
+                          )}
+                        </div>
+
+                        {expandido && (
+                          <div className="mt-1.5 pl-7 text-xs text-gray-500">
+                            Comprado nos últimos 7 dias:{' '}
+                            {semanaValor === 'carregando' || semanaValor == null ? (
+                              'Calculando...'
+                            ) : (
+                              <span className="font-medium text-gray-700">{formatarQuantidade(semanaValor, unidadeMedida || item.unidade_cotacao)}</span>
+                            )}
+                          </div>
                         )}
                       </div>
                     )
@@ -502,13 +617,20 @@ export default function DetalheCotacaoPage() {
                   <p className="text-lg font-bold text-gray-800">{formatBRL(totalEstimado)}</p>
                 </div>
                 {cotacao.status === 'aberta' && fornecedor && (
-                  <button
-                    onClick={() => confirmarFechamentoEstimativa(fornecedor.parte_id)}
-                    disabled={fechando}
-                    className="w-full bg-green-600 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2 mt-4"
-                  >
-                    <CheckCircle size={16} /> {fechando ? 'Fechando...' : 'Fechar e lançar nota'}
-                  </button>
+                  <>
+                    {itensSemPreco > 0 && (
+                      <p className="text-xs text-amber-600 flex items-center gap-1 mt-3">
+                        <AlertCircle size={12} /> {itensSemPreco} {itensSemPreco === 1 ? 'item sem preço não vai' : 'itens sem preço não vão'} entrar na nota automaticamente.
+                      </p>
+                    )}
+                    <button
+                      onClick={() => confirmarFechamentoEstimativa(fornecedor.parte_id)}
+                      disabled={fechando}
+                      className="w-full bg-green-600 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2 mt-3"
+                    >
+                      <CheckCircle size={16} /> {fechando ? 'Fechando...' : 'Fechar e lançar nota'}
+                    </button>
+                  </>
                 )}
               </div>
             )

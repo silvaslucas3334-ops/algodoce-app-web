@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { hojeISO, somarDias } from './financeiro-utils'
 
 export interface CompraItemRelatorio {
   id: string
@@ -98,4 +99,19 @@ export function resumirComprasRelatorio(itens: CompraItemRelatorio[], materiaPri
     valorTotal,
     numeroCompras: itens.length,
   }
+}
+
+/**
+ * Quanto de uma matéria-prima foi comprado nos últimos N dias, já somado em
+ * unidade_medida (unidade da ficha técnica) — reaproveita buscarComprasRelatorio
+ * filtrado por item e período. Usada no painel "comprado na última semana" da
+ * Lista de Compras (cotação tipo 'estimativa').
+ */
+export async function buscarQuantidadeCompradaUltimosDias(materiaPrimaId: string, dias: number): Promise<number> {
+  const itens = await buscarComprasRelatorio({
+    dataInicio: somarDias(hojeISO(), -dias),
+    dataFim: hojeISO(),
+    materiaPrimaId,
+  })
+  return itens.reduce((s, i) => s + i.quantidadeConvertida, 0)
 }

@@ -75,6 +75,32 @@ export async function responderCotacaoFornecedor(
   if (error) throw new Error(error.message)
 }
 
+/**
+ * Atualiza o preço (por unidade de compra) de UM item já vinculado a um
+ * fornecedor — reaproveita a mesma RPC de responderCotacaoFornecedor, só
+ * com um array de 1 elemento. valor_total nunca é digitado, sempre
+ * calculado aqui (mesmo princípio aplicado em SelecionarMateriaPrimaModal.tsx:
+ * o total é sempre quantidade × preço unitário, nunca um campo à parte).
+ * valorUnitario <= 0 grava como indisponível, mesma regra de sempre.
+ */
+export async function atualizarPrecoItemCotacao(
+  cotacaoFornecedorId: string,
+  cotacaoItemId: string,
+  valorUnitario: number,
+  quantidade: number
+): Promise<void> {
+  const disponivel = valorUnitario > 0
+  await responderCotacaoFornecedor(cotacaoFornecedorId, [
+    {
+      cotacao_item_id: cotacaoItemId,
+      valor_unitario: disponivel ? valorUnitario : null,
+      valor_total: disponivel ? Number((valorUnitario * quantidade).toFixed(2)) : null,
+      disponivel,
+      fator_conversao_fornecedor: null,
+    },
+  ])
+}
+
 export async function fecharCotacao(cotacaoId: string, fornecedorVencedorId: string): Promise<void> {
   const { error } = await supabase
     .from('financeiro_cotacoes')
