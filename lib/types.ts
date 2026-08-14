@@ -229,6 +229,16 @@ export interface FinanceiroCentroCusto {
   created_at: string
 }
 
+// Seção da cascata do DRE reestruturado — distinto de grupo_dre (texto
+// livre, usado só pra agrupar exibição do Plano de Contas/Orçamento).
+export type LinhaDre =
+  | 'deducao_vendas'
+  | 'cmv'
+  | 'mao_obra_encargos'
+  | 'despesas_operacionais'
+  | 'resultado_financeiro'
+  | 'distribuicao_lucros'
+
 export interface FinanceiroConta {
   id: string
   codigo: string
@@ -236,6 +246,7 @@ export interface FinanceiroConta {
   centro_custo_id: string
   centro_custo?: FinanceiroCentroCusto
   grupo_dre: string
+  linha_dre?: LinhaDre | null // null = conta ainda não classificada na cascata do DRE
   aplicavel_a: 'compras_insumos' | 'despesas_gerais' | 'ambos'
   afeta_dre: boolean // false = conta de reserva (aplicação financeira, ativo fixo etc.) — aportes nela não entram no DRE
   ativo: boolean

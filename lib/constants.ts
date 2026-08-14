@@ -94,6 +94,25 @@ export const CONDICAO_PAGAMENTO_LABEL: Record<string, string> = {
   a_prazo: 'A prazo',
 }
 
+// Cascata do DRE reestruturado (ver lib/financeiro-dre.ts) — ordem de
+// exibição da tela segue esta lista, de cima pra baixo.
+export const LINHA_DRE_LABEL: Record<string, string> = {
+  deducao_vendas: 'Deduções de Vendas',
+  cmv: 'CMV (Custo das Mercadorias Vendidas)',
+  mao_obra_encargos: 'Mão de Obra e Encargos',
+  despesas_operacionais: 'Despesas Operacionais',
+  resultado_financeiro: 'Resultado Financeiro',
+  distribuicao_lucros: 'Distribuição de Lucros',
+}
+export const LINHA_DRE_ORDEM: string[] = [
+  'deducao_vendas',
+  'cmv',
+  'mao_obra_encargos',
+  'despesas_operacionais',
+  'resultado_financeiro',
+  'distribuicao_lucros',
+]
+
 export const TIPO_LANCAMENTO_LABEL: Record<string, string> = {
   despesa: 'Despesa',
   compra_insumos: 'Nota de Insumos',

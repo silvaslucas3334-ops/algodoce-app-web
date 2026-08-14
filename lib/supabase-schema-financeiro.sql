@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS financeiro_contas (
   -- etc.) — aportes lançados nela não entram no DRE como despesa, só saem
   -- do caixa disponível (ver lib/migrations/financeiro-aplicacao-reserva-dre.sql).
   afeta_dre BOOLEAN NOT NULL DEFAULT true,
+  -- seção da cascata do DRE reestruturado (ver lib/migrations/financeiro-dre-cascata.sql)
+  -- — nullable de propósito: conta sem classificação cai num balde "Não
+  -- classificado" na tela em vez de sumir silenciosamente. Distinto de
+  -- grupo_dre (texto livre, usado só pra agrupar exibição).
+  linha_dre TEXT CHECK (linha_dre IS NULL OR linha_dre IN
+    ('deducao_vendas', 'cmv', 'mao_obra_encargos', 'despesas_operacionais', 'resultado_financeiro', 'distribuicao_lucros')),
   ativo BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -102,6 +108,13 @@ INSERT INTO financeiro_contas (codigo, nome, centro_custo_id, grupo_dre, aplicav
 ON CONFLICT (codigo) DO NOTHING;
 
 UPDATE financeiro_contas SET afeta_dre = false WHERE codigo = '3002';
+
+UPDATE financeiro_contas SET linha_dre = 'cmv'                   WHERE codigo IN ('1001', '1002', '1004');
+UPDATE financeiro_contas SET linha_dre = 'mao_obra_encargos'     WHERE codigo IN ('1003', '1005');
+UPDATE financeiro_contas SET linha_dre = 'despesas_operacionais' WHERE codigo IN ('1006', '1007', '2002', '2006', '3006');
+UPDATE financeiro_contas SET linha_dre = 'deducao_vendas'        WHERE codigo IN ('2001', '2003', '2004', '2005');
+UPDATE financeiro_contas SET linha_dre = 'resultado_financeiro'  WHERE codigo IN ('3001', '3002', '3003', '3005');
+UPDATE financeiro_contas SET linha_dre = 'distribuicao_lucros'   WHERE codigo = '3004';
 
 -- ============================================================
 -- 3. financeiro_materias_primas (cadastro controlado, sem texto livre)

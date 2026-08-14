@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import DreDetalheModal from '@/components/DreDetalheModal'
 import PageHeader from '@/components/PageHeader'
-import { buscarDre, DreResultado, VisaoDre } from '@/lib/financeiro-dre'
+import { buscarDre, DreResultado, VisaoDre, DreSecao, DreContaValor } from '@/lib/financeiro-dre'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { ChevronLeft, ChevronRight, Loader, AlertCircle } from 'lucide-react'
@@ -22,9 +22,81 @@ const VISAO_LABEL: Record<VisaoDre, string> = {
 
 type ModalDetalhe =
   | { tipo: 'receita'; titulo: string; categoria: CategoriaReceita }
-  | { tipo: 'insumo'; titulo: string; grupoDre: string }
-  | { tipo: 'despesa'; titulo: string; grupoDre: string }
+  | { tipo: 'insumo' | 'despesa'; titulo: string; contaId: string }
   | { tipo: 'aporte'; titulo: string }
+
+// CMV é a única seção cujas contas vêm de itens de compra (fornecedor);
+// todo o resto vem de lançamentos de despesa (beneficiário) — decide qual
+// rótulo o modal de detalhe usa, sem precisar guardar isso por conta.
+function tipoOrigem(linha: DreSecao['linha']): 'insumo' | 'despesa' {
+  return linha === 'cmv' ? 'insumo' : 'despesa'
+}
+
+function SecaoCascata({
+  titulo,
+  secao,
+  onAbrirConta,
+  notaExtra,
+}: {
+  titulo: string
+  secao: DreSecao
+  onAbrirConta: (c: DreContaValor) => void
+  notaExtra?: React.ReactNode
+}) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-gray-700">
+          {titulo} — {formatBRL(secao.total)}
+        </p>
+        {secao.percentual != null && (
+          <span className="text-xs text-gray-400 whitespace-nowrap">{secao.percentual.toFixed(1)}%</span>
+        )}
+      </div>
+      {secao.contas.length === 0 ? (
+        <p className="text-sm text-gray-400 px-4 py-4">Nenhuma conta classificada nesta linha.</p>
+      ) : (
+        <div className="divide-y divide-gray-100">
+          {secao.contas.map((c) => {
+            const clicavel = !c.contaId.startsWith('sintetico-') && c.valor !== 0
+            const conteudo = (
+              <>
+                <span className="text-gray-600">
+                  {c.codigo !== '—' ? `${c.codigo} — ${c.nome}` : c.nome}
+                  {c.notaZerado && <span className="block text-xs text-amber-600 mt-0.5">{c.notaZerado}</span>}
+                </span>
+                <span className={c.valor > 0 ? 'font-semibold text-gray-800' : 'text-gray-400'}>{formatBRL(c.valor)}</span>
+              </>
+            )
+            return clicavel ? (
+              <button
+                key={c.contaId}
+                onClick={() => onAbrirConta(c)}
+                className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+              >
+                {conteudo}
+              </button>
+            ) : (
+              <div key={c.contaId} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-left">
+                {conteudo}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {notaExtra && <div className="px-4 py-2.5 border-t border-gray-100 text-xs text-gray-400">{notaExtra}</div>}
+    </div>
+  )
+}
+
+function SubtotalCascata({ label, valor }: { label: string; valor: number }) {
+  return (
+    <div className="bg-pink-50 border border-pink-200 rounded-lg px-4 py-2.5 flex items-center justify-between mb-3">
+      <p className="text-sm font-bold text-pink-900">{label}</p>
+      <p className="text-sm font-bold text-pink-900">{formatBRL(valor)}</p>
+    </div>
+  )
+}
 
 export default function DrePage() {
   const hoje = new Date()
@@ -61,6 +133,10 @@ export default function DrePage() {
   }
   function proximoMes() {
     if (mes === 12) { setMes(1); setAno(ano + 1) } else { setMes(mes + 1) }
+  }
+
+  function abrirConta(secao: DreSecao, c: DreContaValor) {
+    setModalDetalhe({ tipo: tipoOrigem(secao.linha), titulo: c.codigo !== '—' ? `${c.codigo} — ${c.nome}` : c.nome, contaId: c.contaId })
   }
 
   return (
@@ -102,7 +178,7 @@ export default function DrePage() {
           ) : dados ? (
             <>
               <div className="bg-white rounded-xl p-4 border border-gray-100 mb-4">
-                <p className="text-xs text-gray-500 uppercase font-semibold">Resultado do mês</p>
+                <p className="text-xs text-gray-500 uppercase font-semibold">Resultado Líquido do Período</p>
                 <p className={`text-2xl font-bold mt-1 ${dados.resultado >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {formatBRL(dados.resultado)}
                 </p>
@@ -111,8 +187,8 @@ export default function DrePage() {
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 flex items-start gap-2 text-xs text-blue-800">
                 <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
                 <span>
-                  "Custo de Insumos Comprados" é o valor das notas de compra no mês de competência — não é CMV real
-                  (não desconta estoque nem considera o que foi de fato consumido/vendido).
+                  "CMV" é o valor das notas de compra no mês de competência — não é CMV real (não desconta estoque nem
+                  considera o que foi de fato consumido/vendido).
                 </span>
               </div>
 
@@ -127,9 +203,20 @@ export default function DrePage() {
                 </span>
               </div>
 
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-4">
+              {dados.secaoNaoClassificada.total !== 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6 flex items-start gap-2 text-xs text-red-700">
+                  <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                  <span>
+                    Há {formatBRL(dados.secaoNaoClassificada.total)} em contas sem linha do DRE definida (rode a migration
+                    de classificação do plano de contas). Esse valor está incluído no Resultado Líquido do Período, mas
+                    fora da cascata abaixo — veja "Não classificado".
+                  </span>
+                </div>
+              )}
+
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3">
                 <p className="text-sm font-semibold text-gray-700 px-4 py-3 border-b border-gray-100">
-                  Receita Bruta — {formatBRL(dados.totalReceitaBruta)}
+                  Receita Bruta de Vendas — {formatBRL(dados.totalReceitaBruta)}
                 </p>
                 <div className="divide-y divide-gray-100">
                   {dados.receitaBrutaPorCategoria.map((c) => (
@@ -146,7 +233,7 @@ export default function DrePage() {
               </div>
 
               {(dados.totalResgatesAplicacao > 0 || dados.totalAportesReserva > 0) && (
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-4 divide-y divide-gray-100">
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3 divide-y divide-gray-100">
                   {dados.totalAportesReserva > 0 && (
                     <button
                       onClick={() => setModalDetalhe({ tipo: 'aporte', titulo: 'Aportes em Reserva' })}
@@ -174,68 +261,32 @@ export default function DrePage() {
                 </div>
               )}
 
-              {dados.taxasDescontadas.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-4">
-                  <p className="text-sm font-semibold text-gray-700 px-4 py-3 border-b border-gray-100">
-                    (−) Taxas descontadas no repasse — {formatBRL(dados.totalTaxasDescontadas)}
-                  </p>
-                  <div className="divide-y divide-gray-100">
-                    {dados.taxasDescontadas.map((t) => (
-                      <div key={t.label} className="flex items-center justify-between px-4 py-2.5 text-sm">
-                        <span className="text-gray-600">{t.label}</span>
-                        <span className="font-semibold text-gray-800">{formatBRL(t.valor)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-xs text-gray-400 px-4 py-2 border-t border-gray-100">
-                    Nunca sai como pagamento separado — já vem descontada do que caiu no banco. Não aparece no Fluxo de Caixa.
-                  </p>
-                </div>
+              <SecaoCascata titulo="(−) Deduções de Vendas" secao={dados.secaoDeducaoVendas} onAbrirConta={(c) => abrirConta(dados.secaoDeducaoVendas, c)} />
+              <SubtotalCascata label="= Receita Líquida de Vendas" valor={dados.totalReceitaLiquida} />
+
+              <SecaoCascata titulo="(−) CMV" secao={dados.secaoCmv} onAbrirConta={(c) => abrirConta(dados.secaoCmv, c)} />
+              <SecaoCascata titulo="(−) Mão de Obra e Encargos" secao={dados.secaoMaoObra} onAbrirConta={(c) => abrirConta(dados.secaoMaoObra, c)} />
+              <SubtotalCascata label="= Lucro Bruto" valor={dados.totalLucroBruto} />
+
+              <SecaoCascata titulo="(−) Despesas Operacionais" secao={dados.secaoDespesasOperacionais} onAbrirConta={(c) => abrirConta(dados.secaoDespesasOperacionais, c)} />
+              {dados.secaoNaoClassificada.total !== 0 && (
+                <SecaoCascata
+                  titulo="Não classificado (revisar plano de contas)"
+                  secao={dados.secaoNaoClassificada}
+                  onAbrirConta={(c) => abrirConta(dados.secaoNaoClassificada, c)}
+                />
               )}
+              <SubtotalCascata label="= Resultado Operacional" valor={dados.totalResultadoOperacional} />
 
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-4">
-                <p className="text-sm font-semibold text-gray-700 px-4 py-3 border-b border-gray-100">
-                  (−) Custo de Insumos Comprados — {formatBRL(dados.totalCustoInsumos)}
-                </p>
-                {dados.custoInsumosPorGrupoDre.length === 0 ? (
-                  <p className="text-sm text-gray-400 px-4 py-4">Nenhuma compra de insumo neste período.</p>
-                ) : (
-                  <div className="divide-y divide-gray-100">
-                    {dados.custoInsumosPorGrupoDre.map((g) => (
-                      <button
-                        key={g.grupoDre}
-                        onClick={() => setModalDetalhe({ tipo: 'insumo', titulo: g.grupoDre, grupoDre: g.grupoDre })}
-                        className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
-                      >
-                        <span className="text-gray-600">{g.grupoDre}</span>
-                        <span className="font-semibold text-gray-800">{formatBRL(g.valor)}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <SecaoCascata
+                titulo="(−) Resultado Financeiro"
+                secao={dados.secaoResultadoFinanceiro}
+                onAbrirConta={(c) => abrirConta(dados.secaoResultadoFinanceiro, c)}
+                notaExtra="Empréstimos/Amortizações refletem o valor lançado nessas contas — se incluírem a parcela de principal (não só juros), o resultado fica subestimado; confira como esses lançamentos são registrados."
+              />
+              <SubtotalCascata label="= Lucro Líquido Antes da Distribuição" valor={dados.totalLucroLiquidoAntesDistribuicao} />
 
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                <p className="text-sm font-semibold text-gray-700 px-4 py-3 border-b border-gray-100">
-                  (−) Despesas por grupo — {formatBRL(dados.totalDespesas)}
-                </p>
-                {dados.despesasPorGrupoDre.length === 0 ? (
-                  <p className="text-sm text-gray-400 px-4 py-4">Nenhuma despesa neste período.</p>
-                ) : (
-                  <div className="divide-y divide-gray-100">
-                    {dados.despesasPorGrupoDre.map((g) => (
-                      <button
-                        key={g.grupoDre}
-                        onClick={() => setModalDetalhe({ tipo: 'despesa', titulo: g.grupoDre, grupoDre: g.grupoDre })}
-                        className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
-                      >
-                        <span className="text-gray-600">{g.grupoDre}</span>
-                        <span className="font-semibold text-gray-800">{formatBRL(g.valor)}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <SecaoCascata titulo="(−) Distribuição de Lucros" secao={dados.secaoDistribuicaoLucros} onAbrirConta={(c) => abrirConta(dados.secaoDistribuicaoLucros, c)} />
             </>
           ) : null}
         </div>
@@ -250,13 +301,11 @@ export default function DrePage() {
                 : undefined
             }
             linhas={
-              modalDetalhe.tipo === 'insumo'
-                ? dados.custoInsumosDetalhados.filter((i) => i.grupoDre === modalDetalhe.grupoDre)
-                : modalDetalhe.tipo === 'despesa'
-                  ? dados.despesasDetalhadas.filter((d) => d.grupoDre === modalDetalhe.grupoDre)
-                  : modalDetalhe.tipo === 'aporte'
-                    ? dados.aportesReservaDetalhados
-                    : undefined
+              modalDetalhe.tipo === 'insumo' || modalDetalhe.tipo === 'despesa'
+                ? dados.linhasDetalhadas.filter((l) => l.contaId === modalDetalhe.contaId)
+                : modalDetalhe.tipo === 'aporte'
+                  ? dados.aportesReservaDetalhados
+                  : undefined
             }
             onClose={() => setModalDetalhe(null)}
           />
