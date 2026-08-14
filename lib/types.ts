@@ -305,6 +305,21 @@ export interface FinanceiroProdutoFinal {
   created_at: string
   updated_at: string
   itens?: FinanceiroProdutoFinalItem[]
+  preco_venda?: number | null // preço praticado, manual — não vem do PDV ainda
+  margem_lucro_desejada_pct?: number | null // override do padrão global (financeiro_config_precificacao.margem_lucro_padrao_pct); null = usa o padrão
+}
+
+// Config global de precificação (linha única) — despesas variáveis e
+// custos fixos rateados são realidade do negócio como um todo, não fazem
+// sentido por produto. Ver lib/financeiro-precificacao.ts.
+export interface FinanceiroConfigPrecificacao {
+  id: string
+  taxa_cartao_pct: number
+  comissao_marketplace_pct: number
+  imposto_venda_pct: number
+  custos_fixos_pct: number
+  margem_lucro_padrao_pct: number
+  updated_at: string
 }
 
 export interface FinanceiroProdutoFinalItem {

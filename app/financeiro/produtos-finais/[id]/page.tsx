@@ -8,7 +8,7 @@ import SelecionarInsumoReceitaModal, { ItemReceitaForm } from '@/components/Sele
 import { useRouter, useParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { Loader, Plus, Trash2, CheckCircle } from 'lucide-react'
-import { FinanceiroProdutoFinal, FinanceiroMateriaPrima, FinanceiroPrePreparo } from '@/lib/types'
+import { FinanceiroProdutoFinal, FinanceiroMateriaPrima, FinanceiroPrePreparo, FinanceiroConfigPrecificacao } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { STATUS_FICHA_TECNICA_LABEL, STATUS_FICHA_TECNICA_COLOR } from '@/lib/constants'
 import {
@@ -18,6 +18,7 @@ import {
   salvarItensProdutoFinal,
   CustoAtualMateriaPrima,
 } from '@/lib/financeiro-cmv'
+import { buscarConfigPrecificacao, calcularIndiceMarkup, calcularPrecoSugerido, calcularMargemContribuicao } from '@/lib/financeiro-precificacao'
 import CustoAtualBadges from '@/components/CustoAtualBadge'
 
 export default function DetalheProdutoFinalPage() {
@@ -32,6 +33,7 @@ export default function DetalheProdutoFinalPage() {
   const [prePreparosCache, setPrePreparosCache] = useState<Map<string, FinanceiroPrePreparo>>(new Map())
   const [itens, setItens] = useState<ItemReceitaForm[]>([])
   const [custosMP, setCustosMP] = useState<Map<string, CustoAtualMateriaPrima>>(new Map())
+  const [configPrecificacao, setConfigPrecificacao] = useState<FinanceiroConfigPrecificacao | null>(null)
   const [modalAberto, setModalAberto] = useState(false)
 
   const [loading, setLoading] = useState(true)
@@ -96,6 +98,14 @@ export default function DetalheProdutoFinalPage() {
     const mapaCustos = idsMateriaPrima.length > 0 ? await buscarCustosAtuaisMateriasPrimas(idsMateriaPrima) : new Map()
     setCustosMP(mapaCustos)
     setPrePreparosCache(new Map((prePreparosCompletos || []).map((pp: any) => [pp.id, pp])))
+
+    // Card de Precificação é um extra — se a migration ainda não rodou
+    // (tabela não existe), o resto da tela continua funcionando normalmente.
+    try {
+      setConfigPrecificacao(await buscarConfigPrecificacao())
+    } catch (err) {
+      console.error('Config de precificação indisponível (migration pendente?):', err)
+    }
     setLoading(false)
   }
 
@@ -122,6 +132,22 @@ export default function DetalheProdutoFinalPage() {
   const custoCompleto = itensSemCusto.length === 0
   const rendimentoPorcoes = produtoFinal?.rendimento_porcoes || 1
   const podeEditar = usuario?.role === 'admin' || (usuario?.role === 'cozinha' && produtoFinal?.status === 'pendente_revisao')
+  // Decisão de preço é diferente de editar receita — sempre admin, mesmo
+  // com a ficha técnica já aprovada.
+  const podeEditarPreco = usuario?.role === 'admin'
+
+  const custoPorPorcao = custoCompleto && itens.length > 0 ? custoTotalConhecido / rendimentoPorcoes : null
+  const dvPct = configPrecificacao
+    ? configPrecificacao.taxa_cartao_pct + configPrecificacao.comissao_marketplace_pct + configPrecificacao.imposto_venda_pct
+    : null
+  const mlPct = produtoFinal?.margem_lucro_desejada_pct ?? configPrecificacao?.margem_lucro_padrao_pct ?? null
+  const indiceMarkup =
+    configPrecificacao && dvPct != null && mlPct != null ? calcularIndiceMarkup(configPrecificacao.custos_fixos_pct, dvPct, mlPct) : null
+  const precoSugerido = indiceMarkup != null && custoPorPorcao != null ? calcularPrecoSugerido(custoPorPorcao, indiceMarkup) : null
+  const margemPraticada =
+    produtoFinal?.preco_venda != null && custoPorPorcao != null && dvPct != null
+      ? calcularMargemContribuicao(produtoFinal.preco_venda, custoPorPorcao, dvPct)
+      : null
 
   async function aprovar() {
     if (!produtoFinal) return
@@ -155,6 +181,8 @@ export default function DetalheProdutoFinalPage() {
           rendimento_porcoes: produtoFinal.rendimento_porcoes,
           descricao: produtoFinal.descricao || null,
           ativo: produtoFinal.ativo,
+          preco_venda: produtoFinal.preco_venda ?? null,
+          margem_lucro_desejada_pct: produtoFinal.margem_lucro_desejada_pct ?? null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', produtoFinalId)
@@ -363,6 +391,107 @@ export default function DetalheProdutoFinalPage() {
                   </p>
                 )}
               </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
+            <h2 className="font-semibold text-gray-800">Precificação</h2>
+
+            {!configPrecificacao ? (
+              <p className="text-xs text-gray-400">
+                Configuração de precificação ainda não disponível.{' '}
+                {usuario?.role === 'admin' && (
+                  <button onClick={() => router.push('/financeiro/produtos-finais/configuracao-precificacao')} className="text-pink-700 underline">
+                    Configurar
+                  </button>
+                )}
+              </p>
+            ) : custoPorPorcao == null ? (
+              <p className="text-xs text-gray-400">Precisa de custo completo (todos os itens) pra calcular preço e margem.</p>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Margem de lucro desejada (%) <span className="text-gray-400 font-normal">— opcional</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min={0}
+                    max={100}
+                    disabled={!podeEditarPreco}
+                    value={produtoFinal.margem_lucro_desejada_pct ?? ''}
+                    onChange={(e) =>
+                      setProdutoFinal({
+                        ...produtoFinal,
+                        margem_lucro_desejada_pct: e.target.value === '' ? null : Number(e.target.value),
+                      })
+                    }
+                    placeholder={`Padrão: ${configPrecificacao.margem_lucro_padrao_pct}%`}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                  />
+                </div>
+
+                <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+                  {indiceMarkup == null ? (
+                    <p className="text-xs text-red-600">
+                      As % configuradas (custos fixos + despesas variáveis + margem) somam 100% ou mais — nenhum preço é
+                      possível assim. Ajuste a margem ou a configuração global.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600">Índice de markup</span>
+                        <span className="font-medium text-gray-800">{indiceMarkup.toFixed(3)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="font-semibold text-gray-700">Preço sugerido</span>
+                        <span className="font-bold text-gray-900">{formatBRL(precoSugerido!)}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Preço de venda praticado (R$) <span className="text-gray-400 font-normal">— opcional</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min={0}
+                    disabled={!podeEditarPreco}
+                    value={produtoFinal.preco_venda ?? ''}
+                    onChange={(e) =>
+                      setProdutoFinal({ ...produtoFinal, preco_venda: e.target.value === '' ? null : Number(e.target.value) })
+                    }
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                  />
+                </div>
+
+                {margemPraticada && (
+                  <div
+                    className={`rounded-lg p-3 border ${
+                      margemPraticada.percentual >= 30
+                        ? 'bg-green-50 border-green-200'
+                        : margemPraticada.percentual >= 15
+                        ? 'bg-amber-50 border-amber-200'
+                        : 'bg-red-50 border-red-200'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="font-semibold text-gray-700">Margem de contribuição</span>
+                      <span className="font-bold text-gray-900">
+                        {formatBRL(margemPraticada.valorRS)} ({margemPraticada.percentual.toFixed(1)}%)
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      O que sobra do preço praticado depois do custo e das despesas variáveis — antes de cobrir custos fixos e
+                      gerar lucro.
+                    </p>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

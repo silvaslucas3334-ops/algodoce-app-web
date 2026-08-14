@@ -34,7 +34,7 @@ const GRUPO_CADASTROS: Card[] = [
   { href: '/financeiro/partes', label: 'Fornecedores/Beneficiários', desc: 'Cadastro de quem recebe pagamento', icon: Users, roles: ['admin'] },
   { href: '/financeiro/contas', label: 'Plano de Contas', desc: 'Consulta de centro de custo e conta', icon: BookOpen, roles: ['admin'] },
   { href: '/financeiro/pre-preparos', label: 'Pré-Preparados', desc: 'Massa, recheio, brownie... o que a cozinha produz e usa em outras receitas', icon: Layers, roles: ['admin', 'cozinha'] },
-  { href: '/financeiro/produtos-finais', label: 'Produtos Finais', desc: 'O que é vendido na loja — combina pré-preparados e/ou matérias-primas, com custo por porção', icon: Cake, roles: ['admin', 'cozinha'] },
+  { href: '/financeiro/produtos-finais', label: 'Produtos Finais', desc: 'O que é vendido na loja — custo por porção, preço ideal por markup e margem de contribuição', icon: Cake, roles: ['admin', 'cozinha'] },
 ]
 
 function CardGrid({ titulo, cards }: { titulo: string; cards: Card[] }) {

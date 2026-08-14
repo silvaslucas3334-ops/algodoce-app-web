@@ -1260,6 +1260,43 @@ GRANT EXECUTE ON FUNCTION financeiro_produto_final_salvar_itens TO authenticated
 SELECT tablename, rowsecurity FROM pg_tables WHERE tablename LIKE 'financeiro_pre_preparo%' OR tablename LIKE 'financeiro_produto_final%';
 
 -- ============================================================
+-- 16.1 Precificação: markup (custo -> preço ideal) + margem de
+-- contribuição (custo + preço praticado -> quanto sobra). Ver
+-- lib/financeiro-precificacao.ts. Config é uma linha só, global —
+-- despesas variáveis/custos fixos são realidade do negócio como um todo;
+-- só a margem de lucro alvo varia por produto (override em
+-- financeiro_produtos_finais, fallback pro padrão daqui).
+-- Ver lib/migrations/financeiro-precificacao.sql (mirror aqui).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS financeiro_config_precificacao (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  taxa_cartao_pct NUMERIC NOT NULL DEFAULT 0,
+  comissao_marketplace_pct NUMERIC NOT NULL DEFAULT 0,
+  imposto_venda_pct NUMERIC NOT NULL DEFAULT 0,
+  custos_fixos_pct NUMERIC NOT NULL DEFAULT 0,
+  margem_lucro_padrao_pct NUMERIC NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+INSERT INTO financeiro_config_precificacao (id)
+SELECT gen_random_uuid()
+WHERE NOT EXISTS (SELECT 1 FROM financeiro_config_precificacao);
+
+ALTER TABLE financeiro_config_precificacao ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS financeiro_config_precificacao_select ON financeiro_config_precificacao;
+CREATE POLICY financeiro_config_precificacao_select ON financeiro_config_precificacao FOR SELECT TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) IN ('admin', 'cozinha'));
+DROP POLICY IF EXISTS financeiro_config_precificacao_update ON financeiro_config_precificacao;
+CREATE POLICY financeiro_config_precificacao_update ON financeiro_config_precificacao FOR UPDATE TO authenticated
+  USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin')
+  WITH CHECK ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');
+
+ALTER TABLE financeiro_produtos_finais
+  ADD COLUMN IF NOT EXISTS preco_venda NUMERIC,
+  ADD COLUMN IF NOT EXISTS margem_lucro_desejada_pct NUMERIC;
+
+-- ============================================================
 -- 16. Orçamento do mês — meta de venda + previsão de entrada de caixa por
 -- dia da semana + saldo inicial + previsão manual de despesas, base da
 -- visão mensal em calendário do Fluxo de Caixa.

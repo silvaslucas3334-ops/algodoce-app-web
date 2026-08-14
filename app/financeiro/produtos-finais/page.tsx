@@ -5,15 +5,19 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search, Settings } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
 import { FinanceiroProdutoFinal } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { STATUS_FICHA_TECNICA_LABEL, STATUS_FICHA_TECNICA_COLOR } from '@/lib/constants'
 import { buscarCustosAtuaisMateriasPrimas, calcularCustoPrePreparo, calcularCustoProdutoFinal } from '@/lib/financeiro-cmv'
+import { buscarConfigPrecificacao, calcularMargemContribuicao } from '@/lib/financeiro-precificacao'
 
 export default function ProdutosFinaisPage() {
+  const { usuario } = useAuth()
   const [produtos, setProdutos] = useState<FinanceiroProdutoFinal[]>([])
   const [custos, setCustos] = useState<Record<string, ReturnType<typeof calcularCustoProdutoFinal>>>({})
+  const [dvPct, setDvPct] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
   const [soPendentes, setSoPendentes] = useState(false)
@@ -58,6 +62,16 @@ export default function ProdutosFinaisPage() {
       mapa[p.id] = calcularCustoProdutoFinal(p, custosMP, custosPP)
     })
     setCustos(mapa)
+
+    // Selo de margem na lista é um extra — se a migration de precificação
+    // ainda não rodou (tabela não existe), a lista continua funcionando
+    // normalmente, só sem o selo.
+    try {
+      const config = await buscarConfigPrecificacao()
+      setDvPct(config.taxa_cartao_pct + config.comissao_marketplace_pct + config.imposto_venda_pct)
+    } catch (err) {
+      console.error('Config de precificação indisponível (migration pendente?):', err)
+    }
     setLoading(false)
   }
 
@@ -73,12 +87,23 @@ export default function ProdutosFinaisPage() {
           backHref="/financeiro"
           maxWidth="max-w-4xl"
           actions={
-            <Link
-              href="/financeiro/produtos-finais/nova"
-              className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800"
-            >
-              <Plus size={18} /> Novo
-            </Link>
+            <div className="flex items-center gap-2">
+              {usuario?.role === 'admin' && (
+                <Link
+                  href="/financeiro/produtos-finais/configuracao-precificacao"
+                  className="text-gray-500 hover:text-gray-700 p-2"
+                  title="Configuração de precificação"
+                >
+                  <Settings size={20} />
+                </Link>
+              )}
+              <Link
+                href="/financeiro/produtos-finais/nova"
+                className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800"
+              >
+                <Plus size={18} /> Novo
+              </Link>
+            </div>
           }
         />
 
@@ -122,6 +147,12 @@ export default function ProdutosFinaisPage() {
             <div className="space-y-2">
               {filtrados.map((p) => {
                 const custo = custos[p.id]
+                const margem =
+                  p.preco_venda != null && custo?.custoPorPorcao != null && dvPct != null
+                    ? calcularMargemContribuicao(p.preco_venda, custo.custoPorPorcao, dvPct)
+                    : null
+                const corMargem =
+                  margem == null ? '' : margem.percentual >= 30 ? 'text-green-600' : margem.percentual >= 15 ? 'text-amber-600' : 'text-red-600'
                 return (
                   <Link key={p.id} href={`/financeiro/produtos-finais/${p.id}`}>
                     <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-gray-200 cursor-pointer transition-all">
@@ -144,6 +175,12 @@ export default function ProdutosFinaisPage() {
                             </p>
                           ) : (
                             <p className="text-xs text-amber-600">Custo incompleto</p>
+                          )}
+                          {p.preco_venda != null && (
+                            <p className="text-xs text-gray-500">
+                              Vende {formatBRL(p.preco_venda)}
+                              {margem != null && <span className={`ml-1 font-semibold ${corMargem}`}>· MC {margem.percentual.toFixed(0)}%</span>}
+                            </p>
                           )}
                           {!p.ativo && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Inativo</span>}
                           {p.status === 'pendente_revisao' && (
