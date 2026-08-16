@@ -5,13 +5,14 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { Plus, Search, Settings } from 'lucide-react'
+import { Plus, Search, Settings, Download } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { FinanceiroProdutoFinal } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { STATUS_FICHA_TECNICA_LABEL, STATUS_FICHA_TECNICA_COLOR } from '@/lib/constants'
 import { buscarCustosAtuaisMateriasPrimas, calcularCustoPrePreparo, calcularCustoProdutoFinal } from '@/lib/financeiro-cmv'
 import { buscarConfigPrecificacao, calcularMargemContribuicao } from '@/lib/financeiro-precificacao'
+import { exportarProdutosFinaisXlsx } from '@/lib/financeiro-export'
 
 export default function ProdutosFinaisPage() {
   const { usuario } = useAuth()
@@ -104,6 +105,14 @@ export default function ProdutosFinaisPage() {
           maxWidth="max-w-4xl"
           actions={
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => exportarProdutosFinaisXlsx(produtos, custos, dvPct)}
+                disabled={loading || produtos.length === 0}
+                className="text-gray-500 hover:text-gray-700 p-2 disabled:opacity-40"
+                title="Exportar para Excel"
+              >
+                <Download size={20} />
+              </button>
               {usuario?.role === 'admin' && (
                 <Link
                   href="/financeiro/produtos-finais/configuracao-precificacao"

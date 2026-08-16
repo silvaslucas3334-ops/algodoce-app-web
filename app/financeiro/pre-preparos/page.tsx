@@ -5,11 +5,12 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search, Download } from 'lucide-react'
 import { FinanceiroPrePreparo } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { STATUS_FICHA_TECNICA_LABEL, STATUS_FICHA_TECNICA_COLOR } from '@/lib/constants'
 import { buscarCustosAtuaisMateriasPrimas, calcularCustoPrePreparo } from '@/lib/financeiro-cmv'
+import { exportarPrePreparosXlsx } from '@/lib/financeiro-export'
 
 export default function PrePreparosPage() {
   const [prePreparos, setPrePreparos] = useState<FinanceiroPrePreparo[]>([])
@@ -57,12 +58,22 @@ export default function PrePreparosPage() {
           backHref="/financeiro"
           maxWidth="max-w-4xl"
           actions={
-            <Link
-              href="/financeiro/pre-preparos/nova"
-              className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800"
-            >
-              <Plus size={18} /> Novo
-            </Link>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => exportarPrePreparosXlsx(prePreparos, custos)}
+                disabled={loading || prePreparos.length === 0}
+                className="text-gray-500 hover:text-gray-700 p-2 disabled:opacity-40"
+                title="Exportar para Excel"
+              >
+                <Download size={20} />
+              </button>
+              <Link
+                href="/financeiro/pre-preparos/nova"
+                className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800"
+              >
+                <Plus size={18} /> Novo
+              </Link>
+            </div>
           }
         />
 
