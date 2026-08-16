@@ -253,6 +253,12 @@ CREATE TABLE IF NOT EXISTS financeiro_lancamentos (
   -- "parcialmente paga" é estado derivado, não persistido. Ver
   -- lib/migrations/financeiro-conciliacao-parcial.sql.
   valor_pago_conciliado NUMERIC NOT NULL DEFAULT 0,
+  -- false = "não-caixa": entra no DRE por competência, mas nunca gera
+  -- evento de contas a pagar/fluxo de caixa — o dinheiro já saiu antes de
+  -- chegar no banco (ex: Taxa de Cartão/Comissão de Delivery, contas
+  -- 2004/2003, lançadas manualmente pelo valor global do mês). Ver
+  -- lib/migrations/financeiro-lancamento-nao-caixa.sql.
+  afeta_fluxo_caixa BOOLEAN NOT NULL DEFAULT true,
   observacoes TEXT,
   -- Recado rápido entre os admins que mexem no financeiro, pra coordenar
   -- prioridade de pagamento (não é o workflow de pagamento — isso é

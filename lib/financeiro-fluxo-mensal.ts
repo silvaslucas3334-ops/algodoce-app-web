@@ -458,6 +458,7 @@ export async function buscarDespesasFixasFuturas(
       .in('unidade', unidadesDespesa)
       .eq('status', 'aberto')
       .eq('tipo', 'despesa')
+      .eq('afeta_fluxo_caixa', true)
       .gte('data_vencimento', hoje)
       .lte('data_vencimento', fim),
     supabase
@@ -564,6 +565,7 @@ export async function buscarLancamentosDoDiaSaida(
       .in('unidade', unidadesDespesa)
       .eq('tipo', tipo)
       .eq(coluna, grupoId)
+      .eq('afeta_fluxo_caixa', true)
   }
 
   const [{ data: pagos, error: erroPagos }, { data: parciais, error: erroParciais }, { data: previstos, error: erroPrevistos }] =
@@ -771,6 +773,7 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
       .select('id, valor_total, tipo, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_pagamento')
       .in('unidade', unidadesDespesa)
       .eq('status', 'pago')
+      .eq('afeta_fluxo_caixa', true)
       .gte('data_pagamento', inicio)
       .lte('data_pagamento', fim),
     // Ainda 'aberto' (não quitou), mas já com pagamento(s) parcial(is)
@@ -783,6 +786,7 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
       .select('id, tipo, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome)')
       .in('unidade', unidadesDespesa)
       .eq('status', 'aberto')
+      .eq('afeta_fluxo_caixa', true)
       .gt('valor_pago_conciliado', 0),
     supabase
       .from('financeiro_lancamentos')
@@ -790,6 +794,7 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
       .in('unidade', unidadesDespesa)
       .eq('status', 'aberto')
       .eq('tipo', 'compra_insumos')
+      .eq('afeta_fluxo_caixa', true)
       .gte('data_vencimento', hoje)
       .lte('data_vencimento', fim),
     buscarDespesasFixasFuturas(unidade, ano, mes),
@@ -1099,6 +1104,7 @@ export async function buscarAtrasados(unidade: VisaoFluxoMensal): Promise<FluxoM
     .select('id, valor_total, valor_pago_conciliado, tipo, data_vencimento, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome)')
     .in('unidade', unidades)
     .eq('status', 'aberto')
+    .eq('afeta_fluxo_caixa', true)
     .lt('data_vencimento', hoje)
     .order('data_vencimento')
   if (error) throw new Error(error.message)

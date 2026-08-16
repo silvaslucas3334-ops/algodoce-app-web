@@ -47,6 +47,7 @@ function NovaDespesaForm() {
   const [unidade, setUnidade] = useState<UnidadeFinanceiro>(extratoUnidade || unidadeInicial)
   const [contaId, setContaId] = useState('')
   const [numeroDocumento, setNumeroDocumento] = useState('')
+  const [naoAfetaCaixa, setNaoAfetaCaixa] = useState(false)
 
   // Pagamento (pré-preenchido pelo cadastro do beneficiário, editável)
   const [jaPago, setJaPago] = useState(!!extratoTransacaoId)
@@ -98,6 +99,7 @@ function NovaDespesaForm() {
   }, [extratoDocumento, partes])
 
   const parte = partes.find((p) => p.id === parteId)
+  const contaSelecionada = contas.find((c) => c.id === contaId)
 
   // Ao escolher o beneficiário, herda forma/condição do cadastro e calcula
   // o vencimento pela condição (à vista = data do lançamento; a prazo = + prazo).
@@ -108,22 +110,32 @@ function NovaDespesaForm() {
     setDataVencimento(calcularVencimento(dataLancamento, parte.condicao_pagamento, parte.prazo_dias))
   }, [parteId])
 
+  // Taxa de Cartão (2004) e Comissão de Delivery (2003) são "não-caixa" por
+  // natureza — o dinheiro já sai antes de chegar no banco. Só sugere o
+  // padrão ao trocar de conta; continua editável pra qualquer outra conta
+  // que também precise desse tratamento.
+  useEffect(() => {
+    if (!contaSelecionada) return
+    setNaoAfetaCaixa(contaSelecionada.codigo === '2003' || contaSelecionada.codigo === '2004')
+  }, [contaId])
+
   useEffect(() => {
     setDataVencimento(calcularVencimento(dataLancamento, condicao, parte?.prazo_dias))
   }, [dataLancamento, condicao])
 
   const valorNum = Number(valor)
-  // Recorrência é exclusiva do admin (RLS de financeiro_recorrencias) e
-  // incompatível com parcelamento (uma despesa fixa se repete inteira).
-  const podeRecorrencia = usuario?.role === 'admin' && parcelas === 1 && !extratoTransacaoId
+  // Recorrência é exclusiva do admin (RLS de financeiro_recorrencias),
+  // incompatível com parcelamento (uma despesa fixa se repete inteira) e não
+  // se aplica a lançamento não-caixa (não existe "pagamento" a agendar).
+  const podeRecorrencia = usuario?.role === 'admin' && parcelas === 1 && !extratoTransacaoId && !naoAfetaCaixa
   const podeSalvar =
     parteId &&
     descricao.trim() &&
     valorNum > 0 &&
     contaId &&
     dataLancamento &&
-    (!jaPago ? dataVencimento : dataPagamento) &&
-    (!recorrente || !!dataFimRecorrencia)
+    (naoAfetaCaixa || (!jaPago ? dataVencimento : dataPagamento)) &&
+    (naoAfetaCaixa || !recorrente || !!dataFimRecorrencia)
 
   async function salvar() {
     if (!podeSalvar || !usuario) {
@@ -170,7 +182,7 @@ function NovaDespesaForm() {
         recorrenciaId = rec.id
       }
 
-      const nParcelas = jaPago || recorrente ? 1 : parcelas
+      const nParcelas = naoAfetaCaixa || jaPago || recorrente ? 1 : parcelas
       const grupo = nParcelas > 1 ? crypto.randomUUID() : null
       const valorParcela = Math.round((valorNum / nParcelas) * 100) / 100
       const valorUltima = Math.round((valorNum - valorParcela * (nParcelas - 1)) * 100) / 100
@@ -183,10 +195,14 @@ function NovaDespesaForm() {
         numero_documento: numeroDocumento.trim() || null,
         data_lancamento: dataLancamento,
         data_competencia: dataLancamento,
-        data_vencimento: i === 0 ? dataVencimento : somarMeses(dataVencimento, i),
-        data_pagamento: jaPago ? dataPagamento : null,
-        status: jaPago ? 'pago' : 'aberto',
-        forma_pagamento: formaPagamento || null,
+        // Não-caixa não tem vencimento/pagamento de verdade — o dinheiro já
+        // saiu antes de chegar no banco, então já nasce liquidado na própria
+        // data da despesa (afeta_fluxo_caixa=false já exclui do calendário
+        // de caixa/contas a pagar independente do status).
+        data_vencimento: naoAfetaCaixa ? dataLancamento : i === 0 ? dataVencimento : somarMeses(dataVencimento, i),
+        data_pagamento: naoAfetaCaixa ? dataLancamento : jaPago ? dataPagamento : null,
+        status: naoAfetaCaixa || jaPago ? 'pago' : 'aberto',
+        forma_pagamento: naoAfetaCaixa ? null : formaPagamento || null,
         condicao_pagamento: condicao,
         parcela_num: nParcelas > 1 ? i + 1 : null,
         parcela_total: nParcelas > 1 ? nParcelas : null,
@@ -194,6 +210,7 @@ function NovaDespesaForm() {
         recorrencia_id: recorrenciaId,
         unidade,
         conta_id: contaId,
+        afeta_fluxo_caixa: !naoAfetaCaixa,
         criado_por: usuario.id,
         extrato_transacao_id: extratoTransacaoId || null,
       }))
@@ -325,6 +342,28 @@ function NovaDespesaForm() {
               <p className="text-xs text-gray-400 mt-1">Direciona a despesa para a linha certa do DRE e do fluxo de caixa.</p>
             </div>
 
+            <label className="flex items-start gap-2.5 cursor-pointer p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <input
+                type="checkbox"
+                checked={naoAfetaCaixa}
+                onChange={(e) => setNaoAfetaCaixa(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-sm text-gray-700">
+                Não afeta o fluxo de caixa
+                <span className="block text-xs text-gray-400 mt-0.5">
+                  O dinheiro já saiu antes de chegar no banco (ex: Taxa de Cartão, Comissão de Delivery) — não entra em
+                  contas a pagar nem no calendário de caixa, só no resultado (DRE) pela data da despesa.
+                </span>
+              </span>
+            </label>
+            {naoAfetaCaixa && unidade === 'rateio' && (
+              <p className="text-xs text-amber-600">
+                Taxa de cartão/delivery costuma ser custo por transação de cada loja, não custo compartilhado da
+                cozinha — considere lançar direto em {UNIDADE_LABEL.loja1} ou {UNIDADE_LABEL.loja2}.
+              </p>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Unidade</label>
@@ -341,7 +380,15 @@ function NovaDespesaForm() {
             </div>
           </div>
 
-          {/* Pagamento */}
+          {naoAfetaCaixa ? (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+              <h2 className="font-semibold text-gray-800 mb-2">Pagamento</h2>
+              <p className="text-sm text-gray-500">
+                Não se aplica — lançamento não-caixa já entra como liquidado na data da despesa, sem vencimento nem
+                parcelamento a controlar.
+              </p>
+            </div>
+          ) : (
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
             <h2 className="font-semibold text-gray-800">Pagamento</h2>
 
@@ -472,6 +519,7 @@ function NovaDespesaForm() {
               </div>
             )}
           </div>
+          )}
 
           <button onClick={salvar} disabled={salvando || !podeSalvar} className="w-full bg-green-600 text-white rounded-lg py-3 font-semibold disabled:opacity-50">
             {salvando ? 'Salvando...' : parcelas > 1 && !jaPago ? `Salvar (${parcelas} parcelas)` : 'Salvar'}

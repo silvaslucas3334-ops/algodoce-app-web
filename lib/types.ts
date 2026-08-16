@@ -377,6 +377,10 @@ export interface FinanceiroLancamento {
   extrato_transacao?: { status_conciliacao: StatusConciliacao }
   valor_juros_multa?: number // diferença entre valor lançado e valor pago (atraso), aplicada na conciliação manual
   valor_pago_conciliado?: number // soma dos débitos já conciliados quando a despesa é paga em mais de uma vez
+  // false = "não-caixa": entra no DRE por competência, mas nunca gera evento
+  // de contas a pagar/fluxo de caixa (ex: Taxa de Cartão/Comissão de
+  // Delivery, o dinheiro já saiu antes de chegar no banco).
+  afeta_fluxo_caixa: boolean
   observacoes?: string
   etiqueta_aprovacao?: EtiquetaAprovacao | null
   criado_por: string

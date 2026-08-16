@@ -195,6 +195,24 @@ function DetalheDespesaContent() {
     }
   }
 
+  async function mudarAfetaFluxoCaixa(novoValor: boolean) {
+    if (!lancamento) return
+    setProcessando(true)
+    setErro('')
+    try {
+      const { error } = await supabase
+        .from('financeiro_lancamentos')
+        .update({ afeta_fluxo_caixa: novoValor, updated_at: new Date().toISOString() })
+        .eq('id', lancamentoId)
+      if (error) throw error
+      await carregar()
+    } catch (err: any) {
+      setErro('Erro ao atualizar: ' + (err?.message || 'desconhecido'))
+    } finally {
+      setProcessando(false)
+    }
+  }
+
   async function reclassificarConta(novaContaId: string) {
     if (!lancamento) return
     // Na despesa a conta é obrigatória — não permitir voltar para vazio.
@@ -476,6 +494,14 @@ function DetalheDespesaContent() {
                   <Pencil size={18} />
                 </button>
               )}
+              {!lancamento.afeta_fluxo_caixa && (
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap font-medium bg-slate-100 text-slate-600"
+                  title="Não gera evento no fluxo de caixa nem em contas a pagar"
+                >
+                  Não-caixa
+                </span>
+              )}
               <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
             </>
           }
@@ -731,6 +757,29 @@ function DetalheDespesaContent() {
                 )}
               </div>
             )}
+
+            <div className="flex justify-between items-center gap-3 pt-2 border-t border-gray-100">
+              <span className="text-gray-500">
+                Afeta o fluxo de caixa
+                <span className="block text-[11px] text-gray-400 font-normal">
+                  Desmarque se o dinheiro já saiu antes de chegar no banco (ex: taxa de cartão/delivery)
+                </span>
+              </span>
+              {ehAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => mudarAfetaFluxoCaixa(!lancamento.afeta_fluxo_caixa)}
+                  disabled={processando}
+                  className={`text-xs px-3 py-1.5 rounded-full font-medium whitespace-nowrap disabled:opacity-50 ${
+                    lancamento.afeta_fluxo_caixa ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {lancamento.afeta_fluxo_caixa ? 'Sim' : 'Não-caixa'}
+                </button>
+              ) : (
+                <span className="text-gray-800">{lancamento.afeta_fluxo_caixa ? 'Sim' : 'Não'}</span>
+              )}
+            </div>
           </div>
 
           {podeParcelar && (

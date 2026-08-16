@@ -226,6 +226,14 @@ export default function DespesasPage() {
             )}
             <p className="font-semibold text-gray-800">{formatBRL(l.valor_total)}</p>
             <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
+            {!l.afeta_fluxo_caixa && (
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap font-medium bg-slate-100 text-slate-600"
+                title="Não gera evento no fluxo de caixa nem em contas a pagar"
+              >
+                Não-caixa
+              </span>
+            )}
             {usuario?.role === 'admin' && l.status === 'aberto' && (
               <EtiquetaAprovacaoSeletor valor={l.etiqueta_aprovacao} onChange={(nova) => mudarEtiqueta(l, nova)} />
             )}
