@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { CategoriaReceita, FinanceiroConta, LinhaDre } from './types'
 import { CATEGORIA_RECEITA_LABEL, LINHA_DRE_LABEL } from './constants'
+import { buscarFaturamentoPorLojaDoMes } from './financeiro-fluxo-mensal'
 
 export type VisaoDre = 'loja1' | 'loja2' | 'consolidado'
 
@@ -43,7 +44,11 @@ export interface DreResultado {
   ano: number
   mes: number
 
-  receitaBrutaPorCategoria: { categoria: CategoriaReceita; label: string; valor: number }[]
+  // Receita Bruta de Vendas = Faturamento Fiscal (Import do PDV + faturamento
+  // manual do dia) — mesma fonte que já alimenta a linha "Faturamento" do
+  // Fluxo de Caixa (buscarFaturamentoPorLojaDoMes). Não é mais a soma de
+  // financeiro_receitas — ver entradasCaixaPorCategoria/totalEntradasCaixa
+  // mais abaixo pra essa visão (informativa, regime de caixa).
   totalReceitaBruta: number
 
   secaoDeducaoVendas: DreSecao
@@ -67,6 +72,13 @@ export interface DreResultado {
   // uma conta nova sem classificar, ela cai aqui em vez de sumir do
   // resultado silenciosamente. Só aparece na tela quando tem algo dentro.
   secaoNaoClassificada: DreSecao
+
+  // Entradas de Caixa — o que efetivamente caiu no banco (financeiro_receitas),
+  // por categoria. Informativo: não alimenta mais o cálculo do resultado (ver
+  // totalReceitaBruta, agora fiscal) — fica aqui pra conferência/reconciliação
+  // entre o fiscal e o que realmente entrou no caixa.
+  entradasCaixaPorCategoria: { categoria: CategoriaReceita; label: string; valor: number }[]
+  totalEntradasCaixa: number
 
   percentualRateio: number | null // só preenchido quando unidade é loja1/loja2 — % do faturamento do mês que essa loja representa
   // Resgates de contas de reserva (afeta_dre=false) — informativo, fora do
@@ -104,6 +116,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     { data: receitas, error: erroReceitas },
     { data: despesas, error: erroDespesas },
     { data: comprasLancamentos, error: erroCompras },
+    faturamentoFiscalPorLoja,
   ] = await Promise.all([
     supabase.from('financeiro_contas').select('id, codigo, nome, linha_dre, afeta_dre'),
     supabase
@@ -125,6 +138,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
       .neq('status', 'cancelado')
       .gte('data_competencia', dataInicio)
       .lte('data_competencia', dataFim),
+    buscarFaturamentoPorLojaDoMes(ano, mes),
   ])
   if (erroContas) throw new Error(erroContas.message)
   if (erroReceitas) throw new Error(erroReceitas.message)
@@ -141,22 +155,41 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
       : { data: [], error: null }
   if (erroItens) throw new Error(erroItens.message)
 
-  // Faturamento das duas lojas no mês — usado tanto pra exibir a Receita
-  // Bruta da unidade selecionada quanto (sempre) pra calcular o % de rateio.
-  // Resgate de aplicação nunca entra aqui — não é venda, distorceria o rateio.
-  const valorContabil = (r: any) => r.valor_bruto ?? r.valor
-  const receitasVenda = (receitas || []).filter((r: any) => r.categoria !== 'resgate_aplicacao')
-  const receitaLoja1 = receitasVenda.filter((r: any) => r.unidade === 'loja1').reduce((s: number, r: any) => s + valorContabil(r), 0)
-  const receitaLoja2 = receitasVenda.filter((r: any) => r.unidade === 'loja2').reduce((s: number, r: any) => s + valorContabil(r), 0)
+  // Receita Bruta de Vendas = Faturamento Fiscal (mesma fonte da linha
+  // "Faturamento" do Fluxo de Caixa) — soma só os dias já realizados dentro
+  // do mês pedido (ignora o forecast de dias futuros, já que o DRE só olha
+  // pra trás). Também vira a base do rateio entre as lojas, no lugar do
+  // antigo cálculo por entrada de caixa.
+  function somaRealizado(f: { porDia: (number | null)[]; ehForecastPorDia: boolean[] }): number {
+    let total = 0
+    f.porDia.forEach((v, i) => {
+      if (!f.ehForecastPorDia[i]) total += v || 0
+    })
+    return total
+  }
+  const faturamentoFiscalLoja1 = somaRealizado(faturamentoFiscalPorLoja.find((f) => f.loja === 'loja1')!)
+  const faturamentoFiscalLoja2 = somaRealizado(faturamentoFiscalPorLoja.find((f) => f.loja === 'loja2')!)
+  const totalReceitaBruta =
+    unidade === 'consolidado'
+      ? faturamentoFiscalLoja1 + faturamentoFiscalLoja2
+      : unidade === 'loja1'
+        ? faturamentoFiscalLoja1
+        : faturamentoFiscalLoja2
+
   const percentualRateio =
     unidade === 'consolidado'
       ? null
       : (() => {
-          const total = receitaLoja1 + receitaLoja2
-          const receitaUnidade = unidade === 'loja1' ? receitaLoja1 : receitaLoja2
+          const total = faturamentoFiscalLoja1 + faturamentoFiscalLoja2
+          const receitaUnidade = unidade === 'loja1' ? faturamentoFiscalLoja1 : faturamentoFiscalLoja2
           return total > 0 ? receitaUnidade / total : 0
         })()
 
+  // Entradas de Caixa — o que efetivamente caiu no banco (financeiro_receitas),
+  // por categoria. Não alimenta mais o resultado (ver totalReceitaBruta acima,
+  // agora fiscal) — fica como bloco informativo/conferência na tela.
+  // Resgate de aplicação nunca entra aqui — não é venda, distorceria o rateio.
+  const valorContabil = (r: any) => r.valor_bruto ?? r.valor
   const receitasFiltradas = unidade === 'consolidado' ? receitas || [] : (receitas || []).filter((r: any) => r.unidade === unidade)
   const receitasFiltradasVenda = receitasFiltradas.filter((r: any) => r.categoria !== 'resgate_aplicacao')
 
@@ -167,29 +200,16 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
   receitasFiltradasVenda.forEach((r: any) => {
     somaPorCategoria.set(r.categoria, (somaPorCategoria.get(r.categoria) || 0) + valorContabil(r))
   })
-  const receitaBrutaPorCategoria = Array.from(somaPorCategoria.entries()).map(([categoria, valor]) => ({
+  const entradasCaixaPorCategoria = Array.from(somaPorCategoria.entries()).map(([categoria, valor]) => ({
     categoria,
     label: CATEGORIA_RECEITA_LABEL[categoria],
     valor,
   }))
-  const totalReceitaBruta = receitaBrutaPorCategoria.reduce((s, c) => s + c.valor, 0)
+  const totalEntradasCaixa = entradasCaixaPorCategoria.reduce((s, c) => s + c.valor, 0)
 
   const totalResgatesAplicacao = receitasFiltradas
     .filter((r: any) => r.categoria === 'resgate_aplicacao')
     .reduce((s: number, r: any) => s + valorContabil(r), 0)
-
-  // Taxas descontadas no repasse: nunca viram lançamento, só existem aqui —
-  // a diferença entre o que a maquininha/app processou e o que caiu líquido.
-  // Entram na cascata como linhas "sintéticas" (sem conta) dentro de
-  // Deduções de Vendas, somadas a eventuais lançamentos reais em 2001/2003/
-  // 2004/2005 — sem risco de contar duas vezes, as duas fontes já eram
-  // subtraídas do resultado antes desta reestruturação.
-  const taxaCartao = receitasFiltradasVenda
-    .filter((r: any) => r.categoria === 'venda_cartao' && r.valor_bruto != null)
-    .reduce((s: number, r: any) => s + (r.valor_bruto - r.valor), 0)
-  const taxaApp = receitasFiltradasVenda
-    .filter((r: any) => (r.categoria === 'repasse_ifood' || r.categoria === 'repasse_aiqfome') && r.valor_bruto != null)
-    .reduce((s: number, r: any) => s + (r.valor_bruto - r.valor), 0)
 
   // --- Classificação de despesas e itens de compra por conta ---------------
   const linhasDetalhadas: DreLinhaDetalhe[] = []
@@ -255,12 +275,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     return { linha: 'nao_classificado', label: 'Não classificado', contas: contasArr, total, percentual: base > 0 ? (total / base) * 100 : null }
   }
 
-  const taxasSinteticas: DreContaValor[] = [
-    { contaId: 'sintetico-cartao', codigo: '—', nome: 'Taxa de cartão (repasse)', valor: taxaCartao },
-    { contaId: 'sintetico-app', codigo: '—', nome: 'Taxa de iFood/Aiqfome (repasse)', valor: taxaApp },
-  ].filter((t) => t.valor > 0)
-
-  const secaoDeducaoVendas = montarSecao('deducao_vendas', [...taxasSinteticas, ...contasDaLinha('deducao_vendas')], totalReceitaBruta)
+  const secaoDeducaoVendas = montarSecao('deducao_vendas', contasDaLinha('deducao_vendas'), totalReceitaBruta)
   const totalReceitaLiquida = totalReceitaBruta - secaoDeducaoVendas.total
 
   const secaoCmv = montarSecao('cmv', contasDaLinha('cmv'), totalReceitaLiquida)
@@ -302,7 +317,6 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     unidade,
     ano,
     mes,
-    receitaBrutaPorCategoria,
     totalReceitaBruta,
     secaoDeducaoVendas,
     totalReceitaLiquida,
@@ -316,6 +330,8 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     secaoDistribuicaoLucros,
     resultado,
     secaoNaoClassificada,
+    entradasCaixaPorCategoria,
+    totalEntradasCaixa,
     percentualRateio,
     totalResgatesAplicacao,
     totalAportesReserva,

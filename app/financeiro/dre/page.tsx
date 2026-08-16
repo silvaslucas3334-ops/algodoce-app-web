@@ -58,7 +58,7 @@ function SecaoCascata({
       ) : (
         <div className="divide-y divide-gray-100">
           {secao.contas.map((c) => {
-            const clicavel = !c.contaId.startsWith('sintetico-') && c.valor !== 0
+            const clicavel = c.valor !== 0
             const conteudo = (
               <>
                 <span className="text-gray-600">
@@ -198,7 +198,7 @@ export default function DrePage() {
                   Competência de lançamentos antigos (antes desta funcionalidade) é aproximada pela data de
                   lançamento/pagamento — só despesas recorrentes configuradas depois têm competência deslocada de verdade.
                   {unidade !== 'consolidado' && dados.percentualRateio != null && (
-                    <> Rateio aplicado: {(dados.percentualRateio * 100).toFixed(1)}% das despesas de rateio/cozinha do mês, proporcional ao faturamento — se uma loja lançar menos vendas em dinheiro que a outra, essa proporção fica distorcida.</>
+                    <> Rateio aplicado: {(dados.percentualRateio * 100).toFixed(1)}% das despesas de rateio/cozinha do mês, proporcional ao faturamento fiscal de cada loja (Import do PDV).</>
                   )}
                 </span>
               </div>
@@ -215,21 +215,13 @@ export default function DrePage() {
               )}
 
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3">
-                <p className="text-sm font-semibold text-gray-700 px-4 py-3 border-b border-gray-100">
+                <p className="text-sm font-semibold text-gray-700 px-4 py-3">
                   Receita Bruta de Vendas — {formatBRL(dados.totalReceitaBruta)}
                 </p>
-                <div className="divide-y divide-gray-100">
-                  {dados.receitaBrutaPorCategoria.map((c) => (
-                    <button
-                      key={c.categoria}
-                      onClick={() => setModalDetalhe({ tipo: 'receita', titulo: c.label, categoria: c.categoria })}
-                      className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
-                    >
-                      <span className="text-gray-600">{c.label}</span>
-                      <span className={c.valor > 0 ? 'font-semibold text-gray-800' : 'text-gray-400'}>{formatBRL(c.valor)}</span>
-                    </button>
-                  ))}
-                </div>
+                <p className="text-xs text-gray-400 px-4 pb-3">
+                  Faturamento fiscal (Import do PDV + faturamento do dia informado manualmente), não mais o que caiu no
+                  banco — veja "Entradas de Caixa" mais abaixo pra essa outra visão.
+                </p>
               </div>
 
               {(dados.totalResgatesAplicacao > 0 || dados.totalAportesReserva > 0) && (
@@ -287,6 +279,29 @@ export default function DrePage() {
               <SubtotalCascata label="= Lucro Líquido Antes da Distribuição" valor={dados.totalLucroLiquidoAntesDistribuicao} />
 
               <SecaoCascata titulo="(−) Distribuição de Lucros" secao={dados.secaoDistribuicaoLucros} onAbrirConta={(c) => abrirConta(dados.secaoDistribuicaoLucros, c)} />
+
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mt-6">
+                <p className="text-sm font-semibold text-gray-700 px-4 py-3 border-b border-gray-100">
+                  Entradas de Caixa (informativo) — {formatBRL(dados.totalEntradasCaixa)}
+                </p>
+                <p className="text-xs text-gray-400 px-4 pt-3">
+                  O que efetivamente caiu no banco no período, por categoria — não entra mais no cálculo do resultado
+                  (a Receita Bruta acima já é fiscal). Fica aqui pra conferir a diferença entre o que foi vendido e o
+                  que já foi recebido.
+                </p>
+                <div className="divide-y divide-gray-100">
+                  {dados.entradasCaixaPorCategoria.map((c) => (
+                    <button
+                      key={c.categoria}
+                      onClick={() => setModalDetalhe({ tipo: 'receita', titulo: c.label, categoria: c.categoria })}
+                      className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+                    >
+                      <span className="text-gray-600">{c.label}</span>
+                      <span className={c.valor > 0 ? 'font-semibold text-gray-800' : 'text-gray-400'}>{formatBRL(c.valor)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </>
           ) : null}
         </div>
