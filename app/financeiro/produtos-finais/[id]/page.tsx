@@ -31,6 +31,14 @@ export default function DetalheProdutoFinalPage() {
   const [materias, setMaterias] = useState<FinanceiroMateriaPrima[]>([])
   const [prePreparosAtivos, setPrePreparosAtivos] = useState<FinanceiroPrePreparo[]>([])
   const [prePreparosCache, setPrePreparosCache] = useState<Map<string, FinanceiroPrePreparo>>(new Map())
+  // Produtos elegíveis pra virar item de combo (permite_hierarquizacao=true,
+  // ativos, e que não são eles mesmos um combo) — pro seletor. O próprio
+  // produto sendo editado nunca aparece aqui (não pode se conter).
+  const [produtosFinaisElegiveis, setProdutosFinaisElegiveis] = useState<FinanceiroProdutoFinal[]>([])
+  // Cache só dos componentes REALMENTE usados neste produto (pode incluir
+  // um combo inativo/legado) — espelha prePreparosCache, usado no cálculo
+  // de custo, separado da lista de opções do seletor.
+  const [produtosFinaisComponentesCache, setProdutosFinaisComponentesCache] = useState<Map<string, FinanceiroProdutoFinal>>(new Map())
   const [itens, setItens] = useState<ItemReceitaForm[]>([])
   const [custosMP, setCustosMP] = useState<Map<string, CustoAtualMateriaPrima>>(new Map())
   const [configPrecificacao, setConfigPrecificacao] = useState<FinanceiroConfigPrecificacao | null>(null)
@@ -57,14 +65,25 @@ export default function DetalheProdutoFinalPage() {
       .eq('ativo', true)
       .order('nome')
       .then(({ data }) => setPrePreparosAtivos(data || []))
-  }, [])
+    supabase
+      .from('financeiro_produtos_finais')
+      .select('*, itens:financeiro_produto_final_itens!produto_final_id(*, materia_prima:financeiro_materias_primas(nome), pre_preparo:financeiro_pre_preparos(nome))')
+      .eq('permite_hierarquizacao', true)
+      .eq('ativo', true)
+      .order('nome')
+      .then(({ data }) =>
+        setProdutosFinaisElegiveis(
+          (data || []).filter((p: any) => p.id !== produtoFinalId && !(p.itens || []).some((i: any) => i.produto_final_componente_id))
+        )
+      )
+  }, [produtoFinalId])
 
   async function carregar() {
     setLoading(true)
     const { data: pf } = await supabase
       .from('financeiro_produtos_finais')
       .select(
-        '*, itens:financeiro_produto_final_itens(*, materia_prima:financeiro_materias_primas(nome, unidade_medida), pre_preparo:financeiro_pre_preparos(nome, unidade_medida, rendimento_quantidade))'
+        '*, itens:financeiro_produto_final_itens!produto_final_id(*, materia_prima:financeiro_materias_primas(nome, unidade_medida), pre_preparo:financeiro_pre_preparos(nome, unidade_medida, rendimento_quantidade), produto_final_componente:financeiro_produtos_finais!produto_final_componente_id(nome))'
       )
       .eq('id', produtoFinalId)
       .single()
@@ -73,15 +92,34 @@ export default function DetalheProdutoFinalPage() {
       (pf?.itens || []).map((i: any) => ({
         materia_prima_id: i.materia_prima_id,
         pre_preparo_id: i.pre_preparo_id,
-        nome: i.materia_prima?.nome || i.pre_preparo?.nome || 'Item',
-        unidade_medida: i.materia_prima?.unidade_medida || i.pre_preparo?.unidade_medida || '',
+        produto_final_componente_id: i.produto_final_componente_id,
+        nome: i.materia_prima?.nome || i.pre_preparo?.nome || i.produto_final_componente?.nome || 'Item',
+        unidade_medida: i.materia_prima?.unidade_medida || i.pre_preparo?.unidade_medida || (i.produto_final_componente_id ? 'un' : ''),
         quantidade: i.quantidade,
       }))
     )
 
-    // Pré-preparos referenciados precisam da própria receita completa
-    // pra calcular o custo por unidade deles.
-    const idsPrePreparo = Array.from(new Set((pf?.itens || []).map((i: any) => i.pre_preparo_id).filter(Boolean)))
+    // Componentes de combo referenciados precisam da própria receita
+    // completa pra calcular o custo por porção deles (mesma ideia de
+    // pré-preparo, um nível abaixo).
+    const idsComponentes = Array.from(new Set((pf?.itens || []).map((i: any) => i.produto_final_componente_id).filter(Boolean)))
+    const { data: componentesCompletos } = idsComponentes.length
+      ? await supabase
+          .from('financeiro_produtos_finais')
+          .select('*, itens:financeiro_produto_final_itens!produto_final_id(*, materia_prima:financeiro_materias_primas(nome), pre_preparo:financeiro_pre_preparos(nome))')
+          .in('id', idsComponentes)
+      : { data: [] }
+    setProdutosFinaisComponentesCache(new Map((componentesCompletos || []).map((c: any) => [c.id, c])))
+
+    // Pré-preparos referenciados precisam da própria receita completa pra
+    // calcular o custo por unidade deles — direto no produto, ou via um
+    // componente de combo.
+    const idsPrePreparo = Array.from(
+      new Set([
+        ...(pf?.itens || []).map((i: any) => i.pre_preparo_id).filter(Boolean),
+        ...(componentesCompletos || []).flatMap((c: any) => (c.itens || []).map((i: any) => i.pre_preparo_id).filter(Boolean)),
+      ])
+    )
     const { data: prePreparosCompletos } = idsPrePreparo.length
       ? await supabase
           .from('financeiro_pre_preparos')
@@ -93,6 +131,7 @@ export default function DetalheProdutoFinalPage() {
       new Set([
         ...(pf?.itens || []).map((i: any) => i.materia_prima_id).filter(Boolean),
         ...(prePreparosCompletos || []).flatMap((pp: any) => (pp.itens || []).map((i: any) => i.materia_prima_id)),
+        ...(componentesCompletos || []).flatMap((c: any) => (c.itens || []).map((i: any) => i.materia_prima_id).filter(Boolean)),
       ])
     )
     const mapaCustos = idsMateriaPrima.length > 0 ? await buscarCustosAtuaisMateriasPrimas(idsMateriaPrima) : new Map()
@@ -123,6 +162,21 @@ export default function DetalheProdutoFinalPage() {
       if (!pp) return null
       const custoPP = calcularCustoPrePreparo(pp, custosMP)
       return custoPP.custoPorUnidade != null ? item.quantidade * custoPP.custoPorUnidade : null
+    }
+    if (item.produto_final_componente_id) {
+      const pfComponente =
+        produtosFinaisComponentesCache.get(item.produto_final_componente_id) ||
+        produtosFinaisElegiveis.find((p) => p.id === item.produto_final_componente_id)
+      if (!pfComponente) return null
+      const custosPPDoCombo = new Map(
+        (pfComponente.itens || [])
+          .filter((i) => i.pre_preparo_id)
+          .map((i) => prePreparosCache.get(i.pre_preparo_id!) || prePreparosAtivos.find((p) => p.id === i.pre_preparo_id))
+          .filter((pp): pp is FinanceiroPrePreparo => !!pp)
+          .map((pp) => [pp.id, calcularCustoPrePreparo(pp, custosMP)] as const)
+      )
+      const custoPF = calcularCustoProdutoFinal(pfComponente, custosMP, custosPPDoCombo)
+      return custoPF.custoPorPorcao != null ? item.quantidade * custoPF.custoPorPorcao : null
     }
     return null
   }
@@ -183,6 +237,7 @@ export default function DetalheProdutoFinalPage() {
           ativo: produtoFinal.ativo,
           preco_venda: produtoFinal.preco_venda ?? null,
           margem_lucro_desejada_pct: produtoFinal.margem_lucro_desejada_pct ?? null,
+          permite_hierarquizacao: produtoFinal.permite_hierarquizacao,
           updated_at: new Date().toISOString(),
         })
         .eq('id', produtoFinalId)
@@ -197,7 +252,12 @@ export default function DetalheProdutoFinalPage() {
     try {
       await salvarItensProdutoFinal(
         produtoFinalId,
-        itens.map((i) => ({ materia_prima_id: i.materia_prima_id, pre_preparo_id: i.pre_preparo_id, quantidade: i.quantidade }))
+        itens.map((i) => ({
+          materia_prima_id: i.materia_prima_id,
+          pre_preparo_id: i.pre_preparo_id,
+          produto_final_componente_id: i.produto_final_componente_id,
+          quantidade: i.quantidade,
+        }))
       )
       await carregar()
     } catch (err: any) {
@@ -329,6 +389,26 @@ export default function DetalheProdutoFinalPage() {
               />
               Ativo
             </label>
+
+            <label className="flex items-start gap-2.5 cursor-pointer p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <input
+                type="checkbox"
+                checked={produtoFinal.permite_hierarquizacao}
+                onChange={(e) => setProdutoFinal({ ...produtoFinal, permite_hierarquizacao: e.target.checked })}
+                className="mt-0.5"
+              />
+              <span className="text-sm text-gray-700">
+                Permite Hierarquização
+                <span className="block text-xs text-gray-400 mt-0.5">
+                  Outros produtos finais poderão usar este aqui como item, tipo um combo (ex: 1x Brownie + 1x Refrigerante).
+                  {(itens || []).some((i) => i.produto_final_componente_id) && (
+                    <span className="block text-amber-600 mt-0.5">
+                      Este produto já é um combo (contém outro produto final) — não pode virar componente de outro combo.
+                    </span>
+                  )}
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
@@ -357,6 +437,7 @@ export default function DetalheProdutoFinalPage() {
                         <p className="font-medium text-gray-800">
                           {item.nome}
                           {item.pre_preparo_id && <span className="ml-1.5 text-[10px] font-semibold text-purple-700 bg-purple-100 rounded-full px-2 py-0.5">Pré-preparo</span>}
+                          {item.produto_final_componente_id && <span className="ml-1.5 text-[10px] font-semibold text-pink-700 bg-pink-100 rounded-full px-2 py-0.5">Combo</span>}
                         </p>
                         <p className="text-xs text-gray-500 flex items-center gap-1">
                           {item.quantidade} {item.unidade_medida}
@@ -507,7 +588,8 @@ export default function DetalheProdutoFinalPage() {
         <SelecionarInsumoReceitaModal
           materias={materias}
           prePreparos={prePreparosAtivos}
-          idsJaAdicionados={itens.map((i) => i.materia_prima_id || i.pre_preparo_id).filter((id): id is string => !!id)}
+          produtosFinaisElegiveis={produtosFinaisElegiveis}
+          idsJaAdicionados={itens.map((i) => i.materia_prima_id || i.pre_preparo_id || i.produto_final_componente_id).filter((id): id is string => !!id)}
           onAdd={(item) => setItens((prev) => [...prev, item])}
           onClose={() => setModalAberto(false)}
         />

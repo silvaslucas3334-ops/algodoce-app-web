@@ -1138,6 +1138,10 @@ CREATE TABLE IF NOT EXISTS financeiro_produtos_finais (
   descricao TEXT,
   ativo BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'aprovado' CHECK (status IN ('aprovado', 'pendente_revisao')),
+  -- true = este produto pode ser usado como item (componente) dentro de
+  -- outro produto final, tipo um combo. Hierarquia travada em 1 nível por
+  -- trigger (ver financeiro_valida_hierarquizacao_produto_final abaixo).
+  permite_hierarquizacao BOOLEAN NOT NULL DEFAULT false,
   criado_por UUID NOT NULL REFERENCES usuarios(id),
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -1150,15 +1154,54 @@ CREATE TABLE IF NOT EXISTS financeiro_produto_final_itens (
   produto_final_id UUID NOT NULL REFERENCES financeiro_produtos_finais(id) ON DELETE CASCADE,
   materia_prima_id UUID REFERENCES financeiro_materias_primas(id) ON DELETE RESTRICT,
   pre_preparo_id UUID REFERENCES financeiro_pre_preparos(id) ON DELETE RESTRICT,
+  -- outro produto final usado como componente (combo) — ver
+  -- lib/migrations/financeiro-produto-final-hierarquizacao.sql.
+  produto_final_componente_id UUID REFERENCES financeiro_produtos_finais(id) ON DELETE RESTRICT,
   quantidade NUMERIC NOT NULL CHECK (quantidade > 0),
   created_at TIMESTAMPTZ DEFAULT now(),
-  CHECK (num_nonnulls(materia_prima_id, pre_preparo_id) = 1)
+  CONSTRAINT financeiro_produto_final_itens_um_tipo_check
+    CHECK (num_nonnulls(materia_prima_id, pre_preparo_id, produto_final_componente_id) = 1)
 );
 CREATE INDEX IF NOT EXISTS idx_fpfi_produto_final ON financeiro_produto_final_itens(produto_final_id);
 CREATE INDEX IF NOT EXISTS idx_fpfi_materia_prima ON financeiro_produto_final_itens(materia_prima_id);
 CREATE INDEX IF NOT EXISTS idx_fpfi_pre_preparo ON financeiro_produto_final_itens(pre_preparo_id);
+CREATE INDEX IF NOT EXISTS idx_fpfi_produto_final_componente ON financeiro_produto_final_itens(produto_final_componente_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fpfi_unico_mp ON financeiro_produto_final_itens(produto_final_id, materia_prima_id) WHERE materia_prima_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fpfi_unico_pp ON financeiro_produto_final_itens(produto_final_id, pre_preparo_id) WHERE pre_preparo_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fpfi_unico_pfc ON financeiro_produto_final_itens(produto_final_id, produto_final_componente_id) WHERE produto_final_componente_id IS NOT NULL;
+
+-- Trigger de validação — hierarquia travada em 1 nível: um combo não pode
+-- conter outro combo, e um produto já usado como componente não pode virar
+-- combo também. Roda em QUALQUER insert/update na tabela (não só pela RPC
+-- financeiro_produto_final_salvar_itens), então nenhum caminho de escrita
+-- consegue burlar.
+CREATE OR REPLACE FUNCTION financeiro_valida_hierarquizacao_produto_final() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.produto_final_componente_id IS NOT NULL THEN
+    IF NEW.produto_final_componente_id = NEW.produto_final_id THEN
+      RAISE EXCEPTION 'um produto final não pode se referenciar como componente de si mesmo';
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM financeiro_produto_final_itens
+      WHERE produto_final_id = NEW.produto_final_componente_id AND produto_final_componente_id IS NOT NULL
+    ) THEN
+      RAISE EXCEPTION 'este produto já é um combo — não pode ser usado como componente de outro combo (hierarquia limitada a 1 nível)';
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM financeiro_produto_final_itens
+      WHERE produto_final_componente_id = NEW.produto_final_id
+    ) THEN
+      RAISE EXCEPTION 'este produto já é componente de um combo — não pode virar um combo também (hierarquia limitada a 1 nível)';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_valida_hierarquizacao_produto_final ON financeiro_produto_final_itens;
+CREATE TRIGGER trg_valida_hierarquizacao_produto_final
+  BEFORE INSERT OR UPDATE ON financeiro_produto_final_itens
+  FOR EACH ROW EXECUTE FUNCTION financeiro_valida_hierarquizacao_produto_final();
 
 ALTER TABLE financeiro_pre_preparos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE financeiro_pre_preparo_itens ENABLE ROW LEVEL SECURITY;
@@ -1269,8 +1312,8 @@ BEGIN
     END IF;
   END IF;
   DELETE FROM financeiro_produto_final_itens WHERE produto_final_id = p_produto_final_id;
-  INSERT INTO financeiro_produto_final_itens (produto_final_id, materia_prima_id, pre_preparo_id, quantidade)
-  SELECT p_produto_final_id, (i->>'materia_prima_id')::UUID, (i->>'pre_preparo_id')::UUID, (i->>'quantidade')::NUMERIC
+  INSERT INTO financeiro_produto_final_itens (produto_final_id, materia_prima_id, pre_preparo_id, produto_final_componente_id, quantidade)
+  SELECT p_produto_final_id, (i->>'materia_prima_id')::UUID, (i->>'pre_preparo_id')::UUID, (i->>'produto_final_componente_id')::UUID, (i->>'quantidade')::NUMERIC
   FROM jsonb_array_elements(p_itens) AS i;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

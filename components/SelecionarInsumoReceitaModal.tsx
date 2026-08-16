@@ -1,18 +1,19 @@
 'use client'
 import { useState } from 'react'
-import { FinanceiroMateriaPrima, FinanceiroPrePreparo } from '@/lib/types'
+import { FinanceiroMateriaPrima, FinanceiroPrePreparo, FinanceiroProdutoFinal } from '@/lib/types'
 import { X, Search, ArrowLeft, Plus } from 'lucide-react'
 
 export interface ItemReceitaForm {
   materia_prima_id: string | null
   pre_preparo_id: string | null
+  produto_final_componente_id: string | null
   nome: string
   unidade_medida: string
   quantidade: number
 }
 
 interface Opcao {
-  tipo: 'materia_prima' | 'pre_preparo'
+  tipo: 'materia_prima' | 'pre_preparo' | 'produto_final'
   id: string
   nome: string
   unidade_medida: string
@@ -24,10 +25,14 @@ interface Props {
   // produto final) — se omitido, só matéria-prima é selecionável (editor
   // de pré-preparo, que por regra nunca usa outro pré-preparo).
   prePreparos?: FinanceiroPrePreparo[]
-  // Itens já adicionados na receita (materia_prima_id/pre_preparo_id) —
-  // ficam fora da lista pra não deixar escolher o mesmo insumo duas
-  // vezes (o banco rejeita duplicata de matéria-prima em produto final
-  // com um erro cru; melhor nem deixar chegar lá).
+  // Produtos finais com permite_hierarquizacao=true e que não são eles
+  // mesmos um combo (quem chama já filtra) — aparecem como "Combo" na
+  // lista, com unidade fixa "un" (quantas unidades desse produto entram).
+  produtosFinaisElegiveis?: FinanceiroProdutoFinal[]
+  // Itens já adicionados na receita (materia_prima_id/pre_preparo_id/
+  // produto_final_componente_id) — ficam fora da lista pra não deixar
+  // escolher o mesmo insumo duas vezes (o banco rejeita duplicata com um
+  // erro cru; melhor nem deixar chegar lá).
   idsJaAdicionados?: string[]
   onAdd: (item: ItemReceitaForm) => void
   onClose: () => void
@@ -36,7 +41,7 @@ interface Props {
 // Irmão mais simples de SelecionarItemCotacaoModal — sem preço, sem
 // conversão: a receita é sempre expressa na unidade_medida do próprio
 // item (a "unidade da ficha técnica"), nunca na unidade de compra.
-export default function SelecionarInsumoReceitaModal({ materias, prePreparos, idsJaAdicionados, onAdd, onClose }: Props) {
+export default function SelecionarInsumoReceitaModal({ materias, prePreparos, produtosFinaisElegiveis, idsJaAdicionados, onAdd, onClose }: Props) {
   const [busca, setBusca] = useState('')
   const [selecionada, setSelecionada] = useState<Opcao | null>(null)
   const [quantidade, setQuantidade] = useState('')
@@ -45,6 +50,7 @@ export default function SelecionarInsumoReceitaModal({ materias, prePreparos, id
   const opcoes: Opcao[] = [
     ...materias.filter((m) => !jaAdicionados.has(m.id)).map((m) => ({ tipo: 'materia_prima' as const, id: m.id, nome: m.nome, unidade_medida: m.unidade_medida })),
     ...(prePreparos || []).filter((p) => !jaAdicionados.has(p.id)).map((p) => ({ tipo: 'pre_preparo' as const, id: p.id, nome: p.nome, unidade_medida: p.unidade_medida })),
+    ...(produtosFinaisElegiveis || []).filter((p) => !jaAdicionados.has(p.id)).map((p) => ({ tipo: 'produto_final' as const, id: p.id, nome: p.nome, unidade_medida: 'un' })),
   ]
 
   const filtradas = opcoes.filter((o) => o.nome.toLowerCase().includes(busca.trim().toLowerCase()))
@@ -61,6 +67,7 @@ export default function SelecionarInsumoReceitaModal({ materias, prePreparos, id
     onAdd({
       materia_prima_id: selecionada.tipo === 'materia_prima' ? selecionada.id : null,
       pre_preparo_id: selecionada.tipo === 'pre_preparo' ? selecionada.id : null,
+      produto_final_componente_id: selecionada.tipo === 'produto_final' ? selecionada.id : null,
       nome: selecionada.nome,
       unidade_medida: selecionada.unidade_medida,
       quantidade: Number(quantidade),
@@ -117,6 +124,11 @@ export default function SelecionarInsumoReceitaModal({ materias, prePreparos, id
                     {o.tipo === 'pre_preparo' && (
                       <span className="text-[10px] font-semibold text-purple-700 bg-purple-100 rounded-full px-2 py-0.5 flex-shrink-0">
                         Pré-preparo
+                      </span>
+                    )}
+                    {o.tipo === 'produto_final' && (
+                      <span className="text-[10px] font-semibold text-pink-700 bg-pink-100 rounded-full px-2 py-0.5 flex-shrink-0">
+                        Combo
                       </span>
                     )}
                   </button>

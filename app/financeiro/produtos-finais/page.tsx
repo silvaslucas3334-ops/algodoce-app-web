@@ -30,7 +30,7 @@ export default function ProdutosFinaisPage() {
     setLoading(true)
     const { data } = await supabase
       .from('financeiro_produtos_finais')
-      .select('*, itens:financeiro_produto_final_itens(*, materia_prima:financeiro_materias_primas(nome), pre_preparo:financeiro_pre_preparos(nome, unidade_medida, rendimento_quantidade))')
+      .select('*, itens:financeiro_produto_final_itens!produto_final_id(*, materia_prima:financeiro_materias_primas(nome), pre_preparo:financeiro_pre_preparos(nome, unidade_medida, rendimento_quantidade))')
       .order('nome')
     const lista = data || []
     setProdutos(lista)
@@ -57,10 +57,26 @@ export default function ProdutosFinaisPage() {
 
     const custosPP = new Map((prePreparosData || []).map((pp: any) => [pp.id, calcularCustoPrePreparo(pp, custosMP)]))
 
+    // Combo (produto com item produto_final_componente_id) precisa do custo
+    // do componente já calculado antes — como a hierarquia é travada em 1
+    // nível (trigger no banco), o componente nunca é ele mesmo um combo, e
+    // como `lista` já tem TODOS os produtos com seus itens, dá pra calcular
+    // em 2 passadas sem buscar nada a mais.
+    const ehCombo = (p: any) => (p.itens || []).some((i: any) => i.produto_final_componente_id)
     const mapa: Record<string, ReturnType<typeof calcularCustoProdutoFinal>> = {}
-    lista.forEach((p: any) => {
-      mapa[p.id] = calcularCustoProdutoFinal(p, custosMP, custosPP)
-    })
+    const custosPF = new Map<string, ReturnType<typeof calcularCustoProdutoFinal>>()
+    lista
+      .filter((p: any) => !ehCombo(p))
+      .forEach((p: any) => {
+        const c = calcularCustoProdutoFinal(p, custosMP, custosPP)
+        mapa[p.id] = c
+        custosPF.set(p.id, c)
+      })
+    lista
+      .filter((p: any) => ehCombo(p))
+      .forEach((p: any) => {
+        mapa[p.id] = calcularCustoProdutoFinal(p, custosMP, custosPP, custosPF)
+      })
     setCustos(mapa)
 
     // Selo de margem na lista é um extra — se a migration de precificação
@@ -158,7 +174,12 @@ export default function ProdutosFinaisPage() {
                     <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-gray-200 cursor-pointer transition-all">
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="font-semibold text-gray-800">{p.nome}</p>
+                          <p className="font-semibold text-gray-800">
+                            {p.nome}
+                            {(p.itens || []).some((i: any) => i.produto_final_componente_id) && (
+                              <span className="ml-1.5 text-[10px] font-semibold text-pink-700 bg-pink-100 rounded-full px-2 py-0.5 align-middle">Combo</span>
+                            )}
+                          </p>
                           <p className="text-xs text-gray-500 mt-0.5">
                             {p.rendimento_porcoes > 1 ? `${p.rendimento_porcoes} porções` : 'Vendido inteiro'}
                             {(p.codigo_pdv_loja1 || p.codigo_pdv_loja2) &&

@@ -82,7 +82,7 @@ export async function buscarCustosAtuaisMateriasPrimas(ids: string[]): Promise<M
 // --- cálculo de custo (2 níveis, incompletude propaga) ------------------
 
 export interface ItemSemCusto {
-  tipo: 'materia_prima' | 'pre_preparo'
+  tipo: 'materia_prima' | 'pre_preparo' | 'produto_final'
   id: string
   nome: string
 }
@@ -124,15 +124,24 @@ export function calcularCustoPrePreparo(
 }
 
 /**
- * Custo do produto final = soma das linhas (matéria-prima direta ou
- * pré-preparo, pelo custo por unidade já calculado), dividido pelas
- * porções. Se um pré-preparo referenciado já está incompleto, a linha
- * entra em itensSemCusto também — a incompletude propaga pelos 2 níveis.
+ * Custo do produto final = soma das linhas (matéria-prima direta,
+ * pré-preparo, ou outro produto final usado como componente/combo — pelo
+ * custo por unidade/porção já calculado), dividido pelas porções. Se uma
+ * linha referenciada já está incompleta, a linha entra em itensSemCusto
+ * também — a incompletude propaga pelos níveis.
+ *
+ * `custosPF` é opcional: só produtos com hierarquização (combos) usam.
+ * Como a hierarquia é travada em 1 nível (trigger no banco — um combo
+ * nunca contém outro combo), o componente referenciado nunca precisa do
+ * próprio `custosPF` pra ser calculado — dá pra calcular todos os
+ * elegíveis numa primeira passada e os combos numa segunda, sem
+ * recursão.
  */
 export function calcularCustoProdutoFinal(
   produtoFinal: FinanceiroProdutoFinal,
   custosMP: Map<string, CustoAtualMateriaPrima>,
-  custosPP: Map<string, CustoCalculado & { custoPorUnidade: number | null }>
+  custosPP: Map<string, CustoCalculado & { custoPorUnidade: number | null }>,
+  custosPF?: Map<string, CustoCalculado & { custoPorPorcao: number | null }>
 ): CustoCalculado & { custoPorPorcao: number | null } {
   const itens = produtoFinal.itens || []
   let custoConhecidoParcial = 0
@@ -152,6 +161,13 @@ export function calcularCustoProdutoFinal(
         itensSemCusto.push({ tipo: 'pre_preparo', id: item.pre_preparo_id, nome: item.pre_preparo?.nome || 'Pré-preparo' })
       } else {
         custoConhecidoParcial += item.quantidade * custoPP.custoPorUnidade
+      }
+    } else if (item.produto_final_componente_id) {
+      const custoPF = custosPF?.get(item.produto_final_componente_id)
+      if (!custoPF || custoPF.custoPorPorcao == null) {
+        itensSemCusto.push({ tipo: 'produto_final', id: item.produto_final_componente_id, nome: item.produto_final_componente?.nome || 'Produto final' })
+      } else {
+        custoConhecidoParcial += item.quantidade * custoPF.custoPorPorcao
       }
     }
   }
@@ -205,6 +221,7 @@ export async function criarProdutoFinal(
     rendimento_porcoes: number
     descricao: string | null
     status?: StatusFichaTecnica
+    permite_hierarquizacao?: boolean
   },
   usuarioId: string
 ): Promise<string> {
@@ -220,6 +237,7 @@ export async function criarProdutoFinal(
 export interface ItemProdutoFinalPayload {
   materia_prima_id: string | null
   pre_preparo_id: string | null
+  produto_final_componente_id: string | null
   quantidade: number
 }
 

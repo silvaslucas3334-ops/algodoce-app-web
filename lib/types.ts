@@ -318,6 +318,10 @@ export interface FinanceiroProdutoFinal {
   itens?: FinanceiroProdutoFinalItem[]
   preco_venda?: number | null // preço praticado, manual — não vem do PDV ainda
   margem_lucro_desejada_pct?: number | null // override do padrão global (financeiro_config_precificacao.margem_lucro_padrao_pct); null = usa o padrão
+  // true = este produto pode ser usado como item (componente) dentro de
+  // outro produto final, tipo um combo. Hierarquia travada em 1 nível
+  // (um combo não pode conter outro combo) por trigger no banco.
+  permite_hierarquizacao: boolean
 }
 
 // Config global de precificação (linha única) — despesas variáveis e
@@ -336,10 +340,12 @@ export interface FinanceiroConfigPrecificacao {
 export interface FinanceiroProdutoFinalItem {
   id: string
   produto_final_id: string
-  materia_prima_id?: string // exatamente um entre materia_prima_id/pre_preparo_id
+  materia_prima_id?: string // exatamente um entre materia_prima_id/pre_preparo_id/produto_final_componente_id
   materia_prima?: FinanceiroMateriaPrima
   pre_preparo_id?: string
   pre_preparo?: FinanceiroPrePreparo
+  produto_final_componente_id?: string // outro produto final usado como componente (combo)
+  produto_final_componente?: FinanceiroProdutoFinal
   quantidade: number
   created_at: string
 }

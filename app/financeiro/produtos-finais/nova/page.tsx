@@ -7,13 +7,14 @@ import PageHeader from '@/components/PageHeader'
 import SelecionarInsumoReceitaModal, { ItemReceitaForm } from '@/components/SelecionarInsumoReceitaModal'
 import { useRouter } from 'next/navigation'
 import { Plus, Trash2 } from 'lucide-react'
-import { FinanceiroMateriaPrima, FinanceiroPrePreparo } from '@/lib/types'
+import { FinanceiroMateriaPrima, FinanceiroPrePreparo, FinanceiroProdutoFinal } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import {
   criarProdutoFinal,
   salvarItensProdutoFinal,
   buscarCustosAtuaisMateriasPrimas,
   calcularCustoPrePreparo,
+  calcularCustoProdutoFinal,
   CustoAtualMateriaPrima,
 } from '@/lib/financeiro-cmv'
 import CustoAtualBadges from '@/components/CustoAtualBadge'
@@ -23,12 +24,14 @@ export default function NovoProdutoFinalPage() {
   const router = useRouter()
   const [materias, setMaterias] = useState<FinanceiroMateriaPrima[]>([])
   const [prePreparos, setPrePreparos] = useState<FinanceiroPrePreparo[]>([])
+  const [produtosFinaisElegiveis, setProdutosFinaisElegiveis] = useState<FinanceiroProdutoFinal[]>([])
 
   const [nome, setNome] = useState('')
   const [codigoPdvLoja1, setCodigoPdvLoja1] = useState('')
   const [codigoPdvLoja2, setCodigoPdvLoja2] = useState('')
   const [rendimentoPorcoes, setRendimentoPorcoes] = useState('1')
   const [descricao, setDescricao] = useState('')
+  const [permiteHierarquizacao, setPermiteHierarquizacao] = useState(false)
 
   const [itens, setItens] = useState<ItemReceitaForm[]>([])
   const [modalAberto, setModalAberto] = useState(false)
@@ -54,6 +57,17 @@ export default function NovoProdutoFinalPage() {
       .eq('ativo', true)
       .order('nome')
       .then(({ data }) => setPrePreparos(data || []))
+    // Só produtos marcados como "permite hierarquização" e que NÃO são eles
+    // mesmos um combo (hierarquia travada em 1 nível — ver migration).
+    supabase
+      .from('financeiro_produtos_finais')
+      .select('*, itens:financeiro_produto_final_itens!produto_final_id(*, materia_prima:financeiro_materias_primas(nome), pre_preparo:financeiro_pre_preparos(nome))')
+      .eq('permite_hierarquizacao', true)
+      .eq('ativo', true)
+      .order('nome')
+      .then(({ data }) =>
+        setProdutosFinaisElegiveis((data || []).filter((p: any) => !(p.itens || []).some((i: any) => i.produto_final_componente_id)))
+      )
   }, [])
 
   useEffect(() => {
@@ -61,13 +75,22 @@ export default function NovoProdutoFinalPage() {
     const idsViaPrePreparo = itens
       .filter((i) => i.pre_preparo_id)
       .flatMap((i) => prePreparos.find((p) => p.id === i.pre_preparo_id)?.itens?.map((ii) => ii.materia_prima_id) || [])
-    const ids = Array.from(new Set([...idsDireto, ...idsViaPrePreparo]))
+    // Combo: matérias usadas pelo produto componente, direto ou via pré-preparo dele.
+    const idsViaCombo = itens
+      .filter((i) => i.produto_final_componente_id)
+      .flatMap((i) => {
+        const pf = produtosFinaisElegiveis.find((p) => p.id === i.produto_final_componente_id)
+        return (pf?.itens || []).flatMap((ii: any) =>
+          ii.materia_prima_id ? [ii.materia_prima_id] : prePreparos.find((p) => p.id === ii.pre_preparo_id)?.itens?.map((iii: any) => iii.materia_prima_id) || []
+        )
+      })
+    const ids = Array.from(new Set([...idsDireto, ...idsViaPrePreparo, ...idsViaCombo]))
     if (ids.length === 0) {
       setCustosMP(new Map())
       return
     }
     buscarCustosAtuaisMateriasPrimas(ids).then(setCustosMP)
-  }, [itens, prePreparos])
+  }, [itens, prePreparos, produtosFinaisElegiveis])
 
   function removerItem(indice: number) {
     setItens((prev) => prev.filter((_, i) => i !== indice))
@@ -86,6 +109,19 @@ export default function NovoProdutoFinalPage() {
       if (!pp) return null
       const custoPP = calcularCustoPrePreparo(pp, custosMP)
       return custoPP.custoPorUnidade != null ? item.quantidade * custoPP.custoPorUnidade : null
+    }
+    if (item.produto_final_componente_id) {
+      const pf = produtosFinaisElegiveis.find((p) => p.id === item.produto_final_componente_id)
+      if (!pf) return null
+      const custosPPDoCombo = new Map(
+        (pf.itens || [])
+          .filter((i) => i.pre_preparo_id)
+          .map((i) => prePreparos.find((p) => p.id === i.pre_preparo_id))
+          .filter((pp): pp is FinanceiroPrePreparo => !!pp)
+          .map((pp) => [pp.id, calcularCustoPrePreparo(pp, custosMP)] as const)
+      )
+      const custoPF = calcularCustoProdutoFinal(pf, custosMP, custosPPDoCombo)
+      return custoPF.custoPorPorcao != null ? item.quantidade * custoPF.custoPorPorcao : null
     }
     return null
   }
@@ -111,6 +147,7 @@ export default function NovoProdutoFinalPage() {
             rendimento_porcoes: rendimentoNum,
             descricao: descricao.trim() || null,
             status: usuario.role === 'cozinha' ? 'pendente_revisao' : 'aprovado',
+            permite_hierarquizacao: permiteHierarquizacao,
           },
           usuario.id
         )
@@ -126,7 +163,12 @@ export default function NovoProdutoFinalPage() {
     try {
       await salvarItensProdutoFinal(
         id,
-        itens.map((i) => ({ materia_prima_id: i.materia_prima_id, pre_preparo_id: i.pre_preparo_id, quantidade: i.quantidade }))
+        itens.map((i) => ({
+          materia_prima_id: i.materia_prima_id,
+          pre_preparo_id: i.pre_preparo_id,
+          produto_final_componente_id: i.produto_final_componente_id,
+          quantidade: i.quantidade,
+        }))
       )
       router.push('/financeiro/produtos-finais')
     } catch (err: any) {
@@ -208,6 +250,21 @@ export default function NovoProdutoFinalPage() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm h-20 resize-none"
               />
             </div>
+
+            <label className="flex items-start gap-2.5 cursor-pointer p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <input
+                type="checkbox"
+                checked={permiteHierarquizacao}
+                onChange={(e) => setPermiteHierarquizacao(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-sm text-gray-700">
+                Permite Hierarquização
+                <span className="block text-xs text-gray-400 mt-0.5">
+                  Outros produtos finais poderão usar este aqui como item, tipo um combo (ex: 1x Brownie + 1x Refrigerante).
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">
@@ -236,6 +293,7 @@ export default function NovoProdutoFinalPage() {
                         <p className="font-medium text-gray-800">
                           {item.nome}
                           {item.pre_preparo_id && <span className="ml-1.5 text-[10px] font-semibold text-purple-700 bg-purple-100 rounded-full px-2 py-0.5">Pré-preparo</span>}
+                          {item.produto_final_componente_id && <span className="ml-1.5 text-[10px] font-semibold text-pink-700 bg-pink-100 rounded-full px-2 py-0.5">Combo</span>}
                         </p>
                         <p className="text-xs text-gray-500 flex items-center gap-1">
                           {item.quantidade} {item.unidade_medida}
@@ -283,7 +341,8 @@ export default function NovoProdutoFinalPage() {
         <SelecionarInsumoReceitaModal
           materias={materias}
           prePreparos={prePreparos}
-          idsJaAdicionados={itens.map((i) => i.materia_prima_id || i.pre_preparo_id).filter((id): id is string => !!id)}
+          produtosFinaisElegiveis={produtosFinaisElegiveis}
+          idsJaAdicionados={itens.map((i) => i.materia_prima_id || i.pre_preparo_id || i.produto_final_componente_id).filter((id): id is string => !!id)}
           onAdd={(item) => setItens((prev) => [...prev, item])}
           onClose={() => setModalAberto(false)}
         />
