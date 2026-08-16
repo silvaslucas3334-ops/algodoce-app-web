@@ -7,6 +7,9 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'AlgoDoce - Gestão de Produção',
   description: 'Sistema de gestão de produção e estoque para AlgoDoce',
+  icons: {
+    icon: [{ url: '/rosto_marrom.svg', type: 'image/svg+xml' }],
+  },
   openGraph: {
     title: 'AlgoDoce - Gestão de Produção',
     description: 'Sistema de gestão de produção e estoque para AlgoDoce',
