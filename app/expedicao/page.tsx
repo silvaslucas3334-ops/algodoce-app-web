@@ -1,8 +1,8 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, ChevronRight, Package, CheckCircle, AlertCircle, ArrowRightLeft, History } from 'lucide-react'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
@@ -11,9 +11,12 @@ import { hojeISO, somarDias } from '@/lib/financeiro-utils'
 
 const UNIDADE_LOJA_LABEL: Record<string, string> = { loja1: 'Paraisópolis', loja2: 'Itajubá' }
 
-export default function ExpedicaoPage() {
+const ABAS_VALIDAS = ['envios', 'devolucoes', 'recebimentos', 'transferencias', 'historico']
+
+function ExpedicaoContent() {
   const { usuario } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [romaneios, setRomaneios] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [abaPrincipal, setAbaPrincipal] = useState<string>('envios')
@@ -31,14 +34,18 @@ export default function ExpedicaoPage() {
   const [historicoInicio, setHistoricoInicio] = useState(somarDias(hojeISO(), -30))
   const [historicoFim, setHistoricoFim] = useState(hojeISO())
 
-  // Determinar aba padrão baseado na role
+  // Determinar aba padrão: link vindo do Painel Inicial (?aba=) tem prioridade
+  // sobre o default por role, que continua sendo o fallback de sempre.
   useEffect(() => {
-    if (usuario?.role === 'loja') {
+    const abaParam = searchParams.get('aba')
+    if (abaParam && ABAS_VALIDAS.includes(abaParam)) {
+      setAbaPrincipal(abaParam)
+    } else if (usuario?.role === 'loja') {
       setAbaPrincipal('recebimentos')
     } else {
       setAbaPrincipal('envios')
     }
-  }, [usuario?.role])
+  }, [usuario?.role, searchParams])
 
   // Carregar romaneios
   useEffect(() => {
@@ -482,5 +489,13 @@ export default function ExpedicaoPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function ExpedicaoPage() {
+  return (
+    <Suspense>
+      <ExpedicaoContent />
+    </Suspense>
   )
 }

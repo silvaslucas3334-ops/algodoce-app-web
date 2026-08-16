@@ -65,6 +65,28 @@ export interface EstoqueItem {
   lotes: LoteProducao[]
 }
 
+// Romaneio (Expedição). Não há unidade_origem na tabela — origem é sempre
+// implícita: tipo='envio' vem da cozinha, tipo='transferencia' vem de quem
+// criou (criado_por), nunca gravada diretamente na linha.
+export interface RomaneioLinha {
+  produto_id: string
+  nome_produto: string
+  etiquetas_selecionadas: string[]
+}
+
+export interface Romaneio {
+  id: string
+  tipo: 'envio' | 'transferencia'
+  status: 'rascunho' | 'confirmado' | 'em_estoque' | 'cancelado'
+  unidade_destino: Local
+  data_entrega: string
+  linhas: RomaneioLinha[]
+  criado_por: string
+  criado_em: string
+  confirmado_em?: string | null
+  atualizado_em?: string | null
+}
+
 // MÓDULO DE TAREFAS
 export type StatusTarefa = 'pendente' | 'pronta_revisao' | 'concluida' | 'refazer_pendente' | 'cancelada'
 
