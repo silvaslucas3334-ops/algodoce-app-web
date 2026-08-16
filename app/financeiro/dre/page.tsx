@@ -3,16 +3,17 @@ import { useEffect, useState } from 'react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import DreDetalheModal from '@/components/DreDetalheModal'
 import PageHeader from '@/components/PageHeader'
-import { buscarDre, DreResultado, VisaoDre, DreSecao, DreContaValor } from '@/lib/financeiro-dre'
+import { buscarDre, buscarDreComparativo, DreResultado, VisaoDre, DreSecao, DreContaValor } from '@/lib/financeiro-dre'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
-import { ChevronLeft, ChevronRight, Loader, AlertCircle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader, Info, X, TrendingUp, TrendingDown } from 'lucide-react'
 import { CategoriaReceita } from '@/lib/types'
 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ]
+const MESES_ABREV = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
 const VISAO_LABEL: Record<VisaoDre, string> = {
   loja1: UNIDADE_LABEL.loja1,
@@ -20,10 +21,78 @@ const VISAO_LABEL: Record<VisaoDre, string> = {
   consolidado: 'Consolidado',
 }
 
+type Modo = 'unico' | 'comparativo'
+
 type ModalDetalhe =
   | { tipo: 'receita'; titulo: string; categoria: CategoriaReceita }
   | { tipo: 'insumo' | 'despesa'; titulo: string; contaId: string }
   | { tipo: 'aporte'; titulo: string }
+
+interface Aviso {
+  tom: 'azul' | 'ambar' | 'vermelho'
+  texto: string
+}
+
+const TOM_CLASSES: Record<Aviso['tom'], string> = {
+  azul: 'bg-blue-50 border-blue-200 text-blue-800',
+  ambar: 'bg-amber-50 border-amber-200 text-amber-800',
+  vermelho: 'bg-red-50 border-red-200 text-red-700',
+}
+
+function montarAvisos(dados: DreResultado, unidade: VisaoDre): Aviso[] {
+  const avisos: Aviso[] = [
+    {
+      tom: 'azul',
+      texto:
+        '"CMV" é o valor das notas de compra no mês de competência — não é CMV real (não desconta estoque nem considera o que foi de fato consumido/vendido).',
+    },
+    {
+      tom: 'ambar',
+      texto:
+        'Competência de lançamentos antigos (antes desta funcionalidade) é aproximada pela data de lançamento/pagamento — só despesas recorrentes configuradas depois têm competência deslocada de verdade.' +
+        (unidade !== 'consolidado' && dados.percentualRateio != null
+          ? ` Rateio aplicado: ${(dados.percentualRateio * 100).toFixed(1)}% das despesas e do CMV de rateio/cozinha do mês, proporcional ao faturamento fiscal de cada loja (Import do PDV).`
+          : ''),
+    },
+    {
+      tom: 'ambar',
+      texto:
+        'Empréstimos/Amortizações (Resultado Financeiro) refletem o valor lançado nessas contas — se incluírem a parcela de principal (não só juros), o resultado fica subestimado; confira como esses lançamentos são registrados.',
+    },
+  ]
+  if (dados.secaoNaoClassificada.total !== 0) {
+    avisos.unshift({
+      tom: 'vermelho',
+      texto: `Há ${formatBRL(dados.secaoNaoClassificada.total)} em contas sem linha do DRE definida (rode a migration de classificação do plano de contas). Esse valor está incluído no Resultado Líquido do Período, mas fora da cascata abaixo — veja "Não classificado".`,
+    })
+  }
+  return avisos
+}
+
+function AvisosModal({ avisos, onClose }: { avisos: Aviso[]; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-lg max-w-md w-full p-6 max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-gray-800">Avisos sobre este DRE</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X size={24} />
+          </button>
+        </div>
+        <div className="space-y-3">
+          {avisos.map((a, i) => (
+            <div key={i} className={`rounded-lg p-3 text-xs border ${TOM_CLASSES[a.tom]}`}>
+              {a.texto}
+            </div>
+          ))}
+        </div>
+        <button onClick={onClose} className="w-full bg-gray-100 text-gray-700 rounded-lg py-2.5 text-sm font-medium mt-4">
+          Fechar
+        </button>
+      </div>
+    </div>
+  )
+}
 
 // CMV é a única seção cujas contas vêm de itens de compra (fornecedor);
 // todo o resto vem de lançamentos de despesa (beneficiário) — decide qual
@@ -36,12 +105,10 @@ function SecaoCascata({
   titulo,
   secao,
   onAbrirConta,
-  notaExtra,
 }: {
   titulo: string
   secao: DreSecao
   onAbrirConta: (c: DreContaValor) => void
-  notaExtra?: React.ReactNode
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3">
@@ -84,7 +151,6 @@ function SecaoCascata({
           })}
         </div>
       )}
-      {notaExtra && <div className="px-4 py-2.5 border-t border-gray-100 text-xs text-gray-400">{notaExtra}</div>}
     </div>
   )
 }
@@ -98,28 +164,101 @@ function SubtotalCascata({ label, valor }: { label: string; valor: number }) {
   )
 }
 
+interface LinhaComparativa {
+  label: string
+  valores: number[]
+  subtotal?: boolean
+}
+
+function TabelaComparativa({ dados }: { dados: DreResultado[] }) {
+  const linhas: LinhaComparativa[] = [
+    { label: 'Receita Bruta de Vendas', valores: dados.map((d) => d.totalReceitaBruta) },
+    { label: '(−) Deduções de Vendas', valores: dados.map((d) => d.secaoDeducaoVendas.total) },
+    { label: '= Receita Líquida de Vendas', valores: dados.map((d) => d.totalReceitaLiquida), subtotal: true },
+    { label: '(−) CMV', valores: dados.map((d) => d.secaoCmv.total) },
+    { label: '(−) Mão de Obra e Encargos', valores: dados.map((d) => d.secaoMaoObra.total) },
+    { label: '= Lucro Bruto', valores: dados.map((d) => d.totalLucroBruto), subtotal: true },
+    { label: '(−) Despesas Operacionais', valores: dados.map((d) => d.secaoDespesasOperacionais.total) },
+    { label: '= Resultado Operacional', valores: dados.map((d) => d.totalResultadoOperacional), subtotal: true },
+    { label: '(−) Resultado Financeiro', valores: dados.map((d) => d.secaoResultadoFinanceiro.total) },
+    { label: '= Lucro Líquido Antes da Distribuição', valores: dados.map((d) => d.totalLucroLiquidoAntesDistribuicao), subtotal: true },
+    { label: '(−) Distribuição de Lucros', valores: dados.map((d) => d.secaoDistribuicaoLucros.total) },
+    { label: '= Resultado Líquido do Período', valores: dados.map((d) => d.resultado), subtotal: true },
+  ]
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200">
+              <th className="text-left px-4 py-3 font-semibold text-gray-700 sticky left-0 z-10 bg-white whitespace-nowrap">
+                Linha
+              </th>
+              {dados.map((d) => (
+                <th key={`${d.ano}-${d.mes}`} className="text-right px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">
+                  {MESES_ABREV[d.mes - 1]}/{String(d.ano).slice(2)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.map((l) => (
+              <tr key={l.label} className={l.subtotal ? 'bg-pink-50/60' : ''}>
+                <td
+                  className={`px-4 py-2.5 sticky left-0 z-10 whitespace-nowrap ${
+                    l.subtotal ? 'bg-pink-50 font-bold text-pink-900' : 'bg-white text-gray-600'
+                  }`}
+                >
+                  {l.label}
+                </td>
+                {l.valores.map((v, i) => (
+                  <td
+                    key={i}
+                    className={`px-4 py-2.5 text-right whitespace-nowrap ${
+                      l.subtotal ? 'font-bold text-pink-900' : v < 0 ? 'text-red-600' : 'text-gray-800'
+                    }`}
+                  >
+                    {formatBRL(v)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function DrePage() {
   const hoje = new Date()
 
   const [unidade, setUnidade] = useState<VisaoDre>('loja1')
   const [ano, setAno] = useState(hoje.getFullYear())
   const [mes, setMes] = useState(hoje.getMonth() + 1)
+  const [modo, setModo] = useState<Modo>('unico')
 
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [dados, setDados] = useState<DreResultado | null>(null)
+  const [dadosComparativo, setDadosComparativo] = useState<DreResultado[] | null>(null)
   const [modalDetalhe, setModalDetalhe] = useState<ModalDetalhe | null>(null)
+  const [mostrarAvisos, setMostrarAvisos] = useState(false)
 
   useEffect(() => {
     carregar()
-  }, [unidade, ano, mes])
+  }, [unidade, ano, mes, modo])
 
   async function carregar() {
     setLoading(true)
     setErro('')
     try {
-      const resultado = await buscarDre(unidade, ano, mes)
-      setDados(resultado)
+      if (modo === 'unico') {
+        setDados(await buscarDre(unidade, ano, mes))
+      } else {
+        setDadosComparativo(await buscarDreComparativo(unidade, ano, mes, 6))
+      }
     } catch (err: any) {
       console.error('Erro ao carregar DRE:', err)
       setErro('Erro ao carregar: ' + (err?.message || 'desconhecido'))
@@ -139,13 +278,32 @@ export default function DrePage() {
     setModalDetalhe({ tipo: tipoOrigem(secao.linha), titulo: c.codigo !== '—' ? `${c.codigo} — ${c.nome}` : c.nome, contaId: c.contaId })
   }
 
+  const avisos = dados ? montarAvisos(dados, unidade) : []
+  const temAvisoUrgente = !!dados && dados.secaoNaoClassificada.total !== 0
+
   return (
     <ProtectedRoute allowedRoles={['admin']}>
       <div className="min-h-screen bg-gray-50 pb-20">
-        <PageHeader title="DRE" backHref="/financeiro" maxWidth="max-w-3xl" />
+        <PageHeader
+          title="DRE"
+          backHref="/financeiro"
+          maxWidth="max-w-3xl"
+          actions={
+            modo === 'unico' && dados ? (
+              <button
+                onClick={() => setMostrarAvisos(true)}
+                className="relative p-2 hover:bg-gray-100 rounded-lg text-gray-500"
+                title="Avisos sobre este DRE"
+              >
+                <Info size={20} />
+                {temAvisoUrgente && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />}
+              </button>
+            ) : undefined
+          }
+        />
 
         <div className="max-w-3xl mx-auto px-4 py-6">
-          <div className="flex gap-2 mb-4">
+          <div className="flex gap-2 mb-3">
             {(['loja1', 'loja2', 'consolidado'] as const).map((u) => (
               <button
                 key={u}
@@ -159,11 +317,27 @@ export default function DrePage() {
             ))}
           </div>
 
+          <div className="flex gap-2 mb-4">
+            {(['unico', 'comparativo'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setModo(m)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                  modo === m ? 'bg-gray-800 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-500'
+                }`}
+              >
+                {m === 'unico' ? 'Mês único' : 'Comparativo (6 meses)'}
+              </button>
+            ))}
+          </div>
+
           <div className="flex items-center justify-center gap-4 mb-6">
             <button onClick={mesAnterior} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
               <ChevronLeft size={20} className="text-gray-600" />
             </button>
-            <p className="text-lg font-semibold text-gray-800 min-w-[180px] text-center">{MESES[mes - 1]} de {ano}</p>
+            <p className="text-lg font-semibold text-gray-800 min-w-[180px] text-center">
+              {modo === 'unico' ? `${MESES[mes - 1]} de ${ano}` : `Até ${MESES[mes - 1]} de ${ano}`}
+            </p>
             <button onClick={proximoMes} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
               <ChevronRight size={20} className="text-gray-600" />
             </button>
@@ -175,44 +349,28 @@ export default function DrePage() {
             <div className="flex items-center justify-center py-12 gap-2 text-gray-400">
               <Loader size={20} className="animate-spin" /> Carregando...
             </div>
+          ) : modo === 'comparativo' ? (
+            dadosComparativo && <TabelaComparativa dados={dadosComparativo} />
           ) : dados ? (
             <>
-              <div className="bg-white rounded-xl p-4 border border-gray-100 mb-4">
-                <p className="text-xs text-gray-500 uppercase font-semibold">Resultado Líquido do Período</p>
-                <p className={`text-2xl font-bold mt-1 ${dados.resultado >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatBRL(dados.resultado)}
-                </p>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 flex items-start gap-2 text-xs text-blue-800">
-                <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-                <span>
-                  "CMV" é o valor das notas de compra no mês de competência — não é CMV real (não desconta estoque nem
-                  considera o que foi de fato consumido/vendido).
-                </span>
-              </div>
-
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6 flex items-start gap-2 text-xs text-amber-800">
-                <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-                <span>
-                  Competência de lançamentos antigos (antes desta funcionalidade) é aproximada pela data de
-                  lançamento/pagamento — só despesas recorrentes configuradas depois têm competência deslocada de verdade.
-                  {unidade !== 'consolidado' && dados.percentualRateio != null && (
-                    <> Rateio aplicado: {(dados.percentualRateio * 100).toFixed(1)}% das despesas de rateio/cozinha do mês, proporcional ao faturamento fiscal de cada loja (Import do PDV).</>
-                  )}
-                </span>
-              </div>
-
-              {dados.secaoNaoClassificada.total !== 0 && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6 flex items-start gap-2 text-xs text-red-700">
-                  <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-                  <span>
-                    Há {formatBRL(dados.secaoNaoClassificada.total)} em contas sem linha do DRE definida (rode a migration
-                    de classificação do plano de contas). Esse valor está incluído no Resultado Líquido do Período, mas
-                    fora da cascata abaixo — veja "Não classificado".
-                  </span>
+              <div className={`rounded-2xl p-6 mb-4 border ${dados.resultado >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Resultado Líquido do Período</p>
+                    <p className={`text-3xl font-bold mt-1 ${dados.resultado >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {formatBRL(dados.resultado)}
+                    </p>
+                    {dados.totalReceitaBruta > 0 && (
+                      <p className={`text-xs font-medium mt-1 ${dados.resultado >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {((dados.resultado / dados.totalReceitaBruta) * 100).toFixed(1)}% da Receita Bruta
+                      </p>
+                    )}
+                  </div>
+                  <div className={`rounded-full p-3 flex-shrink-0 ${dados.resultado >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {dados.resultado >= 0 ? <TrendingUp size={28} /> : <TrendingDown size={28} />}
+                  </div>
                 </div>
-              )}
+              </div>
 
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3">
                 <p className="text-sm font-semibold text-gray-700 px-4 py-3">
@@ -270,12 +428,7 @@ export default function DrePage() {
               )}
               <SubtotalCascata label="= Resultado Operacional" valor={dados.totalResultadoOperacional} />
 
-              <SecaoCascata
-                titulo="(−) Resultado Financeiro"
-                secao={dados.secaoResultadoFinanceiro}
-                onAbrirConta={(c) => abrirConta(dados.secaoResultadoFinanceiro, c)}
-                notaExtra="Empréstimos/Amortizações refletem o valor lançado nessas contas — se incluírem a parcela de principal (não só juros), o resultado fica subestimado; confira como esses lançamentos são registrados."
-              />
+              <SecaoCascata titulo="(−) Resultado Financeiro" secao={dados.secaoResultadoFinanceiro} onAbrirConta={(c) => abrirConta(dados.secaoResultadoFinanceiro, c)} />
               <SubtotalCascata label="= Lucro Líquido Antes da Distribuição" valor={dados.totalLucroLiquidoAntesDistribuicao} />
 
               <SecaoCascata titulo="(−) Distribuição de Lucros" secao={dados.secaoDistribuicaoLucros} onAbrirConta={(c) => abrirConta(dados.secaoDistribuicaoLucros, c)} />
@@ -305,6 +458,8 @@ export default function DrePage() {
             </>
           ) : null}
         </div>
+
+        {mostrarAvisos && <AvisosModal avisos={avisos} onClose={() => setMostrarAvisos(false)} />}
 
         {modalDetalhe && dados && (
           <DreDetalheModal

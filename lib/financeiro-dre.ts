@@ -246,8 +246,16 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
   ;(itens || []).forEach((item: any) => {
     const lancamento: any = compraPorLancamento.get(item.lancamento_id)
     if (!lancamento) return
-    if (unidade !== 'consolidado' && lancamento.unidade !== unidade) return
-    acumular(item.conta_id, item.valor_total, lancamento.parte_id, lancamento.parte?.nome || 'Sem fornecedor')
+    const parteNome = lancamento.parte?.nome || 'Sem fornecedor'
+    // Mesma regra de rateio das despesas: insumo comprado pela cozinha
+    // (unidade='rateio', ex: matéria-prima compartilhada pelas duas lojas)
+    // precisa entrar proporcionalmente na visão de cada loja — antes ficava
+    // de fora inteiro, e só aparecia certo em Consolidado.
+    if (unidade === 'consolidado' || lancamento.unidade === unidade) {
+      acumular(item.conta_id, item.valor_total, lancamento.parte_id, parteNome)
+    } else if (lancamento.unidade === 'rateio') {
+      acumular(item.conta_id, item.valor_total * (percentualRateio || 0), lancamento.parte_id, parteNome)
+    }
   })
 
   const totalAportesReserva = aportesReservaDetalhados.reduce((s, l) => s + l.valor, 0)
@@ -339,4 +347,23 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     linhasDetalhadas,
     aportesReservaDetalhados,
   }
+}
+
+/**
+ * DRE dos últimos `meses` (default 6), terminando em ano/mes — pra
+ * visualizar a evolução das linhas da cascata mês a mês (análise
+ * horizontal). Reaproveita buscarDre inteiro, um mês de cada vez, em
+ * paralelo — sem duplicar a lógica de cálculo. Mais caro que um mês só
+ * (N buscas em vez de 1), mas é uma ação explícita do usuário (alternar
+ * pro modo Comparativo), não algo carregado toda hora.
+ */
+export async function buscarDreComparativo(unidade: VisaoDre, ano: number, mes: number, meses = 6): Promise<DreResultado[]> {
+  const pares: { ano: number; mes: number }[] = []
+  for (let i = meses - 1; i >= 0; i--) {
+    const totalMeses = mes - 1 - i
+    const anoDoMes = ano + Math.floor(totalMeses / 12)
+    const mesDoMes = ((totalMeses % 12) + 12) % 12
+    pares.push({ ano: anoDoMes, mes: mesDoMes + 1 })
+  }
+  return Promise.all(pares.map((p) => buscarDre(unidade, p.ano, p.mes)))
 }
