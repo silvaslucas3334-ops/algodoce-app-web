@@ -271,6 +271,7 @@ export interface FinanceiroConta {
   linha_dre?: LinhaDre | null // null = conta ainda não classificada na cascata do DRE
   aplicavel_a: 'compras_insumos' | 'despesas_gerais' | 'ambos'
   afeta_dre: boolean // false = conta de reserva (aplicação financeira, ativo fixo etc.) — aportes nela não entram no DRE
+  afeta_fluxo_caixa: boolean // false = dinheiro já sai antes de chegar no banco (Taxa de Cartão, Comissão de Delivery) — trava o campo homônimo em financeiro_lancamentos, não é escolha livre do usuário
   ativo: boolean
   created_at: string
 }

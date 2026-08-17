@@ -70,6 +70,12 @@ CREATE TABLE IF NOT EXISTS financeiro_contas (
   -- grupo_dre (texto livre, usado só pra agrupar exibição).
   linha_dre TEXT CHECK (linha_dre IS NULL OR linha_dre IN
     ('deducao_vendas', 'cmv', 'mao_obra_encargos', 'despesas_operacionais', 'resultado_financeiro', 'distribuicao_lucros')),
+  -- false = o dinheiro já sai antes de chegar no banco (ex: Taxa de Cartão,
+  -- Comissão de Delivery, contas 2003/2004) — despesa nela já nasce
+  -- liquidada, sem evento de contas a pagar/fluxo de caixa. Propriedade da
+  -- conta, não escolha livre do usuário na hora de lançar (ver
+  -- lib/migrations/financeiro-contas-afeta-fluxo-caixa.sql).
+  afeta_fluxo_caixa BOOLEAN NOT NULL DEFAULT true,
   ativo BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -108,6 +114,7 @@ INSERT INTO financeiro_contas (codigo, nome, centro_custo_id, grupo_dre, aplicav
 ON CONFLICT (codigo) DO NOTHING;
 
 UPDATE financeiro_contas SET afeta_dre = false WHERE codigo = '3002';
+UPDATE financeiro_contas SET afeta_fluxo_caixa = false WHERE codigo IN ('2003', '2004');
 
 UPDATE financeiro_contas SET linha_dre = 'cmv'                   WHERE codigo IN ('1001', '1002', '1004');
 UPDATE financeiro_contas SET linha_dre = 'mao_obra_encargos'     WHERE codigo IN ('1003', '1005');

@@ -25,6 +25,7 @@ export default function EditarContaModal({ conta, centros, onClose, onSaved }: P
   const [linhaDre, setLinhaDre] = useState<LinhaDre | ''>(conta.linha_dre || '')
   const [aplicavelA, setAplicavelA] = useState(conta.aplicavel_a)
   const [afetaDre, setAfetaDre] = useState(conta.afeta_dre)
+  const [afetaFluxoCaixa, setAfetaFluxoCaixa] = useState(conta.afeta_fluxo_caixa)
   const [ativo, setAtivo] = useState(conta.ativo)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -46,6 +47,7 @@ export default function EditarContaModal({ conta, centros, onClose, onSaved }: P
         linha_dre: linhaDre || null,
         aplicavel_a: aplicavelA,
         afeta_dre: afetaDre,
+        afeta_fluxo_caixa: afetaFluxoCaixa,
         ativo,
       }
       await atualizarConta(conta.id, dados)
@@ -145,6 +147,24 @@ export default function EditarContaModal({ conta, centros, onClose, onSaved }: P
                 Desmarque só para contas de reserva/provisão (aplicação financeira, ativo fixo, 13º/férias). Lançamentos
                 nela não entram como despesa no resultado — aparecem à parte, em "Aportes em Reserva". Use com cuidado:
                 isso muda o Resultado Líquido calculado.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={afetaFluxoCaixa}
+              onChange={(e) => setAfetaFluxoCaixa(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span className="text-sm text-gray-700">
+              Afeta o fluxo de caixa
+              <span className="block text-xs text-gray-400 mt-0.5">
+                Desmarque só quando o dinheiro já sai antes de chegar no banco (ex: Taxa de Cartão, Comissão de
+                Delivery) — despesas lançadas nesta conta não geram evento de contas a pagar nem entram no calendário
+                de caixa, só no resultado (DRE). Trava esse comportamento pra qualquer despesa lançada nesta conta —
+                não fica mais como escolha do usuário na hora de lançar.
               </span>
             </span>
           </label>

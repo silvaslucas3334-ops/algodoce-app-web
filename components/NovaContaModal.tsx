@@ -25,6 +25,7 @@ export default function NovaContaModal({ centros, onClose, onCreated }: Props) {
   const [linhaDre, setLinhaDre] = useState<LinhaDre | ''>('')
   const [aplicavelA, setAplicavelA] = useState<DadosConta['aplicavel_a']>('ambos')
   const [afetaDre, setAfetaDre] = useState(true)
+  const [afetaFluxoCaixa, setAfetaFluxoCaixa] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
@@ -46,6 +47,7 @@ export default function NovaContaModal({ centros, onClose, onCreated }: Props) {
         linha_dre: linhaDre || null,
         aplicavel_a: aplicavelA,
         afeta_dre: afetaDre,
+        afeta_fluxo_caixa: afetaFluxoCaixa,
       })
       onCreated(conta)
       onClose()
@@ -158,6 +160,24 @@ export default function NovaContaModal({ centros, onClose, onCreated }: Props) {
               <span className="block text-xs text-gray-400 mt-0.5">
                 Desmarque só para contas de reserva/provisão (aplicação financeira, ativo fixo, 13º/férias) — lançamentos
                 nela não entram como despesa no resultado.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={afetaFluxoCaixa}
+              onChange={(e) => setAfetaFluxoCaixa(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span className="text-sm text-gray-700">
+              Afeta o fluxo de caixa
+              <span className="block text-xs text-gray-400 mt-0.5">
+                Desmarque só quando o dinheiro já sai antes de chegar no banco (ex: Taxa de Cartão, Comissão de
+                Delivery) — despesas lançadas nesta conta não geram evento de contas a pagar nem entram no calendário
+                de caixa, só no resultado (DRE). Trava esse comportamento pra qualquer despesa lançada nesta conta —
+                não fica mais como escolha do usuário na hora de lançar.
               </span>
             </span>
           </label>

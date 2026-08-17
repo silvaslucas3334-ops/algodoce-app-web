@@ -110,13 +110,12 @@ function NovaDespesaForm() {
     setDataVencimento(calcularVencimento(dataLancamento, parte.condicao_pagamento, parte.prazo_dias))
   }, [parteId])
 
-  // Taxa de Cartão (2004) e Comissão de Delivery (2003) são "não-caixa" por
-  // natureza — o dinheiro já sai antes de chegar no banco. Só sugere o
-  // padrão ao trocar de conta; continua editável pra qualquer outra conta
-  // que também precise desse tratamento.
+  // "Afeta o fluxo de caixa" é propriedade da conta (Plano de Contas), não
+  // escolha do usuário aqui — trava contra lançar na conta certa com o
+  // comportamento errado (ou vice-versa). Só a troca de conta muda isso.
   useEffect(() => {
     if (!contaSelecionada) return
-    setNaoAfetaCaixa(contaSelecionada.codigo === '2003' || contaSelecionada.codigo === '2004')
+    setNaoAfetaCaixa(!contaSelecionada.afeta_fluxo_caixa)
   }, [contaId])
 
   useEffect(() => {
@@ -342,21 +341,18 @@ function NovaDespesaForm() {
               <p className="text-xs text-gray-400 mt-1">Direciona a despesa para a linha certa do DRE e do fluxo de caixa.</p>
             </div>
 
-            <label className="flex items-start gap-2.5 cursor-pointer p-3 bg-gray-50 border border-gray-200 rounded-lg">
-              <input
-                type="checkbox"
-                checked={naoAfetaCaixa}
-                onChange={(e) => setNaoAfetaCaixa(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span className="text-sm text-gray-700">
-                Não afeta o fluxo de caixa
-                <span className="block text-xs text-gray-400 mt-0.5">
-                  O dinheiro já saiu antes de chegar no banco (ex: Taxa de Cartão, Comissão de Delivery) — não entra em
-                  contas a pagar nem no calendário de caixa, só no resultado (DRE) pela data da despesa.
+            {naoAfetaCaixa && (
+              <div className="flex items-start gap-2.5 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                <span className="text-sm text-gray-700">
+                  Não afeta o fluxo de caixa
+                  <span className="block text-xs text-gray-400 mt-0.5">
+                    Definido pela conta contábil escolhida: o dinheiro já saiu antes de chegar no banco (ex: Taxa de
+                    Cartão, Comissão de Delivery) — não entra em contas a pagar nem no calendário de caixa, só no
+                    resultado (DRE) pela data da despesa. Pra mudar, ajuste a conta no Plano de Contas.
+                  </span>
                 </span>
-              </span>
-            </label>
+              </div>
+            )}
             {naoAfetaCaixa && unidade === 'rateio' && (
               <p className="text-xs text-amber-600">
                 Taxa de cartão/delivery costuma ser custo por transação de cada loja, não custo compartilhado da

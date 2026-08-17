@@ -21,6 +21,7 @@ export interface DadosConta {
   linha_dre: LinhaDre | null
   aplicavel_a: 'compras_insumos' | 'despesas_gerais' | 'ambos'
   afeta_dre: boolean
+  afeta_fluxo_caixa: boolean
 }
 
 export async function criarConta(dados: DadosConta): Promise<FinanceiroConta> {
