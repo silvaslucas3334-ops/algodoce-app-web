@@ -692,10 +692,19 @@ export async function confirmarConciliacaoParcial(
 ): Promise<{ quitado: boolean; saldoRestante: number }> {
   const { data: lancamentoAtual, error: erroLancamentoAtual } = await supabase
     .from('financeiro_lancamentos')
-    .select('parte_id, valor_total, valor_pago_conciliado')
+    .select('parte_id, valor_total, valor_pago_conciliado, status')
     .eq('id', lancamentoId)
     .single()
   if (erroLancamentoAtual) throw new Error(erroLancamentoAtual.message)
+  // Guarda cedo, antes de tocar na transação do extrato: se a despesa
+  // escolhida já não está mais aberta (ex: usuário clicou na parcela errada
+  // entre duas com o mesmo nome, uma já paga), falha aqui em vez de marcar a
+  // transação como conciliada e só depois descobrir — isso já causou um
+  // vínculo órfão em produção (transação "conciliada" apontando pra uma
+  // despesa já paga, sem nunca contar pro valor_pago_conciliado de ninguém).
+  if (lancamentoAtual.status !== 'aberto') {
+    throw new Error('Esta despesa não está mais em aberto — confira se escolheu a parcela certa e tente de novo.')
+  }
 
   const { data: transacaoAtualizada, error: erroTransacao } = await supabase
     .from('financeiro_extrato_transacoes')
@@ -712,6 +721,18 @@ export async function confirmarConciliacaoParcial(
   const novoPago = Number(lancamentoAtual.valor_pago_conciliado || 0) + Math.abs(valorTransacao)
   const saldoRestante = valorTotal - novoPago
 
+  // Ainda existe uma janela de corrida entre o guard acima e os UPDATEs
+  // abaixo (duas abas, ex.). Se o UPDATE final falhar por isso, desfaz o
+  // vínculo em vez de deixar a transação presa como "conciliada" sem contar
+  // pra nenhuma despesa — mesmo problema que o guard de cima evita no caso
+  // comum, coberto aqui pro caso raro.
+  async function desfazerVinculoTransacao() {
+    await supabase
+      .from('financeiro_extrato_transacoes')
+      .update({ status_conciliacao: 'pendente', lancamento_id: null, parte_id: null })
+      .eq('id', transacaoId)
+  }
+
   if (saldoRestante <= 0.01) {
     const { data: quitado, error: erroQuitar } = await supabase
       .from('financeiro_lancamentos')
@@ -724,8 +745,12 @@ export async function confirmarConciliacaoParcial(
       .eq('id', lancamentoId)
       .eq('status', 'aberto')
       .select('id')
-    if (erroQuitar) throw new Error(erroQuitar.message)
+    if (erroQuitar) {
+      await desfazerVinculoTransacao()
+      throw new Error(erroQuitar.message)
+    }
     if (!quitado || quitado.length === 0) {
+      await desfazerVinculoTransacao()
       throw new Error('Este lançamento já foi marcado como pago em outra sessão.')
     }
     return { quitado: true, saldoRestante: 0 }
@@ -737,8 +762,12 @@ export async function confirmarConciliacaoParcial(
     .eq('id', lancamentoId)
     .eq('status', 'aberto')
     .select('id')
-  if (erroParcial) throw new Error(erroParcial.message)
+  if (erroParcial) {
+    await desfazerVinculoTransacao()
+    throw new Error(erroParcial.message)
+  }
   if (!atualizado || atualizado.length === 0) {
+    await desfazerVinculoTransacao()
     throw new Error('Este lançamento mudou de status em outra sessão — atualize a tela e tente de novo.')
   }
   return { quitado: false, saldoRestante }
