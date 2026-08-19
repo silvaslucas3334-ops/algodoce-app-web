@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
+import { exportarCSV } from '@/lib/csv-export'
 import { Download, Filter } from 'lucide-react'
 
 // ordens_producao.hora_inicio_prod e outras colunas "timestamp without time zone"
@@ -23,7 +24,7 @@ function hoje() {
 }
 
 export default function RelatoriosTab() {
-  const [abaRelatorio, setAbaRelatorio] = useState<'producao' | 'baixas' | 'estoque'>('producao')
+  const [abaRelatorio, setAbaRelatorio] = useState<'producao' | 'baixas'>('producao')
   const [loading, setLoading] = useState(false)
 
   const [produtos, setProdutos] = useState<any[]>([])
@@ -225,95 +226,15 @@ export default function RelatoriosTab() {
     setLoading(false)
   }
 
-  // ===================================================================
-  // RELATÓRIO 3: POSIÇÃO DE ESTOQUE (estático, por categoria e por item)
-  // ===================================================================
-  const [filtrosEstoque, setFiltrosEstoque] = useState({ unidade: 'cozinha' })
-  const [visaoEstoque, setVisaoEstoque] = useState<'categoria' | 'item'>('item')
-  const [estoqueData, setEstoqueData] = useState<any[]>([])
-  const [dataConsultaEstoque, setDataConsultaEstoque] = useState('')
-
-  async function carregarEstoque() {
-    setLoading(true)
-    try {
-      setDataConsultaEstoque(new Date().toLocaleString('pt-BR'))
-
-      let query = supabase
-        .from('lotes_producao')
-        .select('quantidade, peso_gramas, destino, produto:produtos(nome, categoria_id, unidade_medida, categoria:categorias(nome))')
-        .in('status', ['na_loja', 'na_cozinha', 'em_estoque'])
-
-      if (filtrosEstoque.unidade) query = query.eq('destino', filtrosEstoque.unidade)
-
-      const { data: lotes } = await query
-
-      const porItem = new Map<string, any>()
-      ;(lotes || []).forEach((lote: any) => {
-        const nomeProduto = lote.produto?.nome || 'Desconhecido'
-        if (!porItem.has(nomeProduto)) {
-          porItem.set(nomeProduto, {
-            produto: nomeProduto,
-            categoria: lote.produto?.categoria?.nome || 'Sem categoria',
-            unidade_medida: lote.produto?.unidade_medida || 'un',
-            quantidade_total: 0,
-            contador: 0,
-          })
-        }
-        const item = porItem.get(nomeProduto)
-        item.quantidade_total += lote.quantidade || lote.peso_gramas || 0
-        item.contador += 1
-      })
-
-      setEstoqueData(Array.from(porItem.values()).sort((a, b) => a.produto.localeCompare(b.produto)))
-    } catch (error) {
-      console.error('Erro ao carregar estoque:', error)
-    }
-    setLoading(false)
-  }
-
-  const estoquePorCategoria = Array.from(
-    estoqueData
-      .reduce((mapa, item) => {
-        if (!mapa.has(item.categoria)) {
-          mapa.set(item.categoria, { categoria: item.categoria, quantidade_total: 0, itens: 0 })
-        }
-        const c = mapa.get(item.categoria)
-        c.quantidade_total += item.quantidade_total
-        c.itens += 1
-        return mapa
-      }, new Map<string, any>())
-      .values()
-  ).sort((a: any, b: any) => a.categoria.localeCompare(b.categoria))
-
   useEffect(() => {
     if (abaRelatorio === 'producao') carregarProducao()
     if (abaRelatorio === 'baixas') carregarBaixas()
-    if (abaRelatorio === 'estoque') carregarEstoque()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abaRelatorio])
 
   function aplicarFiltros() {
     if (abaRelatorio === 'producao') carregarProducao()
     if (abaRelatorio === 'baixas') carregarBaixas()
-    if (abaRelatorio === 'estoque') carregarEstoque()
-  }
-
-  function exportarCSV(dados: any[], headers: string[], filename: string) {
-    let csv = headers.join(',') + '\n'
-    dados.forEach((row) => {
-      const values = headers.map((h) => {
-        let value = row[h] ?? ''
-        if (typeof value === 'object') value = JSON.stringify(value)
-        return `"${String(value).replace(/"/g, '""')}"`
-      })
-      csv += values.join(',') + '\n'
-    })
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${filename}-${new Date().toISOString().split('T')[0]}.csv`
-    link.click()
   }
 
   return (
@@ -327,7 +248,6 @@ export default function RelatoriosTab() {
         {[
           { id: 'producao', label: '🍳 Produção' },
           { id: 'baixas', label: '📉 Baixas & Consumo' },
-          { id: 'estoque', label: '📦 Posição de Estoque' },
         ].map((aba) => (
           <button
             key={aba.id}
@@ -445,22 +365,6 @@ export default function RelatoriosTab() {
                 </select>
               </div>
             </>
-          )}
-
-          {abaRelatorio === 'estoque' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Unidade</label>
-              <select
-                value={filtrosEstoque.unidade}
-                onChange={(e) => setFiltrosEstoque({ ...filtrosEstoque, unidade: e.target.value })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-              >
-                <option value="">Todas</option>
-                <option value="cozinha">Cozinha</option>
-                <option value="loja1">Paraisópolis</option>
-                <option value="loja2">Itajubá</option>
-              </select>
-            </div>
           )}
         </div>
 
@@ -666,99 +570,6 @@ export default function RelatoriosTab() {
                 <div className="text-center py-8 text-gray-400">Nenhuma baixa encontrada no período</div>
               )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== RELATÓRIO 3: POSIÇÃO DE ESTOQUE ===== */}
-      {abaRelatorio === 'estoque' && (
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-800">
-                Posição de Estoque {filtrosEstoque.unidade ? `— ${LOCAL_LABEL[filtrosEstoque.unidade]}` : '— Todas as unidades'}
-              </h3>
-              {dataConsultaEstoque && (
-                <p className="text-xs text-gray-500 mt-1">Consultado em: {dataConsultaEstoque}</p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex bg-gray-100 rounded-lg p-1">
-                <button
-                  onClick={() => setVisaoEstoque('item')}
-                  className={`px-3 py-1.5 rounded text-sm font-medium ${visaoEstoque === 'item' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
-                >
-                  Por Item
-                </button>
-                <button
-                  onClick={() => setVisaoEstoque('categoria')}
-                  className={`px-3 py-1.5 rounded text-sm font-medium ${visaoEstoque === 'categoria' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
-                >
-                  Por Categoria
-                </button>
-              </div>
-              <button
-                onClick={() => {
-                  if (visaoEstoque === 'item') {
-                    exportarCSV(estoqueData, ['produto', 'categoria', 'unidade_medida', 'quantidade_total', 'contador'], 'relatorio-estoque-por-item')
-                  } else {
-                    exportarCSV(estoquePorCategoria, ['categoria', 'quantidade_total', 'itens'], 'relatorio-estoque-por-categoria')
-                  }
-                }}
-                className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700"
-              >
-                <Download size={16} /> Exportar CSV
-              </button>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            {visaoEstoque === 'item' ? (
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Produto</th>
-                    <th className="px-4 py-2 text-left">Categoria</th>
-                    <th className="px-4 py-2 text-left">Un. Medida</th>
-                    <th className="px-4 py-2 text-center">Qtd Disponível</th>
-                    <th className="px-4 py-2 text-center">Etiquetas</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {estoqueData.map((item, idx) => (
-                    <tr key={idx} className="border-b hover:bg-gray-50">
-                      <td className="px-4 py-2 font-medium">{item.produto}</td>
-                      <td className="px-4 py-2">{item.categoria}</td>
-                      <td className="px-4 py-2">{item.unidade_medida}</td>
-                      <td className="px-4 py-2 text-center font-semibold text-blue-600">{item.quantidade_total}</td>
-                      <td className="px-4 py-2 text-center text-gray-500">{item.contador}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Categoria</th>
-                    <th className="px-4 py-2 text-center">Qtd Total</th>
-                    <th className="px-4 py-2 text-center">Itens Diferentes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {estoquePorCategoria.map((cat: any, idx) => (
-                    <tr key={idx} className="border-b hover:bg-gray-50">
-                      <td className="px-4 py-2 font-medium">{cat.categoria}</td>
-                      <td className="px-4 py-2 text-center font-semibold text-blue-600">{cat.quantidade_total}</td>
-                      <td className="px-4 py-2 text-center text-gray-500">{cat.itens}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {estoqueData.length === 0 && (
-              <div className="text-center py-8 text-gray-400">Nenhum produto encontrado</div>
-            )}
           </div>
         </div>
       )}

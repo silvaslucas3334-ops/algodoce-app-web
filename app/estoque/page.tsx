@@ -4,7 +4,8 @@ import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
 import { useRealtimeData } from '@/hooks/useRealtimeData'
-import { ShoppingCart, Trash2, Send, History, RotateCcw } from 'lucide-react'
+import { exportarCSV } from '@/lib/csv-export'
+import { ShoppingCart, Trash2, Send, History, RotateCcw, ChevronDown, Download } from 'lucide-react'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 export default function EstoquePage() {
@@ -43,14 +44,13 @@ export default function EstoquePage() {
   const [buscaEtiqueta, setBuscaEtiqueta] = useState('')
   const [resultadoBusca, setResultadoBusca] = useState<any[] | null>(null)
   const [buscandoEtiqueta, setBuscandoEtiqueta] = useState(false)
-  const [mostrarCiclo, setMostrarCiclo] = useState(false)
-  const [cicloInicio, setCicloInicio] = useState(() => {
-    const d = new Date()
-    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]
-  })
-  const [cicloFim, setCicloFim] = useState(() => new Date().toISOString().split('T')[0])
-  const [cicloData, setCicloData] = useState<any[]>([])
-  const [carregandoCiclo, setCarregandoCiclo] = useState(false)
+  const [mostrarMenuAcoes, setMostrarMenuAcoes] = useState(false)
+  const [mostrarModalReverter, setMostrarModalReverter] = useState(false)
+  const [mostrarModalRelatorio, setMostrarModalRelatorio] = useState(false)
+  const [visaoRelatorio, setVisaoRelatorio] = useState<'item' | 'categoria'>('item')
+  const [unidadeRelatorio, setUnidadeRelatorio] = useState('cozinha')
+  const [relatorioData, setRelatorioData] = useState<any[]>([])
+  const [carregandoRelatorio, setCarregandoRelatorio] = useState(false)
 
   // Sincronizar local quando usuário muda
   useEffect(() => {
@@ -77,9 +77,9 @@ export default function EstoquePage() {
   }, [local])
 
   useEffect(() => {
-    if (mostrarCiclo) carregarCicloEstoque()
+    if (mostrarModalRelatorio) carregarRelatorioGerencial()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mostrarCiclo, local, cicloInicio, cicloFim])
+  }, [mostrarModalRelatorio, unidadeRelatorio])
 
   async function carregarEstoque() {
     setLoading(true)
@@ -157,6 +157,20 @@ export default function EstoquePage() {
   }, {} as Record<string, any>)
 
   const lotesAgrupList = Object.values(lotesAgrupados)
+
+  const relatorioPorCategoria = Array.from(
+    relatorioData
+      .reduce((mapa: Map<string, any>, item: any) => {
+        if (!mapa.has(item.categoria)) {
+          mapa.set(item.categoria, { categoria: item.categoria, quantidade_total: 0, itens: 0 })
+        }
+        const c = mapa.get(item.categoria)
+        c.quantidade_total += item.quantidade_total
+        c.itens += 1
+        return mapa
+      }, new Map<string, any>())
+      .values()
+  ).sort((a: any, b: any) => a.categoria.localeCompare(b.categoria))
 
   function toggleCarrinho(loteId: string) {
     setCarrinho(prev => {
@@ -377,70 +391,58 @@ export default function EstoquePage() {
   }
 
   // Ciclo de estoque (entrada×saída) da própria unidade, no período — sem somar entre unidades
-  async function carregarCicloEstoque() {
-    setCarregandoCiclo(true)
-    try {
-      const inicioIso = `${cicloInicio}T00:00:00`
-      const fimIso = `${cicloFim}T23:59:59`
-
-      const [{ data: produzidos }, { data: consumidos }] = await Promise.all([
-        supabase
-          .from('lotes_producao')
-          .select('quantidade, peso_gramas, produto:produtos(nome, unidade_medida)')
-          .eq('destino', local)
-          .gte('created_at', inicioIso)
-          .lte('created_at', fimIso),
-        supabase
-          .from('movimentacoes_estoque')
-          .select('id, quantidade, estornado_de, lote:lotes_producao(produto:produtos(nome, unidade_medida))')
-          .eq('tipo', 'saida')
-          .eq('local_origem', local)
-          .gte('created_at', inicioIso)
-          .lte('created_at', fimIso),
-      ])
-
-      // Baixas revertidas não contam como consumo real
-      const idsConsumidos = (consumidos || []).map((c: any) => c.id)
-      const revertidas = new Set<string>()
-      if (idsConsumidos.length > 0) {
-        const { data: reversoes } = await supabase
-          .from('movimentacoes_estoque')
-          .select('estornado_de')
-          .in('estornado_de', idsConsumidos)
-        reversoes?.forEach((r: any) => revertidas.add(r.estornado_de))
-      }
-
-      const porProduto = new Map<string, any>()
-      const getOrCriar = (nome: string, unidade_medida: string) => {
-        if (!porProduto.has(nome)) {
-          porProduto.set(nome, { produto: nome, unidade_medida, produzido: 0, consumido: 0 })
-        }
-        return porProduto.get(nome)
-      }
-
-      ;(produzidos || []).forEach((l: any) => {
-        const nome = l.produto?.nome || 'Desconhecido'
-        const item = getOrCriar(nome, l.produto?.unidade_medida || 'un')
-        item.produzido += l.quantidade || l.peso_gramas || 0
-      })
-
-      ;(consumidos || [])
-        .filter((c: any) => !revertidas.has(c.id))
-        .forEach((c: any) => {
-          const nome = c.lote?.produto?.nome || 'Desconhecido'
-          const item = getOrCriar(nome, c.lote?.produto?.unidade_medida || 'un')
-          item.consumido += c.quantidade || 0
+  function montarRelatorioDeLotes(lotesFonte: any[]) {
+    const porItem = new Map<string, any>()
+    lotesFonte.forEach((lote: any) => {
+      const nomeProduto = lote.produto?.nome || 'Desconhecido'
+      if (!porItem.has(nomeProduto)) {
+        porItem.set(nomeProduto, {
+          produto: nomeProduto,
+          categoria: lote.produto?.categoria?.nome || 'Sem categoria',
+          unidade_medida: lote.produto?.unidade_medida || 'un',
+          quantidade_total: 0,
+          contador: 0,
         })
+      }
+      const item = porItem.get(nomeProduto)
+      item.quantidade_total += lote.quantidade || lote.peso_gramas || 0
+      item.contador += 1
+    })
+    return Array.from(porItem.values()).sort((a, b) => a.produto.localeCompare(b.produto))
+  }
 
-      const resultado = Array.from(porProduto.values())
-        .map((c) => ({ ...c, diferenca: c.produzido - c.consumido }))
-        .sort((a, b) => a.produto.localeCompare(b.produto))
+  // Unidade = aba atual: reaproveita os lotes que a própria página já
+  // carregou (garante que o relatório nunca diverge da lista abaixo dele —
+  // mesma fonte de dados). Unidade diferente ou "todas": busca dedicada,
+  // com a mesma regra de status/destino que carregarEstoque() já usa certo
+  // (destino='cozinha' não reflete a realidade — o que importa pra cozinha
+  // é o status do lote, não o destino, que aponta pra qual loja ele é).
+  async function carregarRelatorioGerencial() {
+    if (unidadeRelatorio === local) {
+      setRelatorioData(montarRelatorioDeLotes(lotes))
+      return
+    }
 
-      setCicloData(resultado)
+    setCarregandoRelatorio(true)
+    try {
+      let query = supabase
+        .from('lotes_producao')
+        .select('quantidade, peso_gramas, destino, produto:produtos(nome, categoria_id, unidade_medida, categoria:categorias(nome))')
+
+      if (unidadeRelatorio === 'cozinha') {
+        query = query.eq('status', 'na_cozinha')
+      } else if (unidadeRelatorio === 'todas') {
+        query = query.in('status', ['na_cozinha', 'enviado', 'na_loja'])
+      } else {
+        query = query.eq('destino', unidadeRelatorio).in('status', ['enviado', 'na_loja'])
+      }
+
+      const { data } = await query
+      setRelatorioData(montarRelatorioDeLotes(data || []))
     } catch (err) {
-      console.error('Erro ao carregar ciclo de estoque:', err)
+      console.error('Erro ao carregar relatório gerencial:', err)
     } finally {
-      setCarregandoCiclo(false)
+      setCarregandoRelatorio(false)
     }
   }
 
@@ -680,103 +682,228 @@ export default function EstoquePage() {
         <div className="text-center py-12 text-gray-400">Carregando...</div>
       ) : (
         <>
-          {/* CARD: BAIXA DE CONSUMO (Só aparece na cozinha) */}
-          {local === 'cozinha' && !modoBaixaConsumo && (
-            <div className="mb-6">
-              <div className="bg-white rounded-lg border border-red-200 p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-800">Baixa de consumo</p>
-                    <p className="text-xs text-gray-500 mt-1">Itens usados na produção</p>
-                  </div>
+          {/* MENU DE AÇÕES (substitui os cards soltos de Baixa/Reverter/Histórico) */}
+          <div className="mb-6">
+            <div className="bg-white rounded-lg border border-gray-200">
+              <button
+                onClick={() => setMostrarMenuAcoes(!mostrarMenuAcoes)}
+                className="w-full flex items-center justify-between gap-2 p-4 hover:bg-gray-50"
+              >
+                <span className="text-sm font-semibold text-gray-800">⚙️ Ações</span>
+                <ChevronDown size={18} className={`text-gray-500 transition-transform ${mostrarMenuAcoes ? 'rotate-180' : ''}`} />
+              </button>
+
+              {mostrarMenuAcoes && (
+                <div className="border-t border-gray-200 p-2">
+                  {local === 'cozinha' && !modoBaixaConsumo && (
+                    <button
+                      onClick={() => { setModoBaixaConsumo(true); setMostrarMenuAcoes(false) }}
+                      className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left"
+                    >
+                      📉 Baixa de Consumo
+                    </button>
+                  )}
                   <button
-                    onClick={() => setModoBaixaConsumo(true)}
-                    className="bg-red-600 text-white rounded-lg px-4 py-2.5 text-sm font-semibold hover:bg-red-700"
+                    onClick={() => { setMostrarModalReverter(true); setMostrarMenuAcoes(false) }}
+                    className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left"
                   >
-                    📉 Baixar
+                    <RotateCcw size={16} /> Reverter Baixa por Etiqueta
+                  </button>
+                  <button
+                    onClick={() => { setMostrarHistoricoBaixas(true); carregarBaixasRecentes(); setMostrarMenuAcoes(false) }}
+                    className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left"
+                  >
+                    <History size={16} /> Histórico de Baixas
+                  </button>
+                  {usuario?.role === 'admin' && (
+                    <button
+                      onClick={() => { setUnidadeRelatorio(local); setMostrarModalRelatorio(true); setMostrarMenuAcoes(false) }}
+                      className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left border-t border-gray-100 mt-1 pt-3"
+                    >
+                      📊 Relatório Gerencial
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* MODAL: REVERTER BAIXA POR ETIQUETA */}
+          {mostrarModalReverter && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 max-h-[85vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                    <RotateCcw size={16} />
+                    Reverter baixa por etiqueta
+                  </p>
+                  <button onClick={() => setMostrarModalReverter(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">
+                  Digite o código (ou parte dele) da etiqueta baixada por engano. Busca apenas baixas feitas em{' '}
+                  <strong>{LOCAL_LABEL[local]}</strong> (troque a unidade acima se necessário). Baixas de até 24h podem
+                  ser revertidas mediante justificativa.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={buscaEtiqueta}
+                    onChange={(e) => setBuscaEtiqueta(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && buscarPorEtiqueta()}
+                    placeholder="Ex: ALD-1783191721462-1"
+                    className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <button
+                    onClick={buscarPorEtiqueta}
+                    disabled={buscandoEtiqueta}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {buscandoEtiqueta ? 'Buscando...' : 'Buscar'}
                   </button>
                 </div>
+
+                {resultadoBusca && (
+                  <div className="mt-3 space-y-2">
+                    {resultadoBusca.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-3">Nenhuma baixa encontrada para essa etiqueta</p>
+                    ) : (
+                      resultadoBusca.map(renderBaixaCard)
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          {/* CARD: REVERTER BAIXA POR ETIQUETA (busca direta) */}
-          <div className="mb-6">
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <p className="text-sm font-semibold text-gray-800 flex items-center gap-2 mb-1">
-                <RotateCcw size={16} />
-                Reverter baixa por etiqueta
-              </p>
-              <p className="text-xs text-gray-500 mb-3">
-                Digite o código (ou parte dele) da etiqueta baixada por engano. Busca apenas baixas feitas em{' '}
-                <strong>{LOCAL_LABEL[local]}</strong> (troque a unidade acima se necessário). Baixas de até 24h podem
-                ser revertidas mediante justificativa.
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={buscaEtiqueta}
-                  onChange={(e) => setBuscaEtiqueta(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && buscarPorEtiqueta()}
-                  placeholder="Ex: ALD-1783191721462-1"
-                  className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-                <button
-                  onClick={buscarPorEtiqueta}
-                  disabled={buscandoEtiqueta}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {buscandoEtiqueta ? 'Buscando...' : 'Buscar'}
-                </button>
+          {/* MODAL: HISTÓRICO DE BAIXAS (últimas 48h, para consulta) */}
+          {mostrarHistoricoBaixas && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 max-h-[85vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                    <History size={16} />
+                    Histórico de baixas
+                  </span>
+                  <button onClick={() => setMostrarHistoricoBaixas(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">
+                  Últimas 48h em {LOCAL_LABEL[local]}. Para reverter, use "Reverter Baixa por Etiqueta" no menu Ações.
+                </p>
+
+                {carregandoBaixas ? (
+                  <p className="text-sm text-gray-400 text-center py-4">Carregando...</p>
+                ) : baixasRecentes.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-4">Nenhuma baixa nas últimas 48h para {LOCAL_LABEL[local]}</p>
+                ) : (
+                  <div className="space-y-2">{baixasRecentes.map(renderBaixaCard)}</div>
+                )}
               </div>
-
-              {resultadoBusca && (
-                <div className="mt-3 space-y-2">
-                  {resultadoBusca.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-3">Nenhuma baixa encontrada para essa etiqueta</p>
-                  ) : (
-                    resultadoBusca.map(renderBaixaCard)
-                  )}
-                </div>
-              )}
             </div>
-          </div>
+          )}
 
-          {/* CARD: HISTÓRICO DE BAIXAS (últimas 48h, para consulta) */}
-          <div className="mb-6">
-            <div className="bg-white rounded-lg border border-gray-200">
-              <button
-                onClick={() => {
-                  const abrir = !mostrarHistoricoBaixas
-                  setMostrarHistoricoBaixas(abrir)
-                  if (abrir) carregarBaixasRecentes()
-                }}
-                className="w-full flex items-center justify-between gap-2 p-4 hover:bg-gray-50"
-              >
-                <span className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-                  <History size={16} />
-                  Histórico de baixas
-                </span>
-                <span className="text-xs text-gray-500">{mostrarHistoricoBaixas ? 'Ocultar' : 'Ver'}</span>
-              </button>
-
-              {mostrarHistoricoBaixas && (
-                <div className="border-t border-gray-200 p-4 space-y-3">
-                  <p className="text-xs text-gray-500">
-                    Últimas 48h em {LOCAL_LABEL[local]}. Para reverter, use a busca por etiqueta acima.
-                  </p>
-
-                  {carregandoBaixas ? (
-                    <p className="text-sm text-gray-400 text-center py-4">Carregando...</p>
-                  ) : baixasRecentes.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-4">Nenhuma baixa nas últimas 48h para {LOCAL_LABEL[local]}</p>
-                  ) : (
-                    baixasRecentes.map(renderBaixaCard)
-                  )}
+          {/* MODAL: RELATÓRIO GERENCIAL (admin — migrado de Admin > Relatórios > Posição de Estoque) */}
+          {mostrarModalRelatorio && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 max-h-[85vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-800">📊 Relatório Gerencial</h3>
+                  <button onClick={() => setMostrarModalRelatorio(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
                 </div>
-              )}
+
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <select
+                    value={unidadeRelatorio}
+                    onChange={(e) => setUnidadeRelatorio(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  >
+                    <option value="cozinha">Cozinha</option>
+                    <option value="loja1">Paraisópolis</option>
+                    <option value="loja2">Itajubá</option>
+                    <option value="todas">Todas as unidades</option>
+                  </select>
+                  <div className="flex bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => setVisaoRelatorio('item')}
+                      className={`px-3 py-1.5 rounded text-sm font-medium ${visaoRelatorio === 'item' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
+                    >
+                      Por Item
+                    </button>
+                    <button
+                      onClick={() => setVisaoRelatorio('categoria')}
+                      className={`px-3 py-1.5 rounded text-sm font-medium ${visaoRelatorio === 'categoria' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
+                    >
+                      Por Categoria
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (visaoRelatorio === 'item') {
+                        exportarCSV(relatorioData, ['produto', 'categoria', 'unidade_medida', 'quantidade_total', 'contador'], 'relatorio-estoque-por-item')
+                      } else {
+                        exportarCSV(relatorioPorCategoria, ['categoria', 'quantidade_total', 'itens'], 'relatorio-estoque-por-categoria')
+                      }
+                    }}
+                    className="flex items-center gap-2 bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-green-700"
+                  >
+                    <Download size={16} /> CSV
+                  </button>
+                </div>
+
+                {carregandoRelatorio ? (
+                  <p className="text-sm text-gray-400 text-center py-8">Carregando...</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    {visaoRelatorio === 'item' ? (
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Produto</th>
+                            <th className="px-3 py-2 text-left">Categoria</th>
+                            <th className="px-3 py-2 text-left">Un. Medida</th>
+                            <th className="px-3 py-2 text-center">Qtd Disponível</th>
+                            <th className="px-3 py-2 text-center">Etiquetas</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {relatorioData.map((item, idx) => (
+                            <tr key={idx} className="border-b hover:bg-gray-50">
+                              <td className="px-3 py-2 font-medium">{item.produto}</td>
+                              <td className="px-3 py-2">{item.categoria}</td>
+                              <td className="px-3 py-2">{item.unidade_medida}</td>
+                              <td className="px-3 py-2 text-center font-semibold text-blue-600">{item.quantidade_total}</td>
+                              <td className="px-3 py-2 text-center text-gray-500">{item.contador}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Categoria</th>
+                            <th className="px-3 py-2 text-center">Qtd Total</th>
+                            <th className="px-3 py-2 text-center">Itens Diferentes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {relatorioPorCategoria.map((cat: any, idx) => (
+                            <tr key={idx} className="border-b hover:bg-gray-50">
+                              <td className="px-3 py-2 font-medium">{cat.categoria}</td>
+                              <td className="px-3 py-2 text-center font-semibold text-blue-600">{cat.quantidade_total}</td>
+                              <td className="px-3 py-2 text-center text-gray-500">{cat.itens}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {relatorioData.length === 0 && (
+                      <div className="text-center py-8 text-gray-400">Nenhum produto encontrado</div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* HEADER GERENCIAL */}
           <div className="bg-white border-b border-gray-200 rounded-xl p-6 mb-6">
@@ -807,79 +934,6 @@ export default function EstoquePage() {
                   return dias < 0
                 }).length}</p>
               </div>
-            </div>
-          </div>
-
-          {/* CICLO DE ESTOQUE (entrada x saída) por período, só da unidade atual */}
-          <div className="mb-6">
-            <div className="bg-white rounded-lg border border-gray-200">
-              <button
-                onClick={() => setMostrarCiclo(!mostrarCiclo)}
-                className="w-full flex items-center justify-between gap-2 p-4 hover:bg-gray-50"
-              >
-                <span className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-                  🔄 Ciclo de estoque (entrada × saída) — {LOCAL_LABEL[local]}
-                </span>
-                <span className="text-xs text-gray-500">{mostrarCiclo ? 'Ocultar' : 'Ver'}</span>
-              </button>
-
-              {mostrarCiclo && (
-                <div className="border-t border-gray-200 p-4 space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="date"
-                      value={cicloInicio}
-                      onChange={(e) => setCicloInicio(e.target.value)}
-                      className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
-                    />
-                    <span className="text-gray-400 text-sm">até</span>
-                    <input
-                      type="date"
-                      value={cicloFim}
-                      onChange={(e) => setCicloFim(e.target.value)}
-                      className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    Produzido = lotes gerados para {LOCAL_LABEL[local]} no período. Consumido = baixas não revertidas. Diferença negativa indica que se consumiu mais do que foi produzido no recorte (pode ter vindo de estoque anterior).
-                  </p>
-
-                  {carregandoCiclo ? (
-                    <p className="text-sm text-gray-400 text-center py-4">Carregando...</p>
-                  ) : cicloData.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-4">Nenhum dado no período</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50 border-b">
-                          <tr>
-                            <th className="px-3 py-2 text-left">Produto</th>
-                            <th className="px-3 py-2 text-center">Produzido</th>
-                            <th className="px-3 py-2 text-center">Consumido</th>
-                            <th className="px-3 py-2 text-center">Diferença</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {cicloData.map((c, idx) => (
-                            <tr key={idx} className="border-b hover:bg-gray-50">
-                              <td className="px-3 py-2 font-medium">{c.produto}</td>
-                              <td className="px-3 py-2 text-center text-blue-600 font-semibold">
-                                {c.produzido} {c.unidade_medida}
-                              </td>
-                              <td className="px-3 py-2 text-center text-red-600 font-semibold">
-                                {c.consumido} {c.unidade_medida}
-                              </td>
-                              <td className={`px-3 py-2 text-center font-semibold ${c.diferenca < 0 ? 'text-red-700' : 'text-green-700'}`}>
-                                {c.diferenca > 0 ? '+' : ''}{c.diferenca}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 
