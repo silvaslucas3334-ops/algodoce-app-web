@@ -272,8 +272,21 @@ function DetalheDespesaContent() {
       setErro('Esta despesa já está vinculada a uma transação do extrato — desfaça a conciliação antes de marcar como aberta de novo.')
       return
     }
-    if (!!lancamento.valor_pago_conciliado && lancamento.valor_pago_conciliado > 0) {
-      setErro('Esta despesa já tem pagamentos parciais conciliados — não dá pra editar o valor ou o status por aqui.')
+
+    const valorPagoConciliado = Number(lancamento.valor_pago_conciliado || 0)
+    const temConciliacaoParcial = valorPagoConciliado > 0
+    // Única exceção à trava abaixo: corrigir o valor lançado pra bater
+    // exatamente com o que já foi conciliado (ex: diferença de poucos
+    // centavos na digitação original). Nesse caso a despesa fica quitada
+    // por definição — o status é forçado pra 'pago' junto, não fica a
+    // critério do toggle "Já foi paga" do formulário.
+    const corrigindoParaValorConciliado =
+      temConciliacaoParcial && lancamento.tipo === 'despesa' && Math.abs(Number(formEdicao.valor_total) - valorPagoConciliado) < 0.01
+
+    if (temConciliacaoParcial && !corrigindoParaValorConciliado) {
+      setErro(
+        `Esta despesa já tem pagamentos parciais conciliados — só dá pra editar o valor se o novo valor for igual ao já conciliado (${formatBRL(valorPagoConciliado)}). Outros campos continuam travados por aqui.`
+      )
       return
     }
 
@@ -290,7 +303,10 @@ function DetalheDespesaContent() {
         unidade: formEdicao.unidade,
         updated_at: new Date().toISOString(),
       }
-      if (podeControlarStatusNaEdicao) {
+      if (corrigindoParaValorConciliado) {
+        payload.status = 'pago'
+        payload.data_pagamento = lancamento.data_pagamento || hojeISO()
+      } else if (podeControlarStatusNaEdicao) {
         payload.status = novoJaPago ? 'pago' : 'aberto'
         payload.data_pagamento = novoJaPago ? formEdicao.data_pagamento : null
       }
