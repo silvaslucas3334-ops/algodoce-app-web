@@ -219,10 +219,14 @@ export default function DespesasPage() {
                 + {formatBRL(l.valor_juros_multa)} juros/multa
               </p>
             )}
-            {!!l.valor_pago_conciliado && l.valor_pago_conciliado > 0 && l.status === 'aberto' && (
-              <p className="text-[11px] text-blue-600 font-medium">
-                pago {formatBRL(l.valor_pago_conciliado)} · faltam {formatBRL(l.valor_total - l.valor_pago_conciliado)}
-              </p>
+            {!!l.valor_pago_conciliado && l.valor_pago_conciliado > 0 && (
+              l.status === 'aberto' ? (
+                <p className="text-[11px] text-blue-600 font-medium">
+                  pago {formatBRL(l.valor_pago_conciliado)} · faltam {formatBRL(l.valor_total - l.valor_pago_conciliado)}
+                </p>
+              ) : (
+                <p className="text-[11px] text-green-700 font-medium">✓ conciliado via extrato</p>
+              )
             )}
             <p className="font-semibold text-gray-800">{formatBRL(l.valor_total)}</p>
             <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
