@@ -553,23 +553,13 @@ function DetalheDespesaContent() {
                     <span className="text-red-600 text-xs font-medium">+ {formatBRL(lancamento.valor_juros_multa)}</span>
                   </div>
                 )}
-                {!!lancamento.valor_pago_conciliado && lancamento.valor_pago_conciliado > 0 && (
-                  lancamento.status === 'aberto' ? (
-                    <div className="flex justify-between">
-                      <span className="text-blue-600 text-xs">Pago até agora (conciliação parcial)</span>
-                      <span className="text-blue-600 text-xs font-medium">
-                        {formatBRL(lancamento.valor_pago_conciliado)} · faltam {formatBRL(lancamento.valor_total - lancamento.valor_pago_conciliado)}
-                      </span>
-                    </div>
-                  ) : (
-                    // Despesa quitada via conciliação (a soma das transações do extrato
-                    // bateu o valor_total) — mantém o rastro mesmo depois que o status
-                    // vira 'pago', em vez de só sumir a informação de como foi paga.
-                    <div className="flex justify-between">
-                      <span className="text-green-700 text-xs">✓ Conciliado via extrato bancário</span>
-                      <span className="text-green-700 text-xs font-medium">{formatBRL(lancamento.valor_pago_conciliado)}</span>
-                    </div>
-                  )
+                {!!lancamento.valor_pago_conciliado && lancamento.valor_pago_conciliado > 0 && lancamento.status === 'aberto' && (
+                  <div className="flex justify-between">
+                    <span className="text-blue-600 text-xs">Pago até agora (conciliação parcial)</span>
+                    <span className="text-blue-600 text-xs font-medium">
+                      {formatBRL(lancamento.valor_pago_conciliado)} · faltam {formatBRL(lancamento.valor_total - lancamento.valor_pago_conciliado)}
+                    </span>
+                  </div>
                 )}
                 <div className="flex justify-between"><span className="text-gray-500">Valor</span><span className="font-semibold text-gray-800">{formatBRL(lancamento.valor_total)}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Data do lançamento</span><span className="text-gray-800">{new Date(lancamento.data_lancamento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
@@ -577,7 +567,7 @@ function DetalheDespesaContent() {
                 {lancamento.data_pagamento && (
                   <div className="flex justify-between"><span className="text-gray-500">Paga em</span><span className="text-gray-800">{new Date(lancamento.data_pagamento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
                 )}
-                {lancamento.extrato_transacao_id && (
+                {lancamento.extrato_transacao_id ? (
                   <div className="flex justify-between items-center">
                     <span className="text-gray-500">Conciliação bancária</span>
                     {lancamento.extrato_transacao ? (
@@ -590,6 +580,20 @@ function DetalheDespesaContent() {
                       <span className="text-gray-800">Vinculada ao extrato</span>
                     )}
                   </div>
+                ) : (
+                  // Paga via conciliação parcial (várias transações do extrato somadas
+                  // até bater o valor_total) — não existe um extrato_transacao_id único
+                  // pra apontar (ver confirmarConciliacaoParcial em
+                  // lib/financeiro-reconciliacao.ts), mas o rastro de que veio do banco
+                  // precisa continuar visível, no mesmo estilo do caso acima.
+                  !!lancamento.valor_pago_conciliado && lancamento.valor_pago_conciliado > 0 && lancamento.status !== 'aberto' && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500">Conciliação bancária</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CONCILIACAO_COLOR.conciliado}`}>
+                        {STATUS_CONCILIACAO_LABEL.conciliado}
+                      </span>
+                    </div>
+                  )
                 )}
                 {lancamento.forma_pagamento && (
                   <div className="flex justify-between"><span className="text-gray-500">Forma de pagamento</span><span className="text-gray-800">{FORMA_PAGAMENTO_LABEL[lancamento.forma_pagamento]}</span></div>

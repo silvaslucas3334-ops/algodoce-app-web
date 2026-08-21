@@ -219,14 +219,10 @@ export default function DespesasPage() {
                 + {formatBRL(l.valor_juros_multa)} juros/multa
               </p>
             )}
-            {!!l.valor_pago_conciliado && l.valor_pago_conciliado > 0 && (
-              l.status === 'aberto' ? (
-                <p className="text-[11px] text-blue-600 font-medium">
-                  pago {formatBRL(l.valor_pago_conciliado)} · faltam {formatBRL(l.valor_total - l.valor_pago_conciliado)}
-                </p>
-              ) : (
-                <p className="text-[11px] text-green-700 font-medium">✓ conciliado via extrato</p>
-              )
+            {!!l.valor_pago_conciliado && l.valor_pago_conciliado > 0 && l.status === 'aberto' && (
+              <p className="text-[11px] text-blue-600 font-medium">
+                pago {formatBRL(l.valor_pago_conciliado)} · faltam {formatBRL(l.valor_total - l.valor_pago_conciliado)}
+              </p>
             )}
             <p className="font-semibold text-gray-800">{formatBRL(l.valor_total)}</p>
             <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap font-medium ${st.cor}`}>{st.label}</span>
@@ -241,12 +237,22 @@ export default function DespesasPage() {
             {usuario?.role === 'admin' && l.status === 'aberto' && (
               <EtiquetaAprovacaoSeletor valor={l.etiqueta_aprovacao} onChange={(nova) => mudarEtiqueta(l, nova)} />
             )}
-            {l.extrato_transacao && (
+            {l.extrato_transacao ? (
               <span
                 className={`text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap font-medium ${STATUS_CONCILIACAO_COLOR[l.extrato_transacao.status_conciliacao]}`}
               >
                 {STATUS_CONCILIACAO_LABEL[l.extrato_transacao.status_conciliacao]}
               </span>
+            ) : (
+              // Paga via conciliação parcial (várias transações do extrato somadas até
+              // bater o valor_total) — não tem um extrato_transacao_id único pra apontar
+              // (ver confirmarConciliacaoParcial em lib/financeiro-reconciliacao.ts), mas
+              // o rastro de que veio do banco precisa continuar visível, no mesmo estilo.
+              !!l.valor_pago_conciliado && l.valor_pago_conciliado > 0 && l.status !== 'aberto' && (
+                <span className={`text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap font-medium ${STATUS_CONCILIACAO_COLOR.conciliado}`}>
+                  {STATUS_CONCILIACAO_LABEL.conciliado}
+                </span>
+              )
             )}
             {l.status === 'aberto' && (
               <button
