@@ -418,6 +418,48 @@ export async function buscarFaturamentoPorLojaDoMes(ano: number, mes: number): P
   return lojas.map((loja, i) => ({ loja, porDia: resultados[i].porDia, ehForecastPorDia: resultados[i].ehForecastPorDia }))
 }
 
+export interface ComparativoFaturamentoLoja {
+  loja: 'loja1' | 'loja2'
+  faturamentoRealizado: number // soma dos dias já passados (não-forecast) do mês, até hoje
+  metaAteHoje: number | null // soma da meta diária dos mesmos dias; null = nenhuma meta cadastrada pra essa loja no mês
+}
+
+/**
+ * Mesma conta de buscarResumoHubFinanceiro (faturamento realizado x meta,
+ * só dias não-forecast — comparação justa, não mistura com a meta do mês
+ * inteiro cedo no mês), mas por loja em vez de consolidado. Usado pelo
+ * popover de navegação da linha Faturamento (FluxoFaturamentoPopover).
+ */
+export async function buscarComparativoFaturamentoPorLoja(ano: number, mes: number): Promise<ComparativoFaturamentoLoja[]> {
+  const dias = diasDoMes(ano, mes)
+  const hoje = hojeISO()
+  const lojas: ('loja1' | 'loja2')[] = ['loja1', 'loja2']
+
+  const [resultados, orcamentos] = await Promise.all([
+    Promise.all(lojas.map((loja) => buscarFaturamentoLoja(loja, ano, mes, dias, hoje))),
+    Promise.all(lojas.map((loja) => buscarOrcamento(ano, mes, loja))),
+  ])
+
+  return lojas.map((loja, i) => {
+    const { porDia, ehForecastPorDia } = resultados[i]
+    const metaDiaria = metaDiariaDeWeekdays([orcamentos[i]], dias)
+
+    let faturamentoRealizado = 0
+    let metaAteHoje = 0
+    let temMeta = false
+    dias.forEach((_, idx) => {
+      if (ehForecastPorDia[idx]) return
+      faturamentoRealizado += porDia[idx] || 0
+      if (metaDiaria[idx] != null) {
+        metaAteHoje += metaDiaria[idx]!
+        temMeta = true
+      }
+    })
+
+    return { loja, faturamentoRealizado, metaAteHoje: temMeta ? metaAteHoje : null }
+  })
+}
+
 // --- Despesas fixas futuras (já lançadas + recorrências ainda não materializadas) --
 
 export interface LinhaDespesaFixaFutura {

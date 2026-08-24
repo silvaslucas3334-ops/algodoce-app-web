@@ -1,9 +1,21 @@
 'use client'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
-import { buscarFaturamentoPorLojaDoMes, FaturamentoPorLoja } from '@/lib/financeiro-fluxo-mensal'
+import {
+  buscarFaturamentoPorLojaDoMes,
+  buscarComparativoFaturamentoPorLoja,
+  corComparacao,
+  FaturamentoPorLoja,
+  ComparativoFaturamentoLoja,
+} from '@/lib/financeiro-fluxo-mensal'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
+
+function corTexto(cor: 'azul' | 'laranja' | 'verde'): string {
+  if (cor === 'verde') return 'text-green-600'
+  if (cor === 'laranja') return 'text-amber-600'
+  return 'text-blue-600'
+}
 
 interface Props {
   ano: number
@@ -14,7 +26,7 @@ interface Props {
   onClose: () => void
 }
 
-const LARGURA = 260
+const LARGURA = 300
 const MARGEM = 8
 
 // Popover de navegação da linha Faturamento — clique num dia ou no Total
@@ -22,6 +34,7 @@ const MARGEM = 8
 // de posicionamento (sem lib) de components/FluxoDiaPopover.tsx.
 export default function FluxoFaturamentoPopover({ ano, mes, dia, diaIndex, anchorRect, onClose }: Props) {
   const [porLoja, setPorLoja] = useState<FaturamentoPorLoja[] | null>(null)
+  const [comparativo, setComparativo] = useState<ComparativoFaturamentoLoja[] | null>(null)
   const [erro, setErro] = useState('')
   const [pronto, setPronto] = useState(false)
   const [pos, setPos] = useState({ top: anchorRect.bottom + 4, left: anchorRect.left })
@@ -29,8 +42,12 @@ export default function FluxoFaturamentoPopover({ ano, mes, dia, diaIndex, ancho
 
   useEffect(() => {
     let cancelado = false
-    buscarFaturamentoPorLojaDoMes(ano, mes)
-      .then((data) => { if (!cancelado) setPorLoja(data) })
+    Promise.all([buscarFaturamentoPorLojaDoMes(ano, mes), buscarComparativoFaturamentoPorLoja(ano, mes)])
+      .then(([dataPorLoja, dataComparativo]) => {
+        if (cancelado) return
+        setPorLoja(dataPorLoja)
+        setComparativo(dataComparativo)
+      })
       .catch((err) => { if (!cancelado) setErro('Erro ao carregar: ' + (err?.message || 'desconhecido')) })
     return () => { cancelado = true }
   }, [ano, mes])
@@ -49,7 +66,7 @@ export default function FluxoFaturamentoPopover({ ano, mes, dia, diaIndex, ancho
 
     setPos({ top, left })
     setPronto(true)
-  }, [anchorRect, porLoja, erro])
+  }, [anchorRect, porLoja, comparativo, erro])
 
   useEffect(() => {
     function aoClicarFora(e: MouseEvent) {
@@ -91,6 +108,26 @@ export default function FluxoFaturamentoPopover({ ano, mes, dia, diaIndex, ancho
           <X size={16} />
         </button>
       </div>
+
+      {!erro && comparativo && (
+        <div className="px-3 py-2.5 border-b border-gray-100 bg-gray-50/60">
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">📊 Até hoje (mês)</p>
+          <div className="space-y-1.5">
+            {comparativo.map((c) => {
+              const cor = c.metaAteHoje != null ? corComparacao(c.metaAteHoje, c.faturamentoRealizado, 'receita') : null
+              return (
+                <div key={c.loja} className="flex items-center justify-between text-sm">
+                  <span className="text-gray-700">{UNIDADE_LABEL[c.loja]}</span>
+                  <span className={`font-medium ${cor ? corTexto(cor) : 'text-gray-800'}`}>
+                    {formatBRL(c.faturamentoRealizado)}
+                    {c.metaAteHoje != null && <span className="text-gray-400 font-normal"> / {formatBRL(c.metaAteHoje)}</span>}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="p-3">
         {erro && <p className="text-xs text-red-600">{erro}</p>}
