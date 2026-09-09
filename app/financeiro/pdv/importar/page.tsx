@@ -1,9 +1,9 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Upload, Loader, AlertTriangle, CheckCircle } from 'lucide-react'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import {
@@ -64,11 +64,18 @@ function Dropzone({
   )
 }
 
-export default function ImportarPdvPage() {
+function ImportarPdvContent() {
   const { usuario } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
 
-  const [unidade, setUnidade] = useState<'loja1' | 'loja2'>('loja1')
+  // Herda a loja de onde o usuário veio (aba ativa no hub /financeiro/pdv)
+  // — antes essa tela sempre nascia em Paraisópolis (loja1) mesmo quando o
+  // usuário estava vendo/importava a partir da aba Itajubá, um jeito fácil
+  // de importar pra loja errada sem perceber (o seletor aqui parecia "só
+  // confirmar", não "trocar").
+  const unidadeInicial = searchParams.get('unidade') === 'loja2' ? 'loja2' : 'loja1'
+  const [unidade, setUnidade] = useState<'loja1' | 'loja2'>(unidadeInicial)
   const [fileHistorico, setFileHistorico] = useState<File | null>(null)
   const [fileFinalizados, setFileFinalizados] = useState<File | null>(null)
 
@@ -266,5 +273,13 @@ export default function ImportarPdvPage() {
         </div>
       </div>
     </ProtectedRoute>
+  )
+}
+
+export default function ImportarPdvPage() {
+  return (
+    <Suspense>
+      <ImportarPdvContent />
+    </Suspense>
   )
 }

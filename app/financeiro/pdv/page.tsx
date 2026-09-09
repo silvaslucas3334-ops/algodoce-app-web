@@ -61,7 +61,7 @@ export default function PdvHubPage() {
           maxWidth="max-w-3xl"
           actions={
             <Link
-              href="/financeiro/pdv/importar"
+              href={`/financeiro/pdv/importar?unidade=${unidade}`}
               className="bg-pink-700 text-white rounded-lg px-4 py-2 font-semibold flex items-center gap-2 hover:bg-pink-800"
             >
               <Plus size={18} /> Importar
