@@ -733,6 +733,24 @@ CREATE POLICY financeiro_pdv_pedidos_update_blocked ON financeiro_pdv_pedidos FO
 DROP POLICY IF EXISTS financeiro_pdv_pedidos_delete_blocked ON financeiro_pdv_pedidos;
 CREATE POLICY financeiro_pdv_pedidos_delete_blocked ON financeiro_pdv_pedidos FOR DELETE USING (false);
 
+-- Contagem de pedidos por unidade/mês, agregada no banco — a tela de
+-- listagem (Import do PDV) não pode mais buscar todas as linhas e agrupar
+-- no navegador: o PostgREST corta em 1000 linhas por request sem
+-- paginação, e uma unidade com mais de 1000 pedidos acumulados perdia
+-- meses inteiros da lista silenciosamente. security_invoker = true herda
+-- a RLS de financeiro_pdv_pedidos (só admin), mesmo padrão de
+-- financeiro_custo_medio_mensal.
+CREATE OR REPLACE VIEW financeiro_pdv_periodos
+WITH (security_invoker = true) AS
+SELECT
+  unidade,
+  date_trunc('month', data_periodo)::date AS mes_referencia,
+  count(*) AS quantidade
+FROM financeiro_pdv_pedidos
+GROUP BY unidade, date_trunc('month', data_periodo);
+
+GRANT SELECT ON financeiro_pdv_periodos TO authenticated;
+
 DROP POLICY IF EXISTS financeiro_pdv_itens_select ON financeiro_pdv_itens;
 CREATE POLICY financeiro_pdv_itens_select ON financeiro_pdv_itens FOR SELECT TO authenticated
   USING ((SELECT role FROM usuarios WHERE id = auth.uid()) = 'admin');

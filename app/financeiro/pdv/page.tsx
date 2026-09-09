@@ -31,24 +31,28 @@ export default function PdvHubPage() {
 
   async function carregar() {
     setLoading(true)
+    // Lê de financeiro_pdv_periodos (view agregada no banco) em vez de
+    // buscar todas as linhas de financeiro_pdv_pedidos e contar no
+    // navegador — o PostgREST corta em 1000 linhas por request sem
+    // paginação, e uma unidade com mais de 1000 pedidos acumulados perdia
+    // meses inteiros da lista silenciosamente (ver
+    // lib/migrations/financeiro-pdv-periodos-view.sql).
     const { data, error } = await supabase
-      .from('financeiro_pdv_pedidos')
-      .select('data_periodo')
+      .from('financeiro_pdv_periodos')
+      .select('mes_referencia, quantidade')
       .eq('unidade', unidade)
     if (error) console.error('Erro ao carregar períodos do PDV:', error)
 
-    const mapa = new Map<string, PeriodoResumo>()
-    // data_periodo é DATE ("AAAA-MM-DD"), sem timezone — extrair ano/mês por
-    // string slicing, nunca via new Date(str) (seria reinterpretado no fuso
-    // local do navegador e poderia empurrar o dia 1º pro mês anterior).
-    ;(data || []).forEach((row: { data_periodo: string }) => {
-      const ano = Number(row.data_periodo.slice(0, 4))
-      const mes = Number(row.data_periodo.slice(5, 7)) - 1 // 0-based
+    // mes_referencia é DATE ("AAAA-MM-01"), sem timezone — extrair ano/mês
+    // por string slicing, nunca via new Date(str) (seria reinterpretado no
+    // fuso local do navegador e poderia empurrar o dia 1º pro mês anterior).
+    const resultado = (data || []).map((row: { mes_referencia: string; quantidade: number }) => {
+      const ano = Number(row.mes_referencia.slice(0, 4))
+      const mes = Number(row.mes_referencia.slice(5, 7)) - 1 // 0-based
       const chave = `${ano}-${String(mes + 1).padStart(2, '0')}`
-      if (!mapa.has(chave)) mapa.set(chave, { chave, ano, mes, quantidade: 0 })
-      mapa.get(chave)!.quantidade++
+      return { chave, ano, mes, quantidade: row.quantidade }
     })
-    setPeriodos(Array.from(mapa.values()).sort((a, b) => b.chave.localeCompare(a.chave)))
+    setPeriodos(resultado.sort((a, b) => b.chave.localeCompare(a.chave)))
     setLoading(false)
   }
 
