@@ -780,3 +780,18 @@ export async function ignorarTransacao(transacaoId: string): Promise<void> {
     .eq('id', transacaoId)
   if (error) throw new Error(error.message)
 }
+
+/**
+ * Desfaz "ignorar" (status volta pra 'pendente') — só faz sentido pra uma
+ * transação que está mesmo ignorada; parte_id/lancamento_id nunca chegam a
+ * ser setados nesse caminho (ignorarTransacao não mexe neles), então não
+ * há nada pra limpar aqui além do status.
+ */
+export async function reverterIgnorarTransacao(transacaoId: string): Promise<void> {
+  const { error } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .update({ status_conciliacao: 'pendente' })
+    .eq('id', transacaoId)
+    .eq('status_conciliacao', 'ignorado')
+  if (error) throw new Error(error.message)
+}

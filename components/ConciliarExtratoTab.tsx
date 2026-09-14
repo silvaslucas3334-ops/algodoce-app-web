@@ -9,9 +9,9 @@ import CategorizarReceitasLoteModal from '@/components/CategorizarReceitasLoteMo
 import ConciliarGrupoModal from '@/components/ConciliarGrupoModal'
 import CriarDespesasLoteModal from '@/components/CriarDespesasLoteModal'
 import ReverterImportacaoModal from '@/components/ReverterImportacaoModal'
-import { importarTransacoesOFX, buscarContaAprendida, aprenderContaOFX } from '@/lib/financeiro-reconciliacao'
+import { importarTransacoesOFX, buscarContaAprendida, aprenderContaOFX, reverterIgnorarTransacao } from '@/lib/financeiro-reconciliacao'
 import { formatBRL, parseOFXConta, fingerprintOFX, OFXConta } from '@/lib/ofx'
-import { Upload, Loader, Link2, Tag, Layers, Receipt, History, AlertTriangle } from 'lucide-react'
+import { Upload, Loader, Link2, Tag, Layers, Receipt, History, AlertTriangle, RotateCcw } from 'lucide-react'
 import { FinanceiroExtratoTransacao, StatusConciliacao } from '@/lib/types'
 import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL as STATUS_LABEL, STATUS_CONCILIACAO_COLOR as STATUS_COLOR } from '@/lib/constants'
 
@@ -48,6 +48,7 @@ export default function ConciliarExtratoTab({ voltarPara }: Props) {
   const [modalGrupo, setModalGrupo] = useState(false)
   const [modalDespesasLote, setModalDespesasLote] = useState(false)
   const [modalImportacoes, setModalImportacoes] = useState(false)
+  const [revertendoId, setRevertendoId] = useState<string | null>(null)
   const [avisoConta, setAvisoConta] = useState<{
     texto: string
     fp: string
@@ -146,6 +147,19 @@ export default function ConciliarExtratoTab({ voltarPara }: Props) {
 
   function alternarSelecionarTodos() {
     setSelecionados(todosCreditosSelecionados ? new Set() : new Set(creditosPendentesElegiveis.map((t) => t.id)))
+  }
+
+  async function reverterIgnorada(id: string) {
+    setRevertendoId(id)
+    setErro('')
+    try {
+      await reverterIgnorarTransacao(id)
+      await carregar()
+    } catch (err: any) {
+      setErro('Erro ao reverter: ' + (err?.message || 'desconhecido'))
+    } finally {
+      setRevertendoId(null)
+    }
   }
 
   return (
@@ -343,6 +357,15 @@ export default function ConciliarExtratoTab({ voltarPara }: Props) {
                     className="px-3 py-1.5 bg-green-700 text-white rounded-lg text-xs font-semibold hover:bg-green-800 flex items-center gap-1"
                   >
                     <Tag size={14} /> Categorizar
+                  </button>
+                )}
+                {t.status_conciliacao === 'ignorado' && (
+                  <button
+                    onClick={() => reverterIgnorada(t.id)}
+                    disabled={revertendoId === t.id}
+                    className="px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg text-xs font-semibold hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1"
+                  >
+                    <RotateCcw size={14} /> {revertendoId === t.id ? 'Revertendo...' : 'Reverter'}
                   </button>
                 )}
               </div>
