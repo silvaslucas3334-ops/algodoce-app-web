@@ -330,6 +330,44 @@ export async function confirmarConciliacao(
 }
 
 /**
+ * Desfaz um match direto (1:1) de conciliação — inverso exato de
+ * confirmarConciliacao: devolve a transação do extrato pra 'pendente'
+ * (limpa lancamento_id/parte_id) e desvincula a despesa (limpa
+ * extrato_transacao_id). Não mexe em status/data_pagamento da despesa —
+ * quem chamar decide se quer reabri-la depois (o formulário de edição já
+ * permite isso normalmente assim que extrato_transacao_id some).
+ *
+ * Não cobre o caminho de conciliação parcial (confirmarConciliacaoParcial,
+ * N transações somadas contra 1 despesa) — lá não existe um
+ * extrato_transacao_id único pra apontar; desfazer isso exigiria achar e
+ * desvincular cada transação em financeiro_extrato_transacoes.lancamento_id
+ * e reajustar valor_pago_conciliado, um fluxo diferente deste.
+ */
+export async function desfazerConciliacao(lancamentoId: string): Promise<void> {
+  const { data: lancamento, error: erroBusca } = await supabase
+    .from('financeiro_lancamentos')
+    .select('extrato_transacao_id')
+    .eq('id', lancamentoId)
+    .single()
+  if (erroBusca) throw new Error(erroBusca.message)
+  if (!lancamento?.extrato_transacao_id) {
+    throw new Error('Esta despesa não está vinculada a uma transação do extrato (match direto).')
+  }
+
+  const { error: erroTransacao } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .update({ status_conciliacao: 'pendente', lancamento_id: null, parte_id: null })
+    .eq('id', lancamento.extrato_transacao_id)
+  if (erroTransacao) throw new Error(erroTransacao.message)
+
+  const { error: erroLancamento } = await supabase
+    .from('financeiro_lancamentos')
+    .update({ extrato_transacao_id: null, updated_at: new Date().toISOString() })
+    .eq('id', lancamentoId)
+  if (erroLancamento) throw new Error(erroLancamento.message)
+}
+
+/**
  * Confirma a conciliação de um lançamento que JÁ está pago (alguém
  * registrou o pagamento por outro caminho, sem vincular a esta transação
  * do extrato) — só vincula os dois lados, nunca mexe em status/data_pagamento

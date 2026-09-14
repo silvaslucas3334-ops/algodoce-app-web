@@ -11,6 +11,7 @@ import { EtiquetaAprovacao, FinanceiroConta, FinanceiroLancamentoItem, Financeir
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL, CONDICAO_PAGAMENTO_LABEL, TIPO_LANCAMENTO_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { formatarDocumento, hojeISO, statusExibicao, somarMeses } from '@/lib/financeiro-utils'
+import { desfazerConciliacao } from '@/lib/financeiro-reconciliacao'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
 import EtiquetaAprovacaoSeletor from '@/components/EtiquetaAprovacaoSeletor'
 
@@ -192,6 +193,30 @@ function DetalheDespesaContent() {
       console.error('Erro ao salvar etiqueta:', error)
       setLancamento((prev: any) => ({ ...prev, etiqueta_aprovacao: anterior }))
       alert('Erro ao salvar etiqueta: ' + error.message)
+    }
+  }
+
+  // Desfaz um match direto (1:1) de conciliação — devolve a transação do
+  // extrato pra fila de pendentes e desvincula a despesa, sem mexer em
+  // status/data_pagamento dela (ficam como estavam; se o usuário também
+  // quiser reabrir a despesa, o formulário de edição já permite assim que
+  // extrato_transacao_id some — era exatamente o que a mensagem "desfaça a
+  // conciliação antes de marcar como aberta de novo" pressupunha, sem
+  // nunca ter existido um jeito de fazer isso). Não cobre conciliação
+  // parcial (várias transações somadas, sem extrato_transacao_id único) —
+  // esse botão só aparece quando o vínculo direto existe.
+  async function desfazerConciliacaoBancaria() {
+    if (!lancamento) return
+    if (!window.confirm('Desfazer a conciliação bancária desta despesa? A transação do extrato volta pra fila de pendentes.')) return
+    setProcessando(true)
+    setErro('')
+    try {
+      await desfazerConciliacao(lancamentoId)
+      await carregar()
+    } catch (err: any) {
+      setErro('Erro ao desfazer conciliação: ' + (err?.message || 'desconhecido'))
+    } finally {
+      setProcessando(false)
     }
   }
 
@@ -570,15 +595,26 @@ function DetalheDespesaContent() {
                 {lancamento.extrato_transacao_id ? (
                   <div className="flex justify-between items-center">
                     <span className="text-gray-500">Conciliação bancária</span>
-                    {lancamento.extrato_transacao ? (
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CONCILIACAO_COLOR[lancamento.extrato_transacao.status_conciliacao]}`}
-                      >
-                        {STATUS_CONCILIACAO_LABEL[lancamento.extrato_transacao.status_conciliacao]}
-                      </span>
-                    ) : (
-                      <span className="text-gray-800">Vinculada ao extrato</span>
-                    )}
+                    <span className="flex items-center gap-2">
+                      {lancamento.extrato_transacao ? (
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CONCILIACAO_COLOR[lancamento.extrato_transacao.status_conciliacao]}`}
+                        >
+                          {STATUS_CONCILIACAO_LABEL[lancamento.extrato_transacao.status_conciliacao]}
+                        </span>
+                      ) : (
+                        <span className="text-gray-800">Vinculada ao extrato</span>
+                      )}
+                      {ehAdmin && (
+                        <button
+                          onClick={desfazerConciliacaoBancaria}
+                          disabled={processando}
+                          className="text-xs font-medium text-gray-500 hover:text-red-600 disabled:opacity-50"
+                        >
+                          Desfazer
+                        </button>
+                      )}
+                    </span>
                   </div>
                 ) : (
                   // Paga via conciliação parcial (várias transações do extrato somadas
