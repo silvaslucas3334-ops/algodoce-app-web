@@ -418,45 +418,66 @@ export async function buscarFaturamentoPorLojaDoMes(ano: number, mes: number): P
   return lojas.map((loja, i) => ({ loja, porDia: resultados[i].porDia, ehForecastPorDia: resultados[i].ehForecastPorDia }))
 }
 
-export interface ComparativoFaturamentoLoja {
+export interface MetaDiariaLoja {
   loja: 'loja1' | 'loja2'
-  faturamentoRealizado: number // soma dos dias já passados (não-forecast) do mês, até hoje
-  metaAteHoje: number | null // soma da meta diária dos mesmos dias; null = nenhuma meta cadastrada pra essa loja no mês
+  metaDiariaPorDia: (number | null)[]
 }
 
 /**
- * Mesma conta de buscarResumoHubFinanceiro (faturamento realizado x meta,
- * só dias não-forecast — comparação justa, não mistura com a meta do mês
- * inteiro cedo no mês), mas por loja em vez de consolidado. Usado pelo
- * popover de navegação da linha Faturamento (FluxoFaturamentoPopover).
+ * Meta de venda diária de cada loja no mês — só o orçamento, sem tocar em
+ * faturamento/PDV. Separada de calcularComparativoAte pra o popover da
+ * linha Faturamento reaproveitar o faturamento por dia que ele já buscou
+ * (buscarFaturamentoPorLojaDoMes) em vez de buscá-lo uma segunda vez.
  */
-export async function buscarComparativoFaturamentoPorLoja(ano: number, mes: number): Promise<ComparativoFaturamentoLoja[]> {
+export async function buscarMetaDiariaPorLoja(ano: number, mes: number): Promise<MetaDiariaLoja[]> {
   const dias = diasDoMes(ano, mes)
-  const hoje = hojeISO()
   const lojas: ('loja1' | 'loja2')[] = ['loja1', 'loja2']
+  const orcamentos = await Promise.all(lojas.map((loja) => buscarOrcamento(ano, mes, loja)))
+  return lojas.map((loja, i) => ({ loja, metaDiariaPorDia: metaDiariaDeWeekdays([orcamentos[i]], dias) }))
+}
 
-  const [resultados, orcamentos] = await Promise.all([
-    Promise.all(lojas.map((loja) => buscarFaturamentoLoja(loja, ano, mes, dias, hoje))),
-    Promise.all(lojas.map((loja) => buscarOrcamento(ano, mes, loja))),
-  ])
+export interface ComparativoFaturamentoLoja {
+  loja: 'loja1' | 'loja2'
+  faturamentoAcumulado: number // soma do dia 1 do mês até a data pedida (dias depois de hoje entram como previsão)
+  metaAcumulada: number | null // soma da meta diária dos mesmos dias; null = nenhuma meta cadastrada pra essa loja nesse trecho
+  incluiProjecao: boolean // true quando a data pedida é depois de hoje — parte do acumulado é previsão (média histórica), não faturamento real
+}
 
-  return lojas.map((loja, i) => {
-    const { porDia, ehForecastPorDia } = resultados[i]
-    const metaDiaria = metaDiariaDeWeekdays([orcamentos[i]], dias)
+/**
+ * Faturamento x meta acumulados do dia 1 do mês até `ateData` (inclusive),
+ * por loja — mesma conta de buscarResumoHubFinanceiro, mas por loja e até
+ * uma data qualquer em vez de sempre até hoje. Até hoje é faturamento real;
+ * pra uma data futura os dias depois de hoje entram com a previsão que a
+ * própria linha Faturamento já mostra (média histórica por dia da semana),
+ * o que vira a projeção de "como estaremos em relação à meta naquele dia".
+ * Função pura (sem consulta) — recebe o que o popover já buscou.
+ */
+export function calcularComparativoAte(
+  faturamento: FaturamentoPorLoja[],
+  metas: MetaDiariaLoja[],
+  ano: number,
+  mes: number,
+  ateData: string
+): ComparativoFaturamentoLoja[] {
+  const dias = diasDoMes(ano, mes)
+  return faturamento.map((f) => {
+    const metaDiaria = metas.find((m) => m.loja === f.loja)?.metaDiariaPorDia ?? []
 
-    let faturamentoRealizado = 0
-    let metaAteHoje = 0
+    let faturamentoAcumulado = 0
+    let metaAcumulada = 0
     let temMeta = false
-    dias.forEach((_, idx) => {
-      if (ehForecastPorDia[idx]) return
-      faturamentoRealizado += porDia[idx] || 0
+    let incluiProjecao = false
+    dias.forEach((dia, idx) => {
+      if (dia > ateData) return
+      faturamentoAcumulado += f.porDia[idx] || 0
+      if (f.ehForecastPorDia[idx]) incluiProjecao = true
       if (metaDiaria[idx] != null) {
-        metaAteHoje += metaDiaria[idx]!
+        metaAcumulada += metaDiaria[idx]!
         temMeta = true
       }
     })
 
-    return { loja, faturamentoRealizado, metaAteHoje: temMeta ? metaAteHoje : null }
+    return { loja: f.loja, faturamentoAcumulado, metaAcumulada: temMeta ? metaAcumulada : null, incluiProjecao }
   })
 }
 

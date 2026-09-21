@@ -3,11 +3,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import {
   buscarFaturamentoPorLojaDoMes,
-  buscarComparativoFaturamentoPorLoja,
+  buscarMetaDiariaPorLoja,
+  calcularComparativoAte,
   corComparacao,
   FaturamentoPorLoja,
-  ComparativoFaturamentoLoja,
+  MetaDiariaLoja,
 } from '@/lib/financeiro-fluxo-mensal'
+import { hojeISO } from '@/lib/financeiro-utils'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 
@@ -34,7 +36,7 @@ const MARGEM = 8
 // de posicionamento (sem lib) de components/FluxoDiaPopover.tsx.
 export default function FluxoFaturamentoPopover({ ano, mes, dia, diaIndex, anchorRect, onClose }: Props) {
   const [porLoja, setPorLoja] = useState<FaturamentoPorLoja[] | null>(null)
-  const [comparativo, setComparativo] = useState<ComparativoFaturamentoLoja[] | null>(null)
+  const [metas, setMetas] = useState<MetaDiariaLoja[] | null>(null)
   const [erro, setErro] = useState('')
   const [pronto, setPronto] = useState(false)
   const [pos, setPos] = useState({ top: anchorRect.bottom + 4, left: anchorRect.left })
@@ -42,11 +44,11 @@ export default function FluxoFaturamentoPopover({ ano, mes, dia, diaIndex, ancho
 
   useEffect(() => {
     let cancelado = false
-    Promise.all([buscarFaturamentoPorLojaDoMes(ano, mes), buscarComparativoFaturamentoPorLoja(ano, mes)])
-      .then(([dataPorLoja, dataComparativo]) => {
+    Promise.all([buscarFaturamentoPorLojaDoMes(ano, mes), buscarMetaDiariaPorLoja(ano, mes)])
+      .then(([dataPorLoja, dataMetas]) => {
         if (cancelado) return
         setPorLoja(dataPorLoja)
-        setComparativo(dataComparativo)
+        setMetas(dataMetas)
       })
       .catch((err) => { if (!cancelado) setErro('Erro ao carregar: ' + (err?.message || 'desconhecido')) })
     return () => { cancelado = true }
@@ -66,7 +68,7 @@ export default function FluxoFaturamentoPopover({ ano, mes, dia, diaIndex, ancho
 
     setPos({ top, left })
     setPronto(true)
-  }, [anchorRect, porLoja, comparativo, erro])
+  }, [anchorRect, porLoja, metas, erro])
 
   useEffect(() => {
     function aoClicarFora(e: MouseEvent) {
@@ -93,6 +95,18 @@ export default function FluxoFaturamentoPopover({ ano, mes, dia, diaIndex, ancho
   })
   const total = linhas?.reduce((s, l) => s + l.valor, 0) || 0
 
+  // Comparativo acumulado do dia 1 até a data clicada: até hoje é faturamento
+  // real; num dia futuro vira projeção (real até hoje + previsão dos dias
+  // seguintes) contra a meta acumulada até aquele dia. No Total do mês não
+  // existe uma data específica — segue "até hoje" (clicar no dia de hoje dá o mesmo).
+  const hoje = hojeISO()
+  const ateData = dia ?? hoje
+  const comparativo = porLoja && metas ? calcularComparativoAte(porLoja, metas, ano, mes, ateData) : null
+  const tituloComparativo =
+    dia == null || dia === hoje
+      ? 'Até hoje'
+      : `${dia < hoje ? 'Até' : 'Projeção até'} ${new Date(dia + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`
+
   return (
     <div
       ref={ref}
@@ -111,20 +125,23 @@ export default function FluxoFaturamentoPopover({ ano, mes, dia, diaIndex, ancho
 
       {!erro && comparativo && (
         <div className="px-3 py-2.5 border-b border-gray-100 bg-gray-50/60">
-          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">📊 Até hoje (mês)</p>
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">📊 {tituloComparativo} (mês)</p>
           <div className="space-y-1.5">
             {comparativo.map((c) => {
-              const cor = c.metaAteHoje != null ? corComparacao(c.metaAteHoje, c.faturamentoRealizado, 'receita') : null
+              const cor = c.metaAcumulada != null ? corComparacao(c.metaAcumulada, c.faturamentoAcumulado, 'receita') : null
               return (
                 <div key={c.loja} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-700">{UNIDADE_LABEL[c.loja]}</span>
-                  <span className={`font-medium ${cor ? corTexto(cor) : 'text-gray-800'}`}>
-                    {formatBRL(c.faturamentoRealizado)}
-                    {c.metaAteHoje != null && <span className="text-gray-400 font-normal"> / {formatBRL(c.metaAteHoje)}</span>}
+                  <span className={c.incluiProjecao ? 'text-gray-500 italic' : 'text-gray-700'}>{UNIDADE_LABEL[c.loja]}</span>
+                  <span className={`font-medium ${cor ? corTexto(cor) : 'text-gray-800'} ${c.incluiProjecao ? 'italic' : ''}`}>
+                    {formatBRL(c.faturamentoAcumulado)}
+                    {c.metaAcumulada != null && <span className="text-gray-400 font-normal"> / {formatBRL(c.metaAcumulada)}</span>}
                   </span>
                 </div>
               )
             })}
+            {comparativo.some((c) => c.incluiProjecao) && (
+              <p className="text-[11px] text-gray-400 pt-0.5">Projeção: faturamento real até hoje + previsão (média histórica) dos dias seguintes.</p>
+            )}
           </div>
         </div>
       )}
