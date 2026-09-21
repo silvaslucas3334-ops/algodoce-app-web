@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Tarefa } from '@/lib/types'
 import { X, ChevronRight, Calendar, Clock, Loader } from 'lucide-react'
-import { formatData, formatHora, isAtrasada } from '@/lib/tarefas-utils'
+import { formatData, formatHora, isAtrasada, getHoje } from '@/lib/tarefas-utils'
 
 interface TriagemModalProps {
   usuarioAtualId: string
@@ -64,6 +64,11 @@ export default function TriagemModal({
         .eq('setor_id', setorId)
         .neq('status', 'concluida')
         .neq('status', 'cancelada')
+        // Atrasada nunca vence depois de hoje (ver isAtrasada) — sem esse corte
+        // vinham também as ~30 dias de tarefas recorrentes já geradas à frente,
+        // e o total em aberto do setor podia bater o limite de 1000 linhas do
+        // PostgREST (que corta silenciosamente, sem erro).
+        .lte('data_vencimento', getHoje())
 
       if (error) throw error
 

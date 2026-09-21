@@ -11,6 +11,7 @@ import NovaTarefaModal from '@/components/NovaTarefaModal'
 import TriagemModal from '@/components/TriagemModal'
 import PagamentosOFXModal from '@/components/PagamentosOFXModal'
 import { getHoje, isAtrasada, formatData, getSetorTheme } from '@/lib/tarefas-utils'
+import { somarDias } from '@/lib/financeiro-utils'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, BarChart3, CreditCard, ChevronLeft, ChevronRight } from 'lucide-react'
@@ -131,19 +132,57 @@ function TarefasContent() {
     // só fazia `if (data) setEvidencias(data)`, sem checar erro), esvaziando
     // evidências/comentários/envolvidos da tela inteira, não só de uma
     // tarefa. Join não tem esse limite: não existe lista de ids na URL.
-    let query = supabase
-      .from('tarefas')
-      .select('*, tarefas_evidencias(*), tarefas_comentarios(*), tarefas_envolvidos(*)')
-    query = vendoComoGestor
-      ? query.or(`setor_id.eq.${setorSelecionado},responsavel_atual_id.eq.${usuario!.id}`)
-      : query.eq('setor_id', setorSelecionado)
+    // Só duas fatias, ambas paginadas: (1) tudo que está em aberto, de
+    // qualquer data — é o que a tela realmente mostra (concluída/cancelada
+    // nunca aparece em dia nenhum, ver tarefasDoDia/tarefasDoMes); (2) as
+    // finalizadas dos últimos 30 dias, só pra o clique numa notificação de
+    // uma tarefa recém-concluída ainda achar a tarefa. Antes esta consulta
+    // trazia o histórico INTEIRO do setor ordenado do mais antigo pro mais
+    // novo — o PostgREST corta silenciosamente em 1000 linhas, então quando
+    // o setor passou de 1000 tarefas acumuladas (recorrentes geram várias
+    // por dia) as mais novas (hoje e dias futuros, já geradas pela janela
+    // de 30 dias) simplesmente paravam de aparecer, sem erro nenhum.
+    const filtrarSetor = (q: any) =>
+      vendoComoGestor
+        ? q.or(`setor_id.eq.${setorSelecionado},responsavel_atual_id.eq.${usuario!.id}`)
+        : q.eq('setor_id', setorSelecionado)
 
-    const { data: tarefasData, error: erroTarefas } = await query
-      .order('data_vencimento')
-      .order('data_upload', { foreignTable: 'tarefas_evidencias', ascending: false })
-      .order('created_at', { foreignTable: 'tarefas_comentarios', ascending: false })
+    async function buscarPaginado(montar: () => any): Promise<any[]> {
+      const TAMANHO_PAGINA = 1000
+      const linhas: any[] = []
+      let inicio = 0
+      while (true) {
+        const { data, error } = await montar()
+          .order('data_vencimento')
+          .order('id') // desempate estável — sem isso, linhas com a mesma data podem repetir/sumir entre páginas
+          .order('data_upload', { foreignTable: 'tarefas_evidencias', ascending: false })
+          .order('created_at', { foreignTable: 'tarefas_comentarios', ascending: false })
+          .range(inicio, inicio + TAMANHO_PAGINA - 1)
+        if (error) throw error
+        linhas.push(...(data || []))
+        if (!data || data.length < TAMANHO_PAGINA) break
+        inicio += TAMANHO_PAGINA
+      }
+      return linhas
+    }
 
-    if (erroTarefas) {
+    const SELECT_TAREFA = '*, tarefas_evidencias(*), tarefas_comentarios(*), tarefas_envolvidos(*)'
+    const corteFinalizadas = somarDias(getHoje(), -30)
+
+    let tarefasData: any[] | null = null
+    try {
+      const [abertas, finalizadasRecentes] = await Promise.all([
+        buscarPaginado(() =>
+          filtrarSetor(supabase.from('tarefas').select(SELECT_TAREFA)).in('status', ['pendente', 'pronta_revisao', 'refazer_pendente'])
+        ),
+        buscarPaginado(() =>
+          filtrarSetor(supabase.from('tarefas').select(SELECT_TAREFA))
+            .in('status', ['concluida', 'cancelada'])
+            .gte('data_vencimento', corteFinalizadas)
+        ),
+      ])
+      tarefasData = [...abertas, ...finalizadasRecentes]
+    } catch (erroTarefas) {
       console.error('Erro ao carregar tarefas:', erroTarefas)
       return
     }

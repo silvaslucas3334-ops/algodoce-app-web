@@ -24,6 +24,32 @@ function fmtDiaLabel(dateStr: string): string {
   return new Date(dateStr + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' })
 }
 
+// Todas as tarefas de todos os setores, em páginas de 1000: o PostgREST corta
+// silenciosamente nesse limite por request (sem erro, só menos linhas), e
+// como esta consulta não tinha filtro nem ordem, passar de 1000 tarefas
+// acumuladas deixava os contadores por setor/dia calculados sobre um
+// pedaço aleatório da tabela. order('id') dá um desempate estável entre páginas.
+async function buscarTodasTarefas(): Promise<Tarefa[]> {
+  const TAMANHO_PAGINA = 1000
+  const linhas: Tarefa[] = []
+  let inicio = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('tarefas')
+      .select('*')
+      .order('id')
+      .range(inicio, inicio + TAMANHO_PAGINA - 1)
+    if (error) {
+      console.error('Erro ao carregar tarefas do dashboard:', error)
+      return linhas
+    }
+    linhas.push(...((data as Tarefa[]) || []))
+    if (!data || data.length < TAMANHO_PAGINA) break
+    inicio += TAMANHO_PAGINA
+  }
+  return linhas
+}
+
 function eventoDe(h: TarefaHistorico): { label: string; cor: string; detalhe?: string } {
   const j: any = h.dados_json || {}
   switch (h.alteracao_tipo) {
@@ -74,20 +100,41 @@ function DashboardContent() {
   useEffect(() => {
     async function carregar() {
       setLoading(true)
-      const [{ data: t }, { data: h }, { data: s }, { data: u }] = await Promise.all([
-        supabase.from('tarefas').select('*'),
-        supabase.from('tarefas_historico').select('*').order('created_at', { ascending: true }),
+      const [t, { data: s }, { data: u }] = await Promise.all([
+        buscarTodasTarefas(),
         supabase.from('setores').select('*').eq('ativo', true).order('nome'),
         supabase.from('usuarios').select('id, nome, role, setor_id'),
       ])
-      setTarefas(t || [])
-      setHistorico(h || [])
+      setTarefas(t)
       setSetores(s || [])
       setUsuarios(u || [])
       setLoading(false)
     }
     carregar()
   }, [])
+
+  // Histórico só é usado no detalhe de UMA tarefa — busca sob demanda em vez
+  // de trazer a tabela inteira de tarefas_historico (que cresce a cada
+  // mudança de status de cada tarefa e também passava de 1000 linhas).
+  useEffect(() => {
+    if (!detalhe) {
+      setHistorico([])
+      return
+    }
+    let cancelado = false
+    supabase
+      .from('tarefas_historico')
+      .select('*')
+      .eq('tarefa_id', detalhe.id)
+      .order('created_at', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) console.error('Erro ao carregar histórico da tarefa:', error)
+        if (!cancelado) setHistorico(data || [])
+      })
+    return () => {
+      cancelado = true
+    }
+  }, [detalhe])
 
   const nomeUsuario = (id: string) => usuarios.find((u) => u.id === id)?.nome || '—'
   const nomeSetor = (id: string) => setores.find((s) => s.id === id)?.nome || '—'
