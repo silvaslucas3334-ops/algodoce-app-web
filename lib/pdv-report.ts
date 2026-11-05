@@ -2,21 +2,40 @@ import { supabase } from './supabase'
 import { PDV_STATUS_RECEITA } from './constants'
 import { FinanceiroPdvPedido, ItemVendidoFlat, FaturamentoPorCategoria } from './types'
 
+const TAMANHO_PAGINA = 1000
+
+/**
+ * Pagina em lotes de 1000 porque o PostgREST corta silenciosamente nesse
+ * limite por request — sem erro, só menos linhas (mesma causa raiz do bug
+ * de financeiro_pdv_periodos corrigido nesta sessão). Aqui o intervalo
+ * pode cobrir a janela de 90 dias do forecast histórico (ver
+ * inicioJanelaHistorico em financeiro-forecast.ts), que pra loja2 já passa
+ * de 1000 pedidos hoje — não é só risco futuro.
+ */
 export async function buscarPedidosDoPeriodo(
   unidade: 'loja1' | 'loja2',
   dataMin: string,
   dataMax: string
 ): Promise<FinanceiroPdvPedido[]> {
-  const { data, error } = await supabase
-    .from('financeiro_pdv_pedidos')
-    .select('*, itens:financeiro_pdv_itens(*)')
-    .eq('unidade', unidade)
-    .gte('data_periodo', dataMin)
-    .lte('data_periodo', dataMax)
-    .in('status', PDV_STATUS_RECEITA)
-    .order('data_periodo')
-  if (error) throw new Error(error.message)
-  return data || []
+  const pedidos: FinanceiroPdvPedido[] = []
+  let inicio = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('financeiro_pdv_pedidos')
+      .select('*, itens:financeiro_pdv_itens(*)')
+      .eq('unidade', unidade)
+      .gte('data_periodo', dataMin)
+      .lte('data_periodo', dataMax)
+      .in('status', PDV_STATUS_RECEITA)
+      .order('data_periodo')
+      .order('id')
+      .range(inicio, inicio + TAMANHO_PAGINA - 1)
+    if (error) throw new Error(error.message)
+    pedidos.push(...(data || []))
+    if (!data || data.length < TAMANHO_PAGINA) break
+    inicio += TAMANHO_PAGINA
+  }
+  return pedidos
 }
 
 /**
