@@ -52,17 +52,25 @@ export default function UsuariosTab() {
     setLoading(false)
   }
 
-  function abrirEdicao(usuario: any) {
+  // `liberar` = atalho do botão "Liberar": abre a edição já com o usuário marcado como ativo,
+  // pro admin só conferir função/loja e salvar.
+  function abrirEdicao(usuario: any, liberar = false) {
     setUsuarioEditando(usuario)
     setFormEdicao({
       nome: usuario.nome,
       role: usuario.role,
       loja_id: usuario.loja_id || 'loja1',
       setor_id: usuario.setor_id || '',
-      ativo: usuario.ativo,
+      ativo: liberar ? true : usuario.ativo,
     })
     setErro('')
   }
+
+  // Contas criadas em /signup nascem com ativo = false e não entram no sistema
+  // (ver components/AccessGate.tsx) até o admin liberar aqui. Quem precisa de
+  // liberação aparece primeiro na lista.
+  const aguardando = usuarios.filter((u: any) => u.ativo === false)
+  const usuariosOrdenados = [...usuarios].sort((a: any, b: any) => Number(b.ativo === false) - Number(a.ativo === false))
 
   function cancelarEdicao() {
     setUsuarioEditando(null)
@@ -130,22 +138,35 @@ export default function UsuariosTab() {
         </p>
       </div>
 
+      {aguardando.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-800">
+          ⏳ <strong>{aguardando.length}</strong> {aguardando.length === 1 ? 'conta está' : 'contas estão'} sem acesso ao sistema
+          (cadastros novos ou contas desativadas). Quem acabou de se cadastrar fica aqui até você tocar em{' '}
+          <strong>Liberar</strong> e definir função e loja.
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-12 text-gray-400">Carregando...</div>
       ) : usuarios.length === 0 ? (
         <div className="text-center py-12 text-gray-400">Nenhum usuário cadastrado</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {usuarios.map((u: any) => (
-            <div key={u.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+          {usuariosOrdenados.map((u: any) => (
+            <div key={u.id} className={`bg-white rounded-xl p-4 shadow-sm border hover:shadow-md transition-shadow ${u.ativo === false ? 'border-amber-300' : 'border-gray-100'}`}>
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
                   <p className="font-semibold text-gray-800">{u.nome}</p>
                   <p className="text-xs text-gray-500">{u.email}</p>
                 </div>
-                <span className={`text-xs px-2 py-1 rounded font-medium ${ROLE_INFO[u.role as keyof typeof ROLE_INFO]?.cor}`}>
-                  {ROLE_INFO[u.role as keyof typeof ROLE_INFO]?.label}
-                </span>
+                {u.ativo === false && !u.loja_id && !u.setor_id ? (
+                  // cadastro novo: ainda sem loja/setor definidos pelo admin
+                  <span className="text-xs px-2 py-1 rounded font-medium bg-amber-100 text-amber-700">Função a definir</span>
+                ) : (
+                  <span className={`text-xs px-2 py-1 rounded font-medium ${ROLE_INFO[u.role as keyof typeof ROLE_INFO]?.cor}`}>
+                    {ROLE_INFO[u.role as keyof typeof ROLE_INFO]?.label}
+                  </span>
+                )}
               </div>
 
               {u.role === 'loja' && u.loja_id && (
@@ -157,8 +178,8 @@ export default function UsuariosTab() {
               )}
 
               <div className="flex items-center justify-between text-xs mb-3">
-                <span className={`px-2 py-1 rounded ${u.ativo ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                  {u.ativo ? '✓ Ativo' : 'Inativo'}
+                <span className={`px-2 py-1 rounded ${u.ativo === false ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                  {u.ativo === false ? '⏳ Sem acesso' : '✓ Ativo'}
                 </span>
                 <span className="text-gray-400">
                   Criado em {new Date(u.created_at).toLocaleDateString('pt-BR')}
@@ -166,6 +187,14 @@ export default function UsuariosTab() {
               </div>
 
               <div className="flex gap-2">
+                {u.ativo === false && (
+                  <button
+                    onClick={() => abrirEdicao(u, true)}
+                    className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-semibold flex items-center justify-center gap-1 hover:bg-green-700"
+                  >
+                    Liberar
+                  </button>
+                )}
                 <button
                   onClick={() => abrirEdicao(u)}
                   className="flex-1 bg-blue-50 text-blue-600 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-1 hover:bg-blue-100"

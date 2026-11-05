@@ -10,8 +10,6 @@ export default function SignupPage() {
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [nome, setNome] = useState('')
-  const [role, setRole] = useState('loja')
-  const [lojaId, setLojaId] = useState('loja1')
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
   const [sucesso, setSucesso] = useState(false)
@@ -21,17 +19,17 @@ export default function SignupPage() {
     setCarregando(true)
     setErro('')
 
-    console.log('handleSignup iniciado', { email, nome, role })
-
     try {
-      // Criar usuário no Auth
-      console.log('Tentando criar usuário no Auth com email:', email)
+      // A linha em `usuarios` NÃO é criada aqui: um trigger no servidor
+      // (lib/migrations/seguranca-cadastro-pendente.sql) cria já como pendente
+      // (ativo = false, sem função/loja). Função e loja o administrador define
+      // em Admin > Usuários, que também libera o acesso. Nada de papel vindo
+      // do navegador.
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password: senha,
+        options: { data: { nome } },
       })
-
-      console.log('Resposta do Auth:', { authData, authError })
 
       if (authError) {
         setErro(authError.message)
@@ -40,35 +38,10 @@ export default function SignupPage() {
       }
 
       if (authData.user) {
-        console.log('Usuário criado no Auth:', authData.user.id)
-
-        // Criar registro na tabela usuarios
-        const { error: dbError } = await supabase
-          .from('usuarios')
-          .insert({
-            id: authData.user.id,
-            email,
-            nome,
-            role,
-            loja_id: role === 'loja' ? lojaId : role === 'cozinha' ? 'cozinha' : null,
-            ativo: true,
-          })
-
-        if (dbError) {
-          console.error('Erro ao inserir usuário:', dbError)
-          setErro(`Erro ao criar usuário: ${dbError.message}`)
-          // Deletar do Auth se falhar o insert
-          await supabase.auth.admin.deleteUser(authData.user.id)
-          setCarregando(false)
-          return
-        }
-
-        console.log('Usuário criado com sucesso na tabela usuarios')
-
         setSucesso(true)
         setTimeout(() => {
           router.push('/login')
-        }, 2000)
+        }, 3500)
       }
     } catch (err) {
       setErro('Erro ao criar conta')
@@ -104,7 +77,7 @@ export default function SignupPage() {
 
           {sucesso && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-green-700 font-medium">✓ Conta criada! Redirecionando...</p>
+              <p className="text-sm text-green-700 font-medium">✓ Conta criada! Agora é só aguardar o administrador liberar o seu acesso.</p>
             </div>
           )}
 
@@ -145,31 +118,9 @@ export default function SignupPage() {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Usuário</label>
-              <select
-                value={role}
-                onChange={e => setRole(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-pink-700"
-              >
-                <option value="loja">Funcionário Loja</option>
-                <option value="cozinha">Funcionário Cozinha</option>
-              </select>
-            </div>
-
-            {role === 'loja' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Loja</label>
-                <select
-                  value={lojaId}
-                  onChange={e => setLojaId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-pink-700"
-                >
-                  <option value="loja1">Paraisópolis</option>
-                  <option value="loja2">Itajubá</option>
-                </select>
-              </div>
-            )}
+            <p className="text-xs text-gray-500">
+              Depois de criar a conta, o administrador define a sua função e libera o acesso.
+            </p>
 
             <button
               type="submit"

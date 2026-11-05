@@ -11,6 +11,26 @@ export function useAuth() {
 
   useEffect(() => {
     let montado = true
+    // Id da sessão cuja linha em `usuarios` já foi (ou está sendo) carregada —
+    // evita refazer a consulta quando o Supabase reemite SIGNED_IN só porque a
+    // aba voltou a ter foco.
+    let usuarioIdCarregado: string | null = null
+
+    const carregarUsuario = async (userId: string) => {
+      const { data: userData, error } = await supabase
+        .from('usuarios')
+        .select('*')
+        .eq('id', userId)
+        .single()
+
+      if (!montado) return
+      if (error) {
+        setErro(error.message)
+      } else {
+        setUsuario(userData)
+      }
+      setCarregando(false)
+    }
 
     const init = async () => {
       try {
@@ -41,20 +61,8 @@ export function useAuth() {
         setUser(data.session.user)
 
         // Buscar usuário na base
-        const { data: userData, error } = await supabase
-          .from('usuarios')
-          .select('*')
-          .eq('id', data.session.user.id)
-          .single()
-
-        if (montado) {
-          if (error) {
-            setErro(error.message)
-          } else {
-            setUsuario(userData)
-          }
-          setCarregando(false)
-        }
+        usuarioIdCarregado = data.session.user.id
+        await carregarUsuario(data.session.user.id)
 
       } catch (e: any) {
         if (montado) {
@@ -70,7 +78,16 @@ export function useAuth() {
       if (montado) {
         if (session) {
           setUser(session.user)
+          // Login feito depois que este hook montou (ex.: o portão global do
+          // layout já estava montado na tela de login): sem isto `usuario`
+          // ficaria nulo até recarregar a página.
+          if (event === 'SIGNED_IN' && usuarioIdCarregado !== session.user.id) {
+            usuarioIdCarregado = session.user.id
+            // fora do callback síncrono do auth, como recomenda o supabase-js
+            setTimeout(() => { carregarUsuario(session.user.id) }, 0)
+          }
         } else {
+          usuarioIdCarregado = null
           setUser(null)
           setUsuario(null)
         }
