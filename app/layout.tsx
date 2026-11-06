@@ -3,6 +3,7 @@ import BottomNav from '@/components/BottomNav'
 import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 import IdleLogout from '@/components/IdleLogout'
 import AccessGate from '@/components/AccessGate'
+import { AuthProvider } from '@/hooks/useAuth'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -40,13 +41,15 @@ export default function RootLayout({
       </head>
       <body className="bg-gray-50">
         <ServiceWorkerRegistration />
-        <IdleLogout />
-        <AccessGate>
-          <div className="pb-20">
-            {children}
-          </div>
-          <BottomNav />
-        </AccessGate>
+        <AuthProvider>
+          <IdleLogout />
+          <AccessGate>
+            <div className="pb-20">
+              {children}
+            </div>
+            <BottomNav />
+          </AccessGate>
+        </AuthProvider>
       </body>
     </html>
   )

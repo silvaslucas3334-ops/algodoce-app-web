@@ -1,27 +1,29 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
-import { useRealtimeData } from '@/hooks/useRealtimeData'
 import { exportarCSV } from '@/lib/csv-export'
 import { ShoppingCart, Trash2, Send, History, RotateCcw, ChevronDown, Download } from 'lucide-react'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 export default function EstoquePage() {
-  const { usuario } = useAuth()
-  const [local, setLocal] = useState<string>(() => {
-    if (usuario?.role === 'loja' && usuario?.loja_id) {
-      return usuario.loja_id
-    }
-    return 'cozinha'
-  })
+  const { usuario, carregando: carregandoAuth } = useAuth()
+  // Esta tela nasceu só pro admin (seletor de unidade). Hoje a loja e a cozinha
+  // também usam, então a unidade é DERIVADA do usuário: loja → a própria loja,
+  // cozinha → cozinha, admin → a que ele escolher (começa na cozinha). Calcular
+  // direto do usuário (em vez de um estado corrigido depois por um efeito) evita
+  // desenhar a visão do admin e refazer a consulta quando o login termina.
+  const [localEscolhidoAdmin, setLocalEscolhidoAdmin] = useState<string | null>(null)
+  const localPadrao = usuario?.role === 'loja' && usuario?.loja_id ? usuario.loja_id : 'cozinha'
+  const local: string = usuario?.role === 'admin' && localEscolhidoAdmin ? localEscolhidoAdmin : localPadrao
+  const pronto = !carregandoAuth && !!usuario
   const [lotes, setLotes] = useState<any[]>([])
-  const [lojesPendentes, setLojesPendentes] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [carrinho, setCarrinho] = useState<string[]>([])
   const [destinoEnvio, setDestinoEnvio] = useState('loja1')
-  const [operador, setOperador] = useState('')
+  const operador: string = usuario?.nome || ''
   const [enviando, setEnviando] = useState(false)
   const [modoEnvio, setModoEnvio] = useState(false)
   const [modoRecebimento, setModoRecebimento] = useState(false)
@@ -52,29 +54,37 @@ export default function EstoquePage() {
   const [relatorioData, setRelatorioData] = useState<any[]>([])
   const [carregandoRelatorio, setCarregandoRelatorio] = useState(false)
 
-  // Sincronizar local quando usuário muda
-  useEffect(() => {
-    if (usuario?.role === 'loja' && usuario?.loja_id) {
-      setLocal(usuario.loja_id)
-    } else {
-      setLocal('cozinha')
-    }
-    // Preencher operador com nome do usuário
-    if (usuario?.nome) {
-      setOperador(usuario.nome)
-    }
-  }, [usuario?.role, usuario?.loja_id, usuario?.nome])
+  // Refs pra o handler do realtime sempre chamar a versão mais recente da
+  // consulta e pra descartar resposta de uma unidade que já deixou de ser a atual.
+  const carregarRef = useRef<() => Promise<void>>(async () => {})
+  const localAtualRef = useRef(local)
+  const localCarregadoRef = useRef<string | null>(null)
+  carregarRef.current = carregarEstoque
+  localAtualRef.current = local
 
   useEffect(() => {
+    if (!pronto) return
     carregarEstoque()
 
+    // Qualquer mudança em qualquer etiqueta (de qualquer loja) dispara este
+    // evento — dar baixa em 10 etiquetas gera 10 eventos. Agrupa numa recarga só,
+    // silenciosa (ver carregarEstoque), em vez de uma recarga + "Carregando..."
+    // por evento.
+    let temporizador: ReturnType<typeof setTimeout> | null = null
     const channel = supabase
       .channel(`estoque-${local}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lotes_producao' }, carregarEstoque)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lotes_producao' }, () => {
+        if (temporizador) clearTimeout(temporizador)
+        temporizador = setTimeout(() => { carregarRef.current() }, 700)
+      })
       .subscribe()
 
-    return () => { channel.unsubscribe() }
-  }, [local])
+    return () => {
+      if (temporizador) clearTimeout(temporizador)
+      channel.unsubscribe()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [local, pronto])
 
   useEffect(() => {
     if (mostrarModalRelatorio) carregarRelatorioGerencial()
@@ -82,9 +92,15 @@ export default function EstoquePage() {
   }, [mostrarModalRelatorio, unidadeRelatorio])
 
   async function carregarEstoque() {
-    setLoading(true)
-    setCarrinho([])
-    setModoEnvio(false)
+    const localDaConsulta = local
+    // "Carregando..." e limpar seleção só quando a unidade muda (ou na 1ª carga).
+    // Recargas por realtime/ação são silenciosas: a lista só é trocada quando o
+    // dado novo chega, sem a tela piscar.
+    if (localCarregadoRef.current !== localDaConsulta) {
+      setLoading(true)
+      setCarrinho([])
+      setModoEnvio(false)
+    }
 
     let query = supabase
       .from('lotes_producao')
@@ -100,23 +116,24 @@ export default function EstoquePage() {
 
     const { data, error } = await query.order('data_validade')
 
-    if (error) console.error('Erro ao carregar estoque:', error)
-    setLotes(data || [])
+    // Admin trocou de unidade enquanto esta consulta estava no ar: descarta.
+    if (localAtualRef.current !== localDaConsulta) return
 
-    // Para usuários de loja, carregar pendentes de recebimento
-    if (usuario?.role === 'loja' && usuario?.loja_id) {
-      const { data: pendentes } = await supabase
-        .from('lotes_producao')
-        .select('id, codigo_qr, produto_id, quantidade, peso_gramas, data_validade, produzido_por, status, produto:produtos(nome, unidade_medida, congelado)')
-        .eq('destino', usuario.loja_id)
-        .eq('status', 'enviado')
-        .order('data_validade')
-
-      setLojesPendentes(pendentes || [])
+    if (error) {
+      console.error('Erro ao carregar estoque:', error)
+      // Em recarga silenciosa, erro não apaga a lista que já está na tela.
+      if (localCarregadoRef.current !== localDaConsulta) setLotes([])
+    } else {
+      setLotes(data || [])
     }
-
+    localCarregadoRef.current = localDaConsulta
     setLoading(false)
   }
+
+  // O que de fato está na prateleira desta unidade. Etiquetas `enviado` ainda
+  // estão a caminho (a loja recebe na Expedição) e não entram nos totais.
+  const lotesDisp = lotes.filter(l => (local === 'cozinha' ? l.status === 'na_cozinha' : l.status === 'na_loja'))
+  const emTransito = local === 'cozinha' ? 0 : lotes.filter(l => l.status === 'enviado').length
 
   const hoje = new Date().toISOString().split('T')[0]
   const em3dias = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0]
@@ -607,6 +624,16 @@ export default function EstoquePage() {
     )
   }
 
+  // Enquanto o login não termina não dá pra saber qual unidade mostrar — não
+  // desenhar nada da versão do admin (chips de unidade) pra depois trocar.
+  if (!pronto) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-400">Carregando...</p>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       <div className="bg-white border-b border-gray-200 px-4 py-2 sticky top-0 z-40 shadow-md flex items-center h-20">
@@ -622,27 +649,18 @@ export default function EstoquePage() {
       <div className="p-4">
       <div className="pt-4 mb-4">
         <h1 className="text-xl font-bold text-gray-800 mb-3">Estoque</h1>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {Object.entries(LOCAL_LABEL)
-            .filter(([key]) => {
-              // Se for loja, mostrar só a sua loja
-              if (usuario?.role === 'loja') {
-                return key === usuario.loja_id
-              }
-              // Se for cozinha, mostrar cozinha
-              if (usuario?.role === 'cozinha') {
-                return key === 'cozinha'
-              }
-              // Admin vê tudo
-              return true
-            })
-            .map(([key, label]) => (
-              <button key={key} onClick={() => setLocal(key)}
+        {/* Seletor de unidade: só o admin escolhe. Loja e cozinha têm uma única
+            unidade (a deles), então um botão único só ocupava espaço. */}
+        {usuario?.role === 'admin' && (
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {Object.entries(LOCAL_LABEL).map(([key, label]) => (
+              <button key={key} onClick={() => setLocalEscolhidoAdmin(key)}
                 className={`px-4 py-1.5 rounded-full text-sm whitespace-nowrap border ${local === key ? 'bg-pink-700 text-white border-pink-700 font-semibold' : 'bg-white border-gray-200 text-gray-600'}`}>
                 {label}
               </button>
             ))}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="mb-3 text-sm">
@@ -918,23 +936,33 @@ export default function EstoquePage() {
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                 <p className="text-gray-600 text-xs font-medium">Total</p>
-                <p className="text-2xl font-bold text-gray-800 mt-1">{local === 'cozinha' ? lotes.filter(l => l.status === 'na_cozinha').length : lotes.filter(l => l.status === 'na_loja').length}</p>
+                <p className="text-2xl font-bold text-gray-800 mt-1">{lotesDisp.length}</p>
               </div>
               <div className="bg-orange-50 rounded-lg p-3 border border-orange-200">
                 <p className="text-orange-700 text-xs font-medium">Vencendo em 7 dias</p>
-                <p className="text-2xl font-bold text-orange-600 mt-1">{lotes.filter(l => {
+                <p className="text-2xl font-bold text-orange-600 mt-1">{lotesDisp.filter(l => {
                   const dias = Math.floor((new Date(l.data_validade + 'T00:00:00').getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
                   return dias >= 0 && dias <= 7
                 }).length}</p>
               </div>
               <div className="bg-red-50 rounded-lg p-3 border border-red-200">
                 <p className="text-red-700 text-xs font-medium">Vencidos</p>
-                <p className="text-2xl font-bold text-red-600 mt-1">{lotes.filter(l => {
+                <p className="text-2xl font-bold text-red-600 mt-1">{lotesDisp.filter(l => {
                   const dias = Math.floor((new Date(l.data_validade + 'T00:00:00').getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
                   return dias < 0
                 }).length}</p>
               </div>
             </div>
+
+            {emTransito > 0 && (
+              <Link
+                href="/expedicao"
+                className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 hover:bg-blue-100"
+              >
+                <span>🚚 {emTransito} etiqueta(s) a caminho — ainda não receberam entrada no estoque</span>
+                <span className="font-semibold whitespace-nowrap">Receber →</span>
+              </Link>
+            )}
           </div>
 
           {/* NOTE: Recebimentos agora aparecem apenas na aba Expedição > Recebimentos */}

@@ -84,10 +84,16 @@ create policy "acesso_autenticado_ativo" on public.produtos
 -- Cada um enxerga a própria linha (o AccessGate precisa dela, inclusive para
 -- quem está pendente); os demais, só depois de ativo (nomes de colegas são
 -- usados em Tarefas, Ordens e no painel).
+-- ATENÇÃO: aqui NÃO usar `(select public.usuario_ativo())`. As policies antigas
+-- "Admin pode atualizar/deletar" consultam a própria tabela `usuarios`; uma
+-- sub-consulta na policy de SELECT faz o Postgres acusar "infinite recursion
+-- detected in policy for relation usuarios" ao salvar um usuário. Corrigido em
+-- seguranca-hotfix-usuarios-recursao.sql (que também troca o teste de admin por
+-- uma função). Se for rodar este arquivo do zero, rode o hotfix logo depois.
 drop policy if exists "Todos podem ver" on public.usuarios;
 create policy "usuarios_select_proprio_ou_ativo" on public.usuarios
   for select to authenticated
-  using (id = auth.uid() or (select public.usuario_ativo()));
+  using (id = auth.uid() or public.usuario_ativo());
 
 -- A linha nasce pelo trigger (security definer); não existe mais insert do cliente.
 drop policy if exists "Qualquer um pode inserir" on public.usuarios;
