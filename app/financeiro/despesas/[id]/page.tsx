@@ -12,6 +12,8 @@ import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL, CONDICAO_PAGAMENTO_LABEL, TIPO_LA
 import { formatBRL } from '@/lib/ofx'
 import { formatarDocumento, hojeISO, statusExibicao, somarMeses } from '@/lib/financeiro-utils'
 import { desfazerConciliacao } from '@/lib/financeiro-reconciliacao'
+import { caminhoInternoSeguro } from '@/lib/navegacao'
+import Link from 'next/link'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
 import EtiquetaAprovacaoSeletor from '@/components/EtiquetaAprovacaoSeletor'
 
@@ -37,7 +39,8 @@ function DetalheDespesaContent() {
   // Presente quando se chega aqui a partir de outra tela (ex: passo
   // Despesas Fixas do wizard de Orçamento) — o botão voltar deve retornar
   // pra lá, não pro default (lista de Despesas).
-  const voltarPara = searchParams.get('voltarPara')
+  // Só caminho interno (ver lib/navegacao.ts) — evita redirecionamento aberto.
+  const voltarPara = caminhoInternoSeguro(searchParams.get('voltarPara'))
 
   const [lancamento, setLancamento] = useState<any>(null)
   const [itens, setItens] = useState<FinanceiroLancamentoItem[]>([])
@@ -560,6 +563,14 @@ function DetalheDespesaContent() {
                     {lancamento.parte?.nome}
                     {lancamento.parte?.documento && (
                       <span className="block text-xs text-gray-400 font-normal">{formatarDocumento(lancamento.parte.documento)}</span>
+                    )}
+                    {lancamento.parte_id && (
+                      <Link
+                        href={`/financeiro/despesas?parte=${lancamento.parte_id}`}
+                        className="block text-xs text-pink-700 font-medium hover:underline"
+                      >
+                        Ver todas as despesas deste fornecedor →
+                      </Link>
                     )}
                   </span>
                 </div>

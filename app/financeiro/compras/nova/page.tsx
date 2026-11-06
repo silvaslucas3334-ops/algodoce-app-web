@@ -14,6 +14,7 @@ import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { calcularVencimento, formatarDocumento, hojeISO, somarMeses } from '@/lib/financeiro-utils'
 import { vincularTransacaoCriada } from '@/lib/financeiro-reconciliacao'
+import { caminhoInternoSeguro } from '@/lib/navegacao'
 
 const TOLERANCIA_CENTAVOS = 0.02
 
@@ -35,7 +36,7 @@ function LancarNotaForm() {
   // Vindo da conciliação do extrato: mês/aba não vivem na URL do Fluxo de
   // Caixa, então router.back() sozinho voltaria pro estado default — voltarPara
   // carrega o destino exato.
-  const voltarPara = params.get('voltarPara')
+  const voltarPara = caminhoInternoSeguro(params.get('voltarPara'))
 
   // Vindo do fechamento de uma cotação: diferente do extrato, aqui NÃO é um
   // pagamento já feito — é uma decisão. Os campos vêm pré-preenchidos mas

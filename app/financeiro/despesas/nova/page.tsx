@@ -11,6 +11,7 @@ import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { calcularVencimento, diferencaEmMeses, formatarDocumento, hojeISO, somarMeses } from '@/lib/financeiro-utils'
 import { vincularTransacaoCriada } from '@/lib/financeiro-reconciliacao'
+import { caminhoInternoSeguro } from '@/lib/navegacao'
 
 function NovaDespesaForm() {
   const { usuario } = useAuth()
@@ -31,7 +32,7 @@ function NovaDespesaForm() {
   // Caixa): mês/aba não vivem na URL daquela tela, então router.back() sozinho
   // voltaria pro estado default (mês atual, aba mensal) em vez de onde o
   // usuário estava — voltarPara carrega o destino exato.
-  const voltarPara = params.get('voltarPara')
+  const voltarPara = caminhoInternoSeguro(params.get('voltarPara'))
 
   // Só o valor inicial do seletor — cozinha não é uma entidade própria
   // (custos entram como rateio/0001) e loja tende a lançar pra própria

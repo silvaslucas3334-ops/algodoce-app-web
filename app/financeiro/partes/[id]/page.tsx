@@ -5,6 +5,7 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
 import NotFoundState from '@/components/NotFoundState'
 import { useRouter, useParams } from 'next/navigation'
+import Link from 'next/link'
 import { Loader } from 'lucide-react'
 import { FinanceiroParte, FormaPagamento, CondicaoPagamento } from '@/lib/types'
 import { FORMA_PAGAMENTO_LABEL } from '@/lib/constants'
@@ -143,6 +144,14 @@ export default function DetalheParteePage() {
                 <p className={`text-lg font-bold mt-1 ${resumo.atrasado > 0 ? 'text-red-600' : 'text-gray-800'}`}>{formatBRL(resumo.atrasado)}</p>
               </div>
             </div>
+          )}
+          {resumo && (
+            <Link
+              href={`/financeiro/despesas?parte=${parteId}`}
+              className="block mb-4 text-sm text-pink-700 font-medium hover:underline"
+            >
+              Ver as despesas deste fornecedor →
+            </Link>
           )}
 
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 space-y-4">

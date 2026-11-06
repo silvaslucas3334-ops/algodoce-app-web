@@ -1,29 +1,44 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import PageHeader from '@/components/PageHeader'
+import FornecedorCombobox, { OpcaoFornecedor } from '@/components/FornecedorCombobox'
 import Link from 'next/link'
-import { Plus, Search, ReceiptText, ShoppingCart, CheckCircle, X } from 'lucide-react'
+import { Plus, Search, ReceiptText, ShoppingCart, CheckCircle, X, Loader } from 'lucide-react'
 import { EtiquetaAprovacao, FinanceiroLancamento } from '@/lib/types'
 import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR, ETIQUETA_APROVACAO_LABEL, ETIQUETA_APROVACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
-import { hojeISO, somarDias, statusExibicao } from '@/lib/financeiro-utils'
+import { hojeISO, statusExibicao } from '@/lib/financeiro-utils'
 import EtiquetaAprovacaoSeletor from '@/components/EtiquetaAprovacaoSeletor'
+import {
+  Agrupamento,
+  buscarPagina,
+  buscarResumo,
+  buscarTodos,
+  filtrosParaQuery,
+  FiltroEtiqueta,
+  FiltrosDespesas,
+  lerFiltros,
+  resumir,
+  ResumoDespesas,
+  STATUS_CARGA_COMPLETA,
+  statusPadrao,
+  StatusLista,
+  TAMANHO_PAGINA,
+} from '@/lib/financeiro-despesas-lista'
 
-type Filtro = 'atrasadas' | 'vence7' | 'aberto' | 'pagas' | 'canceladas'
-
-const FILTROS: { key: Filtro; label: string }[] = [
+const FILTROS: { key: StatusLista; label: string }[] = [
   { key: 'atrasadas', label: 'Atrasadas' },
   { key: 'vence7', label: 'Vence em 7 dias' },
   { key: 'aberto', label: 'Em aberto' },
   { key: 'pagas', label: 'Pagas' },
+  { key: 'todas', label: 'Todas' },
   { key: 'canceladas', label: 'Canceladas' },
 ]
-
-type FiltroEtiqueta = 'todas' | 'sem_etiqueta' | EtiquetaAprovacao
 
 const FILTROS_ETIQUETA: { key: FiltroEtiqueta; label: string }[] = [
   { key: 'todas', label: 'Todas' },
@@ -37,7 +52,9 @@ const MESES = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ]
 
-type Agrupamento = 'mes' | 'etiqueta'
+// Posição da lista guardada ao abrir uma despesa, pra devolver o usuário ao
+// mesmo ponto (e destacar a linha que ele estava olhando) quando voltar.
+const CHAVE_POSICAO = 'despesas:posicao'
 
 interface GrupoLancamentos {
   chave: string
@@ -80,51 +97,178 @@ function agruparPorEtiqueta(itens: FinanceiroLancamento[]): GrupoLancamentos[] {
     .filter((g) => g.itens.length > 0)
 }
 
-export default function DespesasPage() {
+function formatarDataCurta(iso: string): string {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR')
+}
+
+function DespesasContent() {
   const { usuario } = useAuth()
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // O estado da lista mora na URL (?status=&q=&parte=&etq=&de=&ate=&agr=): abrir
+  // uma despesa e voltar, atualizar a página ou mandar o link devolve exatamente
+  // a mesma visão. URL sem parâmetros = a tela de sempre (Em aberto, sem filtros).
+  const queryAtual = searchParams.toString()
+  const urlAtual = queryAtual ? `${pathname}?${queryAtual}` : pathname
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const filtros = useMemo(() => lerFiltros(searchParams), [queryAtual])
+
+  const atualizarFiltros = useCallback(
+    (parcial: Partial<FiltrosDespesas>) => {
+      const qs = filtrosParaQuery({ ...filtros, ...parcial })
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [filtros, pathname, router]
+  )
+
   const [lancamentos, setLancamentos] = useState<FinanceiroLancamento[]>([])
+  const [total, setTotal] = useState(0)
+  const [resumo, setResumo] = useState<ResumoDespesas | null>(null)
   const [loading, setLoading] = useState(true)
-  const [filtro, setFiltro] = useState<Filtro>('aberto')
-  const [busca, setBusca] = useState('')
+  const [carregandoMais, setCarregandoMais] = useState(false)
+  const [erro, setErro] = useState('')
   const [pagandoId, setPagandoId] = useState<string | null>(null)
   const [mostrarMaisFiltros, setMostrarMaisFiltros] = useState(false)
-  const [filtroParteId, setFiltroParteId] = useState('')
-  const [filtroEtiqueta, setFiltroEtiqueta] = useState<FiltroEtiqueta>('todas')
-  const [vencimentoDe, setVencimentoDe] = useState('')
-  const [vencimentoAte, setVencimentoAte] = useState('')
-  const [agrupamento, setAgrupamento] = useState<Agrupamento>('mes')
+  const [buscaDigitada, setBuscaDigitada] = useState(filtros.q)
+  const [partes, setPartes] = useState<OpcaoFornecedor[]>([])
+  const [destacadoId, setDestacadoId] = useState<string | null>(null)
+
+  const paginado = !STATUS_CARGA_COMPLETA.includes(filtros.status)
+  const chaveConsulta = [filtros.status, filtros.q, filtros.parteId, filtros.etiqueta, filtros.de, filtros.ate].join('|')
+
+  // --- consulta ---------------------------------------------------------
+  const requisicaoRef = useRef(0)
+  const carregar = useCallback(
+    async (opcoes?: { silencioso?: boolean; quantidade?: number }) => {
+      const numero = ++requisicaoRef.current
+      if (!opcoes?.silencioso) setLoading(true)
+      setErro('')
+      try {
+        if (!paginado) {
+          const linhas = await buscarTodos(filtros)
+          if (numero !== requisicaoRef.current) return
+          setLancamentos(linhas)
+          setTotal(linhas.length)
+          setResumo(resumir(linhas))
+        } else {
+          const quantidade = Math.max(opcoes?.quantidade ?? 0, TAMANHO_PAGINA)
+          const [pagina, resumoGeral] = await Promise.all([buscarPagina(filtros, 0, quantidade), buscarResumo(filtros)])
+          if (numero !== requisicaoRef.current) return
+          setLancamentos(pagina.linhas)
+          setTotal(pagina.total)
+          setResumo(resumoGeral)
+        }
+      } catch (e: any) {
+        console.error('Erro ao carregar despesas:', e)
+        if (numero === requisicaoRef.current) setErro('Erro ao carregar: ' + (e?.message || 'desconhecido'))
+      } finally {
+        if (numero === requisicaoRef.current) setLoading(false)
+      }
+    },
+    [filtros, paginado]
+  )
+  const carregarRef = useRef(carregar)
+  carregarRef.current = carregar
+
+  // Ao montar: se o usuário está voltando de uma despesa aberta a partir desta
+  // mesma URL, guarda onde estava (declarado antes do efeito de carga de propósito).
+  const restaurarRef = useRef<{ y: number; id: string; qtd: number } | null>(null)
+  useEffect(() => {
+    try {
+      const bruto = sessionStorage.getItem(CHAVE_POSICAO)
+      if (bruto) {
+        const posicao = JSON.parse(bruto)
+        if (posicao?.url === urlAtual) restaurarRef.current = posicao
+        sessionStorage.removeItem(CHAVE_POSICAO)
+      }
+    } catch {
+      /* sessionStorage indisponível: segue sem restaurar */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
-    if (usuario) carregar()
-  }, [usuario, filtro])
+    if (!usuario) return
+    // Voltando pra uma lista paginada: recarrega de uma vez tudo o que já estava aberta.
+    carregarRef.current({ quantidade: restaurarRef.current?.qtd })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usuario, chaveConsulta])
 
-  async function carregar() {
-    setLoading(true)
-    const hoje = hojeISO()
-    let query = supabase
-      .from('financeiro_lancamentos')
-      .select(
-        '*, parte:financeiro_partes!parte_id(nome, documento), conta:financeiro_contas(codigo, nome), extrato_transacao:financeiro_extrato_transacoes!extrato_transacao_id(status_conciliacao)'
-      )
+  // Depois da primeira carga, devolve a rolagem e destaca a linha visitada.
+  useEffect(() => {
+    const posicao = restaurarRef.current
+    if (loading || !posicao) return
+    restaurarRef.current = null
+    // setTimeout (e não requestAnimationFrame): dá tempo do React pintar a lista e
+    // também roda quando a aba não está sendo pintada.
+    // Sem cleanup de propósito: a posição já foi consumida acima, então cancelar este
+    // temporizador numa re-renderização perderia a restauração.
+    setTimeout(() => {
+      window.scrollTo({ top: posicao.y })
+      setDestacadoId(posicao.id)
+      setTimeout(() => setDestacadoId(null), 2500)
+    }, 50)
+  }, [loading, lancamentos])
 
-    if (filtro === 'atrasadas') {
-      query = query.eq('status', 'aberto').lt('data_vencimento', hoje).order('data_vencimento')
-    } else if (filtro === 'vence7') {
-      query = query.eq('status', 'aberto').gte('data_vencimento', hoje).lte('data_vencimento', somarDias(hoje, 7)).order('data_vencimento')
-    } else if (filtro === 'aberto') {
-      query = query.eq('status', 'aberto').order('data_vencimento')
-    } else if (filtro === 'pagas') {
-      query = query.eq('status', 'pago').order('data_pagamento', { ascending: false })
-    } else {
-      query = query.eq('status', 'cancelado').order('updated_at', { ascending: false })
-    }
+  // Fornecedores pra o filtro (todos os cadastrados, não só os da página atual).
+  useEffect(() => {
+    if (!usuario) return
+    supabase
+      .from('financeiro_partes')
+      .select('id, nome')
+      .order('nome')
+      .then(({ data }) => setPartes((data || []) as OpcaoFornecedor[]))
+  }, [usuario])
 
-    const { data, error } = await query
-    if (error) console.error('Erro ao carregar despesas:', error)
-    setLancamentos(data || [])
-    setLoading(false)
+  // Se o perfil não enxerga a tabela de fornecedores (ex.: regra de loja), usa os que aparecem na lista.
+  const opcoesFornecedor = useMemo(() => {
+    if (partes.length > 0) return partes
+    const mapa = new Map<string, string>()
+    lancamentos.forEach((l) => { if (l.parte_id && l.parte?.nome) mapa.set(l.parte_id, l.parte.nome) })
+    return Array.from(mapa.entries()).map(([id, nome]) => ({ id, nome })).sort((a, b) => a.nome.localeCompare(b.nome))
+  }, [partes, lancamentos])
+  const nomeFornecedor = opcoesFornecedor.find((o) => o.id === filtros.parteId)?.nome
+
+  // --- busca por texto: debounce de 350 ms antes de mexer na URL ----------
+  useEffect(() => {
+    setBuscaDigitada(filtros.q)
+  }, [filtros.q])
+  useEffect(() => {
+    if (buscaDigitada === filtros.q) return
+    const t = setTimeout(() => atualizarFiltros({ q: buscaDigitada }), 350)
+    return () => clearTimeout(t)
+  }, [buscaDigitada, filtros.q, atualizarFiltros])
+
+  function escolherFornecedor(id: string) {
+    // Quem estava na visão padrão passa pra visão padrão do novo estado (fornecedor → histórico completo);
+    // quem já tinha escolhido uma aba (ex.: Pagas) mantém.
+    const estavaNoPadrao = filtros.status === statusPadrao(filtros.parteId)
+    atualizarFiltros({ parteId: id, status: estavaNoPadrao ? statusPadrao(id) : filtros.status })
   }
 
+  const filtrosAtivos: { chave: string; texto: string; remover: () => void }[] = []
+  if (filtros.q) filtrosAtivos.push({ chave: 'q', texto: `Busca: "${filtros.q}"`, remover: () => atualizarFiltros({ q: '' }) })
+  if (filtros.etiqueta !== 'todas') {
+    const rotulo = FILTROS_ETIQUETA.find((f) => f.key === filtros.etiqueta)?.label
+    filtrosAtivos.push({ chave: 'etq', texto: `Etiqueta: ${rotulo}`, remover: () => atualizarFiltros({ etiqueta: 'todas' }) })
+  }
+  if (filtros.de || filtros.ate) {
+    const texto =
+      filtros.de && filtros.ate
+        ? `Vencimento ${formatarDataCurta(filtros.de)} a ${formatarDataCurta(filtros.ate)}`
+        : filtros.de
+          ? `Vencimento desde ${formatarDataCurta(filtros.de)}`
+          : `Vencimento até ${formatarDataCurta(filtros.ate)}`
+    filtrosAtivos.push({ chave: 'venc', texto, remover: () => atualizarFiltros({ de: '', ate: '' }) })
+  }
+  const temFiltroAlemDoStatus = filtrosAtivos.length > 0 || !!filtros.parteId
+  function limparTudo() {
+    atualizarFiltros({ q: '', parteId: '', etiqueta: 'todas', de: '', ate: '', status: statusPadrao('') })
+  }
+
+  // --- ações --------------------------------------------------------------
   async function marcarPago(l: FinanceiroLancamento) {
     setPagandoId(l.id)
     try {
@@ -133,7 +277,7 @@ export default function DespesasPage() {
         .update({ status: 'pago', data_pagamento: hojeISO(), updated_at: new Date().toISOString() })
         .eq('id', l.id)
       if (error) throw error
-      await carregar()
+      await carregar({ silencioso: true, quantidade: lancamentos.length })
     } catch (err: any) {
       console.error('Erro ao marcar pago:', err)
       alert('Erro ao marcar como paga: ' + (err?.message || 'desconhecido'))
@@ -155,45 +299,55 @@ export default function DespesasPage() {
     }
   }
 
-  const fornecedoresDisponiveis = Array.from(
-    new Map(lancamentos.filter((l) => l.parte).map((l) => [l.parte_id, l.parte!.nome])).entries()
-  )
-    .map(([id, nome]) => ({ id, nome }))
-    .sort((a, b) => a.nome.localeCompare(b.nome))
-
-  const filtrosSecundariosAtivos = !!filtroParteId || !!vencimentoDe || !!vencimentoAte
-  function limparFiltrosSecundarios() {
-    setFiltroParteId('')
-    setVencimentoDe('')
-    setVencimentoAte('')
+  async function carregarMais() {
+    setCarregandoMais(true)
+    try {
+      const pagina = await buscarPagina(filtros, lancamentos.length, TAMANHO_PAGINA)
+      setLancamentos((prev) => {
+        const ja = new Set(prev.map((x) => x.id))
+        return [...prev, ...pagina.linhas.filter((x) => !ja.has(x.id))]
+      })
+      setTotal(pagina.total)
+    } catch (e: any) {
+      setErro('Erro ao carregar mais: ' + (e?.message || 'desconhecido'))
+    } finally {
+      setCarregandoMais(false)
+    }
   }
 
-  const termo = busca.trim().toLowerCase()
-  const filtradas = lancamentos.filter((l) => {
-    if (termo) {
-      const bate =
-        l.descricao.toLowerCase().includes(termo) ||
-        (l.parte?.nome || '').toLowerCase().includes(termo) ||
-        (l.conta?.nome || '').toLowerCase().includes(termo)
-      if (!bate) return false
+  function guardarPosicao(id: string) {
+    try {
+      sessionStorage.setItem(CHAVE_POSICAO, JSON.stringify({ url: urlAtual, y: window.scrollY, id, qtd: lancamentos.length }))
+    } catch {
+      /* sem sessionStorage: volta pro topo, como antes */
     }
-    if (filtroParteId && l.parte_id !== filtroParteId) return false
-    if (filtroEtiqueta === 'sem_etiqueta' && l.etiqueta_aprovacao) return false
-    if (filtroEtiqueta !== 'todas' && filtroEtiqueta !== 'sem_etiqueta' && l.etiqueta_aprovacao !== filtroEtiqueta) return false
-    if (vencimentoDe && l.data_vencimento < vencimentoDe) return false
-    if (vencimentoAte && l.data_vencimento > vencimentoAte) return false
-    return true
-  })
+  }
 
-  const totalFiltrado = filtradas.reduce((acc, l) => acc + l.valor_total, 0)
-  const grupos = filtro === 'aberto' ? (agrupamento === 'mes' ? agruparPorMes(filtradas) : agruparPorEtiqueta(filtradas)) : null
+  // --- derivados ----------------------------------------------------------
+  const grupos = filtros.status === 'aberto' ? (filtros.agrupar === 'mes' ? agruparPorMes(lancamentos) : agruparPorEtiqueta(lancamentos)) : null
+
+  const totalDoFiltro = resumo
+    ? filtros.status === 'pagas'
+      ? resumo.pago.total
+      : filtros.status === 'canceladas'
+        ? resumo.cancelado.total
+        : filtros.status === 'todas'
+          ? resumo.aberto.total + resumo.pago.total
+          : resumo.aberto.total
+    : 0
 
   function renderCard(l: FinanceiroLancamento) {
     const st = statusExibicao(l.status, l.data_vencimento, l.valor_pago_conciliado)
+    const href = `/financeiro/despesas/${l.id}?voltarPara=${encodeURIComponent(urlAtual)}`
     return (
-      <div key={l.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all">
+      <div
+        key={l.id}
+        className={`bg-white rounded-xl p-4 shadow-sm border hover:shadow-md transition-all ${
+          destacadoId === l.id ? 'border-pink-400 ring-2 ring-pink-300' : 'border-gray-100'
+        }`}
+      >
         <div className="flex items-start justify-between gap-3">
-          <Link href={`/financeiro/despesas/${l.id}`} className="flex-1 cursor-pointer">
+          <Link href={href} onClick={() => guardarPosicao(l.id)} className="flex-1 cursor-pointer">
             <div className="flex items-center gap-2">
               {l.tipo === 'compra_insumos' ? (
                 <ShoppingCart size={14} className="text-blue-600 flex-shrink-0" />
@@ -208,8 +362,8 @@ export default function DespesasPage() {
             </p>
             <p className="text-xs text-gray-400 mt-1">
               {l.status === 'pago' && l.data_pagamento
-                ? `Paga em ${new Date(l.data_pagamento + 'T00:00:00').toLocaleDateString('pt-BR')}`
-                : `Vencimento: ${new Date(l.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}`}
+                ? `Paga em ${formatarDataCurta(l.data_pagamento)}`
+                : `Vencimento: ${formatarDataCurta(l.data_vencimento)}`}
               {l.tipo === 'despesa' && !l.conta_id && <span className="ml-2 text-amber-600">· sem conta</span>}
             </p>
           </Link>
@@ -300,8 +454,8 @@ export default function DespesasPage() {
             <input
               type="text"
               placeholder="Buscar por descrição, beneficiário ou conta..."
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
+              value={buscaDigitada}
+              onChange={(e) => setBuscaDigitada(e.target.value)}
               className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2.5 text-sm"
             />
           </div>
@@ -310,9 +464,9 @@ export default function DespesasPage() {
             {FILTROS.map((f) => (
               <button
                 key={f.key}
-                onClick={() => setFiltro(f.key)}
+                onClick={() => atualizarFiltros({ status: f.key })}
                 className={`px-3 py-1 rounded-full text-sm whitespace-nowrap border ${
-                  filtro === f.key
+                  filtros.status === f.key
                     ? 'bg-pink-100 text-pink-700 border-transparent font-semibold'
                     : 'bg-white border-gray-200 text-gray-500'
                 }`}
@@ -323,39 +477,42 @@ export default function DespesasPage() {
             <button
               onClick={() => setMostrarMaisFiltros((v) => !v)}
               className={`px-3 py-1 rounded-full text-sm whitespace-nowrap border flex items-center gap-1 ${
-                mostrarMaisFiltros || filtrosSecundariosAtivos
+                mostrarMaisFiltros || filtros.de || filtros.ate
                   ? 'bg-gray-800 text-white border-transparent font-semibold'
                   : 'bg-white border-gray-200 text-gray-500'
               }`}
             >
-              Mais filtros{filtrosSecundariosAtivos ? ' ·' : ''}
+              Vencimento{filtros.de || filtros.ate ? ' ·' : ''}
             </button>
           </div>
 
-          <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
-            <span className="text-xs text-gray-400 flex-shrink-0">Etiqueta:</span>
-            {FILTROS_ETIQUETA.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setFiltroEtiqueta(f.key)}
-                className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${
-                  filtroEtiqueta === f.key
-                    ? 'bg-gray-800 text-white border-transparent font-semibold'
-                    : 'bg-white border-gray-200 text-gray-500'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-            {filtro === 'aberto' && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
+            <FornecedorCombobox valorId={filtros.parteId} opcoes={opcoesFornecedor} onChange={escolherFornecedor} />
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <span className="text-xs text-gray-400 flex-shrink-0">Etiqueta:</span>
+              {FILTROS_ETIQUETA.map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => atualizarFiltros({ etiqueta: f.key })}
+                  className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${
+                    filtros.etiqueta === f.key
+                      ? 'bg-gray-800 text-white border-transparent font-semibold'
+                      : 'bg-white border-gray-200 text-gray-500'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            {filtros.status === 'aberto' && (
               <div className="flex items-center gap-1 ml-auto flex-shrink-0">
                 <span className="text-xs text-gray-400 mr-1">Agrupar:</span>
                 {(['mes', 'etiqueta'] as Agrupamento[]).map((a) => (
                   <button
                     key={a}
-                    onClick={() => setAgrupamento(a)}
+                    onClick={() => atualizarFiltros({ agrupar: a })}
                     className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap border ${
-                      agrupamento === a
+                      filtros.agrupar === a
                         ? 'bg-pink-100 text-pink-700 border-transparent font-semibold'
                         : 'bg-white border-gray-200 text-gray-500'
                     }`}
@@ -368,64 +525,70 @@ export default function DespesasPage() {
           </div>
 
           {mostrarMaisFiltros && (
-            <div className="bg-white border border-gray-200 rounded-lg p-3 mb-4 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Fornecedor</label>
-                  <select
-                    value={filtroParteId}
-                    onChange={(e) => setFiltroParteId(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-                  >
-                    <option value="">Todos</option>
-                    {fornecedoresDisponiveis.map((f) => (
-                      <option key={f.id} value={f.id}>{f.nome}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Vencimento</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="date"
-                      value={vencimentoDe}
-                      onChange={(e) => setVencimentoDe(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm"
-                    />
-                    <span className="text-gray-400 text-xs">até</span>
-                    <input
-                      type="date"
-                      value={vencimentoAte}
-                      onChange={(e) => setVencimentoAte(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm"
-                    />
-                  </div>
-                </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-3 mb-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Vencimento</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={filtros.de}
+                  onChange={(e) => atualizarFiltros({ de: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm"
+                />
+                <span className="text-gray-400 text-xs">até</span>
+                <input
+                  type="date"
+                  value={filtros.ate}
+                  onChange={(e) => atualizarFiltros({ ate: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm"
+                />
               </div>
+            </div>
+          )}
 
-              {filtrosSecundariosAtivos && (
-                <button
-                  onClick={limparFiltrosSecundarios}
-                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
-                >
-                  <X size={12} /> Limpar esses filtros
+          {(filtrosAtivos.length > 0 || filtros.parteId) && (
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              {filtrosAtivos.map((f) => (
+                <span key={f.chave} className="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs rounded-full pl-2.5 pr-1 py-1">
+                  {f.texto}
+                  <button onClick={f.remover} className="rounded-full p-0.5 hover:bg-gray-200" aria-label={`Remover filtro ${f.texto}`}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+              {temFiltroAlemDoStatus && (
+                <button onClick={limparTudo} className="text-xs text-gray-500 hover:text-gray-700 underline">
+                  Limpar filtros
                 </button>
               )}
             </div>
           )}
 
-          {!loading && filtradas.length > 0 && (
+          {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-sm text-red-700">{erro}</div>}
+
+          {!loading && lancamentos.length > 0 && (
             <p className="text-xs text-gray-500 mb-3">
-              {filtradas.length} lançamento{filtradas.length > 1 ? 's' : ''} · total {formatBRL(totalFiltrado)}
+              {total} lançamento{total > 1 ? 's' : ''} · total {formatBRL(totalDoFiltro)}
+              {filtros.status === 'todas' && resumo && (
+                <span>
+                  {' '}· em aberto {formatBRL(resumo.aberto.total)} ({resumo.aberto.quantidade}) · pago {formatBRL(resumo.pago.total)} ({resumo.pago.quantidade})
+                </span>
+              )}
+              {nomeFornecedor && <span> · {nomeFornecedor}</span>}
             </p>
           )}
 
           {loading ? (
             <div className="text-center py-12 text-gray-400">Carregando...</div>
-          ) : filtradas.length === 0 ? (
+          ) : lancamentos.length === 0 ? (
             <EmptyState
               title="Nada por aqui"
-              description={busca ? `Nenhum lançamento encontrado para "${busca}"` : 'Nenhum lançamento neste filtro'}
+              description={
+                filtros.q
+                  ? `Nenhum lançamento encontrado para "${filtros.q}"`
+                  : temFiltroAlemDoStatus
+                    ? 'Nenhum lançamento com esses filtros'
+                    : 'Nenhum lançamento neste filtro'
+              }
             />
           ) : grupos ? (
             <div className="space-y-5">
@@ -443,10 +606,31 @@ export default function DespesasPage() {
               ))}
             </div>
           ) : (
-            <div className="space-y-2">{filtradas.map(renderCard)}</div>
+            <div className="space-y-2">{lancamentos.map(renderCard)}</div>
+          )}
+
+          {!loading && paginado && lancamentos.length < total && (
+            <div className="mt-4 text-center">
+              <button
+                onClick={carregarMais}
+                disabled={carregandoMais}
+                className="border border-gray-300 text-gray-700 rounded-lg px-4 py-2 text-sm font-semibold hover:bg-gray-100 disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {carregandoMais && <Loader size={14} className="animate-spin" />}
+                Carregar mais ({total - lancamentos.length} restantes)
+              </button>
+            </div>
           )}
         </div>
       </div>
     </ProtectedRoute>
+  )
+}
+
+export default function DespesasPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">Carregando...</div>}>
+      <DespesasContent />
+    </Suspense>
   )
 }
