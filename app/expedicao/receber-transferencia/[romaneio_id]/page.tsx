@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { LOCAL_LABEL } from '@/lib/constants'
+import { buscarOrigemDoCriador, nomeUnidade, Unidade } from '@/lib/expedicao'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter, useParams } from 'next/navigation'
 import { ArrowLeft, CheckCircle, Loader, ArrowRightLeft } from 'lucide-react'
@@ -16,7 +16,10 @@ export default function ReceberTransferenciaPage() {
   const [loading, setLoading] = useState(true)
   const [recebendo, setRecebendo] = useState(false)
 
-  const origemLabel = romaneio ? LOCAL_LABEL[romaneio.unidade_destino as keyof typeof LOCAL_LABEL] || 'Desconhecido' : 'Carregando...'
+  // "De:" é quem enviou a devolução (a unidade de quem criou). Antes mostrava
+  // `unidade_destino`, que numa devolução é a própria cozinha.
+  const [origem, setOrigem] = useState<Unidade | null>(null)
+  const origemLabel = romaneio ? nomeUnidade(origem) : 'Carregando...'
 
   useEffect(() => {
     const carregarRomaneio = async () => {
@@ -29,6 +32,7 @@ export default function ReceberTransferenciaPage() {
 
         if (error) throw error
         setRomaneio(data)
+        setOrigem(await buscarOrigemDoCriador(data.criado_por))
       } catch (err) {
         console.error('Erro:', err)
       } finally {

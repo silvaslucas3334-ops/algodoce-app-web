@@ -1,129 +1,251 @@
 'use client'
-import { useEffect, useState, Suspense } from 'react'
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Plus, ChevronRight, Package, CheckCircle, AlertCircle, ArrowRightLeft, History } from 'lucide-react'
+import { Plus, Package, CheckCircle, ArrowRightLeft, History, LayoutDashboard } from 'lucide-react'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
-import { ROMANEIO_STATUS_LABEL } from '@/lib/constants'
+import RomaneioCard, { ChipUnidade } from '@/components/RomaneioCard'
+import { LOCAL_LABEL } from '@/lib/constants'
 import { hojeISO, somarDias } from '@/lib/financeiro-utils'
+import { carregarRomaneiosAtivos, enriquecerRomaneios, RomaneioBase, RomaneioEnriquecido, Unidade, UNIDADES } from '@/lib/expedicao'
 
-const UNIDADE_LOJA_LABEL: Record<string, string> = { loja1: 'Paraisópolis', loja2: 'Itajubá' }
+const ABAS_VALIDAS = ['geral', 'envios', 'devolucoes', 'recebimentos', 'transferencias', 'historico']
 
-const ABAS_VALIDAS = ['envios', 'devolucoes', 'recebimentos', 'transferencias', 'historico']
+// Quantos dias um romaneio enviado pode ficar sem ser recebido antes de aparecer em "Parados".
+const DIAS_PARADO = 2
+
+type FiltroLoja = 'todas' | Unidade
+
+function hrefDetalhe(r: RomaneioEnriquecido): string {
+  return r.tipo === 'transferencia' ? `/expedicao/transferencia/${r.id}` : `/expedicao/${r.id}`
+}
+
+function VazioLista({ icone: Icone, texto }: { icone: typeof Package; texto: string }) {
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+      <Icone size={40} className="mx-auto text-gray-300 mb-3" />
+      <p className="text-gray-600">{texto}</p>
+    </div>
+  )
+}
 
 function ExpedicaoContent() {
-  const { usuario } = useAuth()
+  const { usuario, carregando: carregandoAuth } = useAuth()
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
-  const [romaneios, setRomaneios] = useState<any[]>([])
+  const pronto = !carregandoAuth && !!usuario
+
+  const papel: string | undefined = usuario?.role
+  const ehAdmin = papel === 'admin'
+  const ehCozinha = papel === 'cozinha'
+  const ehLoja = papel === 'loja'
+  const lojaDoUsuario: string | undefined = ehLoja ? usuario?.loja_id : undefined
+
+  // Aba e loja vivem na URL (?aba=&loja=): os links do Painel Inicial
+  // (/expedicao?aba=devolucoes) continuam valendo e o estado sobrevive a atualizar a página.
+  const abasPermitidas = [
+    ...(ehAdmin ? ['geral'] : []),
+    ...(ehCozinha || ehAdmin ? ['envios', 'devolucoes'] : []),
+    ...(ehLoja || ehAdmin ? ['recebimentos', 'transferencias'] : []),
+    'historico',
+  ]
+  const abaPadrao = ehAdmin ? 'geral' : ehLoja ? 'recebimentos' : 'envios'
+  const abaParam = searchParams.get('aba')
+  const aba = abaParam && ABAS_VALIDAS.includes(abaParam) && abasPermitidas.includes(abaParam) ? abaParam : abaPadrao
+
+  const lojaParam = searchParams.get('loja')
+  // O filtro de loja é do admin (que vê tudo junto). Loja e cozinha já veem só o que é deles.
+  const filtroLoja: FiltroLoja = ehAdmin && lojaParam && (UNIDADES as string[]).includes(lojaParam) ? (lojaParam as Unidade) : 'todas'
+
+  const atualizarUrl = useCallback(
+    (parcial: { aba?: string; loja?: FiltroLoja }) => {
+      const p = new URLSearchParams(searchParams.toString())
+      if (parcial.aba !== undefined) p.set('aba', parcial.aba)
+      if (parcial.loja !== undefined) {
+        if (parcial.loja === 'todas') p.delete('loja')
+        else p.set('loja', parcial.loja)
+      }
+      const qs = p.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [searchParams, pathname, router]
+  )
+
+  // --- dados -----------------------------------------------------------------
+  const [ativos, setAtivos] = useState<RomaneioEnriquecido[]>([])
   const [loading, setLoading] = useState(true)
-  const [abaPrincipal, setAbaPrincipal] = useState<string>('envios')
-  // Admin não tem loja_id própria — precisa escolher qual unidade ver na
-  // visão de Recebimentos/Transferências (que hoje é sempre da loja do usuário).
-  const [unidadeAdmin, setUnidadeAdmin] = useState<'loja1' | 'loja2'>('loja1')
-  const unidadeEfetiva = usuario?.role === 'admin' ? unidadeAdmin : usuario?.loja_id
+  const jaCarregouRef = useRef(false)
+  const [concluindoId, setConcluindoId] = useState<string | null>(null)
 
-  // Histórico — romaneios concluídos/cancelados, hoje escondidos sem deixar
-  // rastro nenhum. Busca separada (com filtro de data no backend) pra não
-  // crescer sem limite junto com a lista de "ativos".
-  const [historico, setHistorico] = useState<any[]>([])
-  const [historicoLoading, setHistoricoLoading] = useState(false)
-  const [filtroStatusHistorico, setFiltroStatusHistorico] = useState<'todos' | 'em_estoque' | 'cancelado'>('todos')
-  const [historicoInicio, setHistoricoInicio] = useState(somarDias(hojeISO(), -30))
-  const [historicoFim, setHistoricoFim] = useState(hojeISO())
-
-  // Determinar aba padrão: link vindo do Painel Inicial (?aba=) tem prioridade
-  // sobre o default por role, que continua sendo o fallback de sempre.
-  useEffect(() => {
-    const abaParam = searchParams.get('aba')
-    if (abaParam && ABAS_VALIDAS.includes(abaParam)) {
-      setAbaPrincipal(abaParam)
-    } else if (usuario?.role === 'loja') {
-      setAbaPrincipal('recebimentos')
-    } else {
-      setAbaPrincipal('envios')
-    }
-  }, [usuario?.role, searchParams])
-
-  // Carregar romaneios
-  useEffect(() => {
-    carregarRomaneios()
-
-    const channel = supabase
-      .channel('romaneios-real')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'romaneios' },
-        carregarRomaneios
-      )
-      .subscribe()
-
-    return () => {
-      channel.unsubscribe()
-    }
-  }, [abaPrincipal])
-
-  async function carregarRomaneios() {
-    setLoading(true)
+  const carregar = useCallback(async () => {
+    // "Carregando..." só na primeira vez: recargas por realtime/ação são silenciosas.
+    if (!jaCarregouRef.current) setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('romaneios')
-        .select('*')
-        .order('data_entrega', { ascending: true })
-
-      if (error) throw error
-      setRomaneios(data || [])
+      setAtivos(await carregarRomaneiosAtivos())
+      jaCarregouRef.current = true
     } catch (err) {
       console.error('Erro ao carregar romaneios:', err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+  const carregarRef = useRef(carregar)
+  carregarRef.current = carregar
 
-  async function carregarHistorico() {
-    setHistoricoLoading(true)
+  useEffect(() => {
+    if (!pronto) return
+    carregar()
+
+    // Mudanças em romaneios ou em etiquetas (recebimento pelo scanner, por exemplo)
+    // alteram o andamento; agrupa os eventos numa recarga só.
+    let temporizador: ReturnType<typeof setTimeout> | null = null
+    const agendar = () => {
+      if (temporizador) clearTimeout(temporizador)
+      temporizador = setTimeout(() => { carregarRef.current() }, 800)
+    }
+    const channel = supabase
+      .channel('expedicao-romaneios')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'romaneios' }, agendar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lotes_producao' }, agendar)
+      .subscribe()
+    return () => {
+      if (temporizador) clearTimeout(temporizador)
+      channel.unsubscribe()
+    }
+  }, [pronto, carregar])
+
+  // Histórico — romaneios recebidos/cancelados, com filtro de data no servidor
+  // pra não crescer sem limite junto com a lista de "ativos".
+  const [historico, setHistorico] = useState<RomaneioEnriquecido[]>([])
+  const [historicoLoading, setHistoricoLoading] = useState(false)
+  const [filtroStatusHistorico, setFiltroStatusHistorico] = useState<'todos' | 'em_estoque' | 'cancelado'>('todos')
+  const [historicoInicio, setHistoricoInicio] = useState(somarDias(hojeISO(), -30))
+  const [historicoFim, setHistoricoFim] = useState(hojeISO())
+
+  useEffect(() => {
+    if (!pronto || aba !== 'historico') return
+    let cancelado = false
+    async function carregarHistorico() {
+      setHistoricoLoading(true)
+      try {
+        let query = supabase
+          .from('romaneios')
+          .select('*')
+          .gte('data_entrega', historicoInicio)
+          .lte('data_entrega', historicoFim)
+          .order('data_entrega', { ascending: false })
+        if (filtroStatusHistorico === 'todos') query = query.in('status', ['em_estoque', 'cancelado'])
+        else query = query.eq('status', filtroStatusHistorico)
+
+        const { data, error } = await query
+        if (error) throw error
+        const enriquecidos = await enriquecerRomaneios((data || []) as RomaneioBase[])
+        if (!cancelado) setHistorico(enriquecidos)
+      } catch (err) {
+        console.error('Erro ao carregar histórico de romaneios:', err)
+      } finally {
+        if (!cancelado) setHistoricoLoading(false)
+      }
+    }
+    carregarHistorico()
+    return () => { cancelado = true }
+  }, [pronto, aba, filtroStatusHistorico, historicoInicio, historicoFim])
+
+  // --- filtros ---------------------------------------------------------------
+  // Filtro de loja do admin: o romaneio entra se a loja escolhida é a origem OU o destino.
+  const casa = (r: RomaneioEnriquecido) => filtroLoja === 'todas' || r.unidade_destino === filtroLoja || r.origem === filtroLoja
+
+  const enviosCozinha = ativos.filter((r) => r.tipo === 'envio' && casa(r))
+  // Devolução = transferência enviada à cozinha. (Antes esta lista não filtrava o destino
+  // e a cozinha via — e podia "receber" — transferências entre lojas.)
+  const devolucoes = ativos.filter((r) => r.tipo === 'transferencia' && r.status === 'confirmado' && r.unidade_destino === 'cozinha' && casa(r))
+  const recebimentos = ativos.filter((r) => {
+    if (r.status !== 'confirmado') return false
+    if (ehLoja) return r.unidade_destino === lojaDoUsuario
+    return (r.unidade_destino === 'loja1' || r.unidade_destino === 'loja2') && casa(r)
+  })
+  const transfSaindo = ativos.filter((r) => r.tipo === 'transferencia' && !!lojaDoUsuario && r.origem === lojaDoUsuario)
+  const transfChegando = ativos.filter((r) => r.tipo === 'transferencia' && !!lojaDoUsuario && r.unidade_destino === lojaDoUsuario)
+  const transfAdmin = ativos.filter((r) => r.tipo === 'transferencia' && casa(r))
+
+  // Visão geral (admin)
+  const confirmados = ativos.filter((r) => r.status === 'confirmado' && casa(r))
+  const todoRecebido = (r: RomaneioEnriquecido) => r.etiquetasTotal > 0 && r.etiquetasPendentes === 0
+  const paraConcluir = confirmados.filter(todoRecebido)
+  const aCaminho = confirmados.filter((r) => !todoRecebido(r))
+  const parados = aCaminho.filter((r) => (r.idadeDias ?? 0) >= DIAS_PARADO).sort((a, b) => (b.idadeDias ?? 0) - (a.idadeDias ?? 0))
+  const idsParados = new Set(parados.map((r) => r.id))
+  const emTransitoNormal = aCaminho.filter((r) => !idsParados.has(r.id))
+  const rascunhos = ativos.filter((r) => r.status === 'rascunho' && casa(r))
+
+  // Conclui um romaneio que ficou aberto mesmo com todas as etiquetas já recebidas
+  // (ex.: recebimento etiqueta a etiqueta pelo scanner nunca fecha o romaneio).
+  async function concluir(r: RomaneioEnriquecido) {
+    if (!window.confirm('Concluir este romaneio? Todas as etiquetas dele já foram recebidas; ele deixa de aparecer como pendente.')) return
+    setConcluindoId(r.id)
     try {
-      let query = supabase
+      // Reconfere no banco: a lista pode estar desatualizada.
+      const ids = (r.linhas || []).flatMap((l: any) => l.etiquetas_selecionadas || [])
+      if (ids.length > 0) {
+        const { count } = await supabase.from('lotes_producao').select('id', { count: 'exact', head: true }).in('id', ids).eq('status', 'enviado')
+        if ((count || 0) > 0) {
+          alert('Ainda há etiquetas a caminho neste romaneio. Atualize a tela.')
+          await carregar()
+          return
+        }
+      }
+      const { error } = await supabase
         .from('romaneios')
-        .select('*')
-        .gte('data_entrega', historicoInicio)
-        .lte('data_entrega', historicoFim)
-        .order('data_entrega', { ascending: false })
-      if (filtroStatusHistorico === 'todos') query = query.in('status', ['em_estoque', 'cancelado'])
-      else query = query.eq('status', filtroStatusHistorico)
-
-      const { data, error } = await query
+        .update({ status: 'em_estoque', atualizado_em: new Date().toISOString() })
+        .eq('id', r.id)
       if (error) throw error
-      setHistorico(data || [])
-    } catch (err) {
-      console.error('Erro ao carregar histórico de romaneios:', err)
+      await carregar()
+    } catch (err: any) {
+      console.error('Erro ao concluir romaneio:', err)
+      alert('Erro ao concluir: ' + (err?.message || 'desconhecido'))
     } finally {
-      setHistoricoLoading(false)
+      setConcluindoId(null)
     }
   }
 
-  useEffect(() => {
-    if (abaPrincipal === 'historico') carregarHistorico()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [abaPrincipal, filtroStatusHistorico, historicoInicio, historicoFim])
-
-  // Filtros para Cozinha
-  const enviosCozinha = romaneios.filter(
-    (r) => r.tipo === 'envio' && (r.status === 'rascunho' || r.status === 'confirmado')
-  )
-  const devolucoesRecebidas = romaneios.filter(
-    (r) => r.tipo === 'transferencia' && r.status === 'confirmado'
+  const botaoReceber = (href: string) => (
+    <Link href={href} className="inline-block bg-green-600 text-white rounded-lg px-4 py-2 hover:bg-green-700 font-semibold text-sm">
+      Receber
+    </Link>
   )
 
-  // Filtros para Loja (admin escolhe a unidade via unidadeAdmin — ver unidadeEfetiva)
-  const recebimentosLoja = romaneios.filter(
-    (r) => r.status === 'confirmado' && r.unidade_destino === unidadeEfetiva && (r.tipo === 'envio' || r.tipo === 'transferencia')
+  const renderLista = (lista: RomaneioEnriquecido[], opcoes: { href?: (r: RomaneioEnriquecido) => string; receberHref?: (r: RomaneioEnriquecido) => string; andamento?: boolean; concluir?: boolean }) => (
+    <div className="space-y-3">
+      {lista.map((r) => (
+        <RomaneioCard
+          key={r.id}
+          romaneio={r}
+          href={opcoes.href?.(r)}
+          acao={opcoes.receberHref ? botaoReceber(opcoes.receberHref(r)) : undefined}
+          mostrarAndamento={opcoes.andamento}
+          onConcluir={opcoes.concluir ? () => concluir(r) : undefined}
+          concluindo={concluindoId === r.id}
+        />
+      ))}
+    </div>
   )
-  const transferenciasLoja = romaneios.filter(
-    (r) => r.tipo === 'transferencia' && (r.status === 'rascunho' || r.status === 'confirmado') && r.unidade_destino === unidadeEfetiva
-  )
+
+  const classeAba = (chave: string) =>
+    `px-4 py-3 font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
+      aba === chave ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-600 hover:text-gray-800'
+    }`
+
+  // Enquanto o login não termina não dá pra saber o papel — não desenhar abas de outro perfil.
+  if (!pronto) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-400">Carregando...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -139,77 +261,142 @@ function ExpedicaoContent() {
         </div>
       </div>
 
-      {/* Abas - por role. Admin vê as duas visões (cozinha + loja), já que
-          não tem uma unidade própria fixa. Histórico é comum a todo mundo. */}
+      {/* Abas por papel. Admin vê as duas visões (cozinha + loja) e ganha a "Visão geral". */}
       <div className="bg-white border-b border-gray-200 sticky top-20 z-30">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex gap-4 overflow-x-auto">
-            {(usuario?.role === 'cozinha' || usuario?.role === 'admin') && (
+            {ehAdmin && (
+              <button onClick={() => atualizarUrl({ aba: 'geral' })} className={classeAba('geral')}>
+                <LayoutDashboard size={18} /> Visão geral
+              </button>
+            )}
+            {(ehCozinha || ehAdmin) && (
               <>
-                <button
-                  onClick={() => setAbaPrincipal('envios')}
-                  className={`px-4 py-3 font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
-                    abaPrincipal === 'envios'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
+                <button onClick={() => atualizarUrl({ aba: 'envios' })} className={classeAba('envios')}>
                   📦 Envios
                 </button>
-                <button
-                  onClick={() => setAbaPrincipal('devolucoes')}
-                  className={`px-4 py-3 font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
-                    abaPrincipal === 'devolucoes'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
+                <button onClick={() => atualizarUrl({ aba: 'devolucoes' })} className={classeAba('devolucoes')}>
                   <ArrowRightLeft size={18} /> Devoluções Recebidas
                 </button>
               </>
             )}
-            {(usuario?.role === 'loja' || usuario?.role === 'admin') && (
+            {(ehLoja || ehAdmin) && (
               <>
-                <button
-                  onClick={() => setAbaPrincipal('recebimentos')}
-                  className={`px-4 py-3 font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
-                    abaPrincipal === 'recebimentos'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
+                <button onClick={() => atualizarUrl({ aba: 'recebimentos' })} className={classeAba('recebimentos')}>
                   📥 Recebimentos
                 </button>
-                <button
-                  onClick={() => setAbaPrincipal('transferencias')}
-                  className={`px-4 py-3 font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
-                    abaPrincipal === 'transferencias'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
+                <button onClick={() => atualizarUrl({ aba: 'transferencias' })} className={classeAba('transferencias')}>
                   <ArrowRightLeft size={18} /> Transferências
                 </button>
               </>
             )}
-            <button
-              onClick={() => setAbaPrincipal('historico')}
-              className={`px-4 py-3 font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
-                abaPrincipal === 'historico'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-600 hover:text-gray-800'
-              }`}
-            >
+            <button onClick={() => atualizarUrl({ aba: 'historico' })} className={classeAba('historico')}>
               <History size={18} /> Histórico
             </button>
           </div>
         </div>
       </div>
 
-      {/* Content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {/* Filtro de loja do admin — vale pra todas as abas, no lugar dos seletores soltos de cada aba */}
+        {ehAdmin && (
+          <div className="flex items-center gap-2 mb-5 flex-wrap">
+            <span className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Unidade</span>
+            {(['todas', 'loja1', 'loja2', 'cozinha'] as FiltroLoja[]).map((u) => (
+              <button
+                key={u}
+                onClick={() => atualizarUrl({ loja: u })}
+                className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${
+                  filtroLoja === u ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {u === 'todas' ? 'Todas' : LOCAL_LABEL[u]}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ADMIN - VISÃO GERAL */}
+        {ehAdmin && aba === 'geral' && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <div className="bg-white rounded-lg border border-gray-200 p-3">
+                <p className="text-xs text-gray-500 font-medium">A caminho</p>
+                <p className="text-2xl font-bold text-gray-800 mt-1">{aCaminho.length}</p>
+              </div>
+              <div className={`rounded-lg border p-3 ${parados.length > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
+                <p className={`text-xs font-medium ${parados.length > 0 ? 'text-red-700' : 'text-gray-500'}`}>Parados há {DIAS_PARADO}+ dias</p>
+                <p className={`text-2xl font-bold mt-1 ${parados.length > 0 ? 'text-red-600' : 'text-gray-800'}`}>{parados.length}</p>
+              </div>
+              <div className={`rounded-lg border p-3 ${paraConcluir.length > 0 ? 'bg-green-50 border-green-200' : 'bg-white border-gray-200'}`}>
+                <p className={`text-xs font-medium ${paraConcluir.length > 0 ? 'text-green-700' : 'text-gray-500'}`}>Já recebidos, falta concluir</p>
+                <p className="text-2xl font-bold text-gray-800 mt-1">{paraConcluir.length}</p>
+              </div>
+              <div className="bg-white rounded-lg border border-gray-200 p-3">
+                <p className="text-xs text-gray-500 font-medium">Rascunhos (não enviados)</p>
+                <p className="text-2xl font-bold text-gray-800 mt-1">{rascunhos.length}</p>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="text-center py-12 text-gray-400">Carregando...</div>
+            ) : confirmados.length === 0 && rascunhos.length === 0 ? (
+              <VazioLista icone={CheckCircle} texto="Nada pendente na Expedição" />
+            ) : (
+              <div className="space-y-7">
+                {parados.length > 0 && (
+                  <section>
+                    <h2 className="text-lg font-bold text-red-700 mb-3">Parados há {DIAS_PARADO} dias ou mais</h2>
+                    {renderLista(parados, { href: hrefDetalhe, andamento: true })}
+                  </section>
+                )}
+
+                {paraConcluir.length > 0 && (
+                  <section>
+                    <h2 className="text-lg font-bold text-green-700 mb-1">Já recebidos, falta concluir</h2>
+                    <p className="text-sm text-gray-500 mb-3">
+                      Todas as etiquetas destes romaneios já foram recebidas (por exemplo, pelo Scanner), mas eles ficaram abertos e continuam contando como pendentes.
+                    </p>
+                    {renderLista(paraConcluir, { href: hrefDetalhe, andamento: true, concluir: true })}
+                  </section>
+                )}
+
+                {emTransitoNormal.length > 0 && (
+                  <section>
+                    <h2 className="text-lg font-bold text-gray-800 mb-3">A caminho</h2>
+                    <div className="space-y-5">
+                      {(['loja1', 'loja2', 'cozinha'] as Unidade[]).map((destino) => {
+                        const doDestino = emTransitoNormal.filter((r) => r.unidade_destino === destino)
+                        if (doDestino.length === 0) return null
+                        return (
+                          <div key={destino}>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-sm text-gray-500">Indo para</span>
+                              <ChipUnidade unidade={destino} />
+                              <span className="text-xs text-gray-400">{doDestino.length}</span>
+                            </div>
+                            {renderLista(doDestino, { href: hrefDetalhe, andamento: true })}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </section>
+                )}
+
+                {rascunhos.length > 0 && (
+                  <section>
+                    <h2 className="text-lg font-bold text-gray-800 mb-1">Rascunhos</h2>
+                    <p className="text-sm text-gray-500 mb-3">Criados e ainda não enviados — as etiquetas continuam no estoque de origem.</p>
+                    {renderLista(rascunhos, { href: hrefDetalhe })}
+                  </section>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
         {/* COZINHA/ADMIN - ENVIOS */}
-        {(usuario?.role === 'cozinha' || usuario?.role === 'admin') && abaPrincipal === 'envios' && (
+        {(ehCozinha || ehAdmin) && aba === 'envios' && (
           <>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold text-gray-800">Envios</h2>
@@ -224,196 +411,87 @@ function ExpedicaoContent() {
             {loading ? (
               <div className="text-center py-12 text-gray-400">Carregando...</div>
             ) : enviosCozinha.length === 0 ? (
-              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-                <Package size={40} className="mx-auto text-gray-300 mb-3" />
-                <p className="text-gray-600">Nenhum envio aberto</p>
-              </div>
+              <VazioLista icone={Package} texto="Nenhum envio aberto" />
             ) : (
-              <div className="space-y-3">
-                {enviosCozinha.map((romaneio) => (
-                  <Link key={romaneio.id} href={`/expedicao/${romaneio.id}`}>
-                    <div className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md hover:border-gray-300 transition-all cursor-pointer">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <p className="text-lg font-bold text-gray-800">
-                              Entrega: {new Date(romaneio.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
-                            </p>
-                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${romaneio.status === 'rascunho' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                              {ROMANEIO_STATUS_LABEL[romaneio.status] || romaneio.status}
-                            </span>
-                          </div>
-                          <p className="text-sm text-gray-600">
-                            {romaneio.linhas?.length || 0} produto(s) · Criado em {new Date(romaneio.criado_em).toLocaleDateString('pt-BR')}
-                          </p>
-                        </div>
-                        <ChevronRight size={24} className="text-gray-400" />
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+              renderLista(enviosCozinha, { href: hrefDetalhe, andamento: true })
             )}
           </>
         )}
 
         {/* COZINHA/ADMIN - DEVOLUÇÕES RECEBIDAS */}
-        {(usuario?.role === 'cozinha' || usuario?.role === 'admin') && abaPrincipal === 'devolucoes' && (
+        {(ehCozinha || ehAdmin) && aba === 'devolucoes' && (
           <>
             <h2 className="text-xl font-bold text-gray-800 mb-6">Devoluções Recebidas</h2>
 
             {loading ? (
               <div className="text-center py-12 text-gray-400">Carregando...</div>
-            ) : devolucoesRecebidas.length === 0 ? (
-              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-                <CheckCircle size={40} className="mx-auto text-gray-300 mb-3" />
-                <p className="text-gray-600">Nenhuma devolução pendente de recebimento</p>
-              </div>
+            ) : devolucoes.length === 0 ? (
+              <VazioLista icone={CheckCircle} texto="Nenhuma devolução pendente de recebimento" />
             ) : (
-              <div className="space-y-3">
-                {devolucoesRecebidas.map((romaneio) => (
-                  <div key={romaneio.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-all">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="text-lg font-bold text-gray-800 mb-1">
-                          Devolução de: {romaneio.unidade_destino === 'loja1' ? 'Paraisópolis' : 'Itajubá'}
-                        </p>
-                        <p className="text-sm text-gray-600">{romaneio.linhas?.length || 0} produto(s)</p>
-                      </div>
-                      <Link href={`/expedicao/receber-transferencia/${romaneio.id}`}>
-                        <button className="bg-green-600 text-white rounded-lg px-4 py-2 hover:bg-green-700 font-semibold">
-                          Receber
-                        </button>
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              renderLista(devolucoes, { receberHref: (r) => `/expedicao/receber-transferencia/${r.id}`, andamento: true })
             )}
           </>
         )}
 
         {/* LOJA/ADMIN - RECEBIMENTOS */}
-        {(usuario?.role === 'loja' || usuario?.role === 'admin') && abaPrincipal === 'recebimentos' && (
+        {(ehLoja || ehAdmin) && aba === 'recebimentos' && (
           <>
-            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-              <h2 className="text-xl font-bold text-gray-800">Recebimentos Pendentes</h2>
-              {usuario?.role === 'admin' && (
-                <div className="flex gap-2">
-                  {(['loja1', 'loja2'] as const).map((u) => (
-                    <button
-                      key={u}
-                      onClick={() => setUnidadeAdmin(u)}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold border-2 ${
-                        unidadeAdmin === u ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-700'
-                      }`}
-                    >
-                      {UNIDADE_LOJA_LABEL[u]}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <h2 className="text-xl font-bold text-gray-800 mb-6">Recebimentos Pendentes</h2>
 
             {loading ? (
               <div className="text-center py-12 text-gray-400">Carregando...</div>
-            ) : recebimentosLoja.length === 0 ? (
-              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-                <CheckCircle size={40} className="mx-auto text-gray-300 mb-3" />
-                <p className="text-gray-600">Nenhum envio pendente de recebimento</p>
-              </div>
+            ) : recebimentos.length === 0 ? (
+              <VazioLista icone={CheckCircle} texto="Nenhum envio pendente de recebimento" />
             ) : (
-              <div className="space-y-3">
-                {recebimentosLoja.map((romaneio) => (
-                  <div key={romaneio.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-all">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="text-lg font-bold text-gray-800 mb-1">
-                          Entrega: {new Date(romaneio.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
-                        </p>
-                        <p className="text-sm text-gray-600">{romaneio.linhas?.length || 0} produto(s)</p>
-                      </div>
-                      <Link href={`/expedicao/receber/${romaneio.id}`}>
-                        <button className="bg-green-600 text-white rounded-lg px-4 py-2 hover:bg-green-700 font-semibold">
-                          Receber
-                        </button>
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              renderLista(recebimentos, { receberHref: (r) => `/expedicao/receber/${r.id}`, andamento: true, concluir: true })
             )}
           </>
         )}
 
         {/* LOJA/ADMIN - TRANSFERÊNCIAS */}
-        {(usuario?.role === 'loja' || usuario?.role === 'admin') && abaPrincipal === 'transferencias' && (
+        {(ehLoja || ehAdmin) && aba === 'transferencias' && (
           <>
             <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
               <h2 className="text-xl font-bold text-gray-800">Transferências</h2>
-              <div className="flex items-center gap-3">
-                {usuario?.role === 'admin' && (
-                  <div className="flex gap-2">
-                    {(['loja1', 'loja2'] as const).map((u) => (
-                      <button
-                        key={u}
-                        onClick={() => setUnidadeAdmin(u)}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-semibold border-2 ${
-                          unidadeAdmin === u ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-700'
-                        }`}
-                      >
-                        {UNIDADE_LOJA_LABEL[u]}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <button
-                  onClick={() => router.push('/expedicao/nova-transferencia')}
-                  className="bg-blue-600 text-white rounded-lg px-4 py-2 flex items-center gap-2 hover:bg-blue-700 font-semibold"
-                >
-                  <Plus size={18} /> Nova Transferência
-                </button>
-              </div>
+              <button
+                onClick={() => router.push('/expedicao/nova-transferencia')}
+                className="bg-blue-600 text-white rounded-lg px-4 py-2 flex items-center gap-2 hover:bg-blue-700 font-semibold"
+              >
+                <Plus size={18} /> Nova Transferência
+              </button>
             </div>
 
             {loading ? (
               <div className="text-center py-12 text-gray-400">Carregando...</div>
-            ) : transferenciasLoja.length === 0 ? (
-              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-                <Package size={40} className="mx-auto text-gray-300 mb-3" />
-                <p className="text-gray-600">Nenhuma transferência aberta</p>
+            ) : ehLoja ? (
+              <div className="space-y-7">
+                <section>
+                  <h3 className="text-base font-bold text-gray-800 mb-3">Saindo desta loja</h3>
+                  {transfSaindo.length === 0 ? (
+                    <VazioLista icone={Package} texto="Nenhuma transferência saindo desta loja" />
+                  ) : (
+                    renderLista(transfSaindo, { href: hrefDetalhe, andamento: true })
+                  )}
+                </section>
+                <section>
+                  <h3 className="text-base font-bold text-gray-800 mb-3">Chegando nesta loja</h3>
+                  {transfChegando.length === 0 ? (
+                    <VazioLista icone={Package} texto="Nenhuma transferência chegando" />
+                  ) : (
+                    renderLista(transfChegando, { href: hrefDetalhe, andamento: true })
+                  )}
+                </section>
               </div>
+            ) : transfAdmin.length === 0 ? (
+              <VazioLista icone={Package} texto="Nenhuma transferência aberta" />
             ) : (
-              <div className="space-y-3">
-                {transferenciasLoja.map((romaneio) => (
-                  <Link key={romaneio.id} href={`/expedicao/transferencia/${romaneio.id}`}>
-                    <div className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md hover:border-gray-300 transition-all cursor-pointer">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <p className="text-lg font-bold text-gray-800">
-                              Para: {romaneio.unidade_destino === 'loja1' ? 'Paraisópolis' : romaneio.unidade_destino === 'loja2' ? 'Itajubá' : 'Cozinha'}
-                            </p>
-                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${romaneio.status === 'rascunho' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                              {ROMANEIO_STATUS_LABEL[romaneio.status] || romaneio.status}
-                            </span>
-                          </div>
-                          <p className="text-sm text-gray-600">
-                            {romaneio.linhas?.length || 0} produto(s) · Criado em {new Date(romaneio.criado_em).toLocaleDateString('pt-BR')}
-                          </p>
-                        </div>
-                        <ChevronRight size={24} className="text-gray-400" />
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+              renderLista(transfAdmin, { href: hrefDetalhe, andamento: true })
             )}
           </>
         )}
 
-        {/* HISTÓRICO - comum a todo mundo (romaneios recebidos/cancelados, hoje escondidos sem deixar rastro) */}
-        {abaPrincipal === 'historico' && (
+        {/* HISTÓRICO - comum a todo mundo (romaneios recebidos/cancelados) */}
+        {aba === 'historico' && (
           <>
             <h2 className="text-xl font-bold text-gray-800 mb-4">Histórico de Romaneios</h2>
 
@@ -450,40 +528,10 @@ function ExpedicaoContent() {
 
             {historicoLoading ? (
               <div className="text-center py-12 text-gray-400">Carregando...</div>
-            ) : historico.length === 0 ? (
-              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-                <History size={40} className="mx-auto text-gray-300 mb-3" />
-                <p className="text-gray-600">Nenhum romaneio nesse período/filtro</p>
-              </div>
+            ) : historico.filter(casa).length === 0 ? (
+              <VazioLista icone={History} texto="Nenhum romaneio nesse período/filtro" />
             ) : (
-              <div className="space-y-3">
-                {historico.map((romaneio) => (
-                  <Link
-                    key={romaneio.id}
-                    href={romaneio.tipo === 'transferencia' ? `/expedicao/transferencia/${romaneio.id}` : `/expedicao/${romaneio.id}`}
-                  >
-                    <div className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md hover:border-gray-300 transition-all cursor-pointer">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2 flex-wrap">
-                            <p className="text-lg font-bold text-gray-800">
-                              {romaneio.tipo === 'transferencia' ? 'Transferência' : 'Envio'} · Entrega: {new Date(romaneio.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
-                            </p>
-                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${romaneio.status === 'cancelado' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                              {ROMANEIO_STATUS_LABEL[romaneio.status] || romaneio.status}
-                            </span>
-                          </div>
-                          <p className="text-sm text-gray-600">
-                            {UNIDADE_LOJA_LABEL[romaneio.unidade_destino] || 'Cozinha'} · {romaneio.linhas?.length || 0} produto(s) · Criado em{' '}
-                            {new Date(romaneio.criado_em).toLocaleDateString('pt-BR')}
-                          </p>
-                        </div>
-                        <ChevronRight size={24} className="text-gray-400" />
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+              renderLista(historico.filter(casa), { href: hrefDetalhe })
             )}
           </>
         )}
