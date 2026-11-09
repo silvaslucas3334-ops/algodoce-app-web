@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { AlertTriangle, Package, Truck, TrendingUp, Settings, Plus, Clock, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, Package, Truck, TrendingUp, Settings, Plus, Clock, AlertCircle, CheckCircle2, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter } from 'next/navigation'
@@ -11,6 +11,10 @@ import { useRealtimeData } from '@/hooks/useRealtimeData'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
 import ResumoDoDia from '@/components/painel/ResumoDoDia'
 import { buscarResumoPainelLoja, buscarResumoPainelCozinha, PainelResumo } from '@/lib/painel-inicial'
+import ContasAPagarAdmin from '@/components/painel/ContasAPagarAdmin'
+import { buscarPainelFinanceiro, linksPainelFinanceiro, PainelFinanceiro } from '@/lib/financeiro-painel'
+import { buscarResumoHubFinanceiro } from '@/lib/financeiro-fluxo-mensal'
+import { formatBRL } from '@/lib/ofx'
 
 function DashboardContent() {
   const router = useRouter()
@@ -21,6 +25,9 @@ function DashboardContent() {
   const [tarefasCozinha, setTarefasCozinha] = useState<any[]>([])
   const [resumoLoja, setResumoLoja] = useState<PainelResumo | null>(null)
   const [resumoCozinha, setResumoCozinha] = useState<PainelResumo | null>(null)
+  // Painel financeiro (só admin): carrega em segundo plano, sem segurar o resto do Início.
+  const [painelFin, setPainelFin] = useState<PainelFinanceiro | null>(null)
+  const [saldoProjetado, setSaldoProjetado] = useState<number | null>(null)
 
   // Redirecionar para login se não há usuário
   useEffect(() => {
@@ -54,6 +61,12 @@ function DashboardContent() {
         .gte('data_validade', hoje),
     ])
     setStats((prev: any) => ({ ...prev, totalEstoque: totalEstoque || 0, vencendo: vencendo || 0 }))
+
+    // Não esperam (sem await): o resto do Início aparece sem depender do financeiro. Falha = bloco some.
+    buscarPainelFinanceiro().then(setPainelFin).catch(() => setPainelFin(null))
+    buscarResumoHubFinanceiro()
+      .then((r) => setSaldoProjetado(r.saldoAtual))
+      .catch(() => setSaldoProjetado(null))
   }
 
   async function carregarResumoUnidade() {
@@ -178,7 +191,7 @@ function DashboardContent() {
           {/* Ações Rápidas */}
           <div className="mb-8">
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Ações Rápidas</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Link href="/ordens" className="bg-gradient-to-br from-slate-500 to-slate-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
                 <TrendingUp size={24} className="mb-2" />
                 <p className="font-medium text-sm">Ordens</p>
@@ -199,6 +212,10 @@ function DashboardContent() {
                 <CheckCircle2 size={24} className="mb-2" />
                 <p className="font-medium text-sm">Tarefas</p>
               </Link>
+              <Link href="/financeiro" className="bg-gradient-to-br from-teal-500 to-teal-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
+                <Wallet size={24} className="mb-2" />
+                <p className="font-medium text-sm">Financeiro</p>
+              </Link>
               <Link href="/admin" className="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-lg p-4 hover:shadow-md transition-all">
                 <Settings size={24} className="mb-2" />
                 <p className="font-medium text-sm">Config</p>
@@ -207,9 +224,23 @@ function DashboardContent() {
           </div>
 
           {/* Indicadores Críticos (Atrasados/Vencendo) */}
-          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0 || stats.vencendo > 0) && (
+          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0 || stats.vencendo > 0 || (painelFin?.atrasadas.qtd ?? 0) > 0) && (
             <div className="mb-8 space-y-3">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Atenção Necessária</h2>
+
+              {painelFin && painelFin.atrasadas.qtd > 0 && (
+                <Link href={linksPainelFinanceiro().atrasadas} className="bg-red-50 border border-red-200 rounded-lg p-4 hover:bg-red-100 transition-all block">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-red-700 flex items-center gap-2">
+                        <AlertCircle size={18} /> Despesas Atrasadas
+                      </p>
+                      <p className="text-sm text-red-600 mt-1">{formatBRL(painelFin.atrasadas.valor)} em aberto, já vencidas</p>
+                    </div>
+                    <span className="bg-red-200 text-red-700 px-3 py-1 rounded-full text-sm font-bold">{painelFin.atrasadas.qtd}</span>
+                  </div>
+                </Link>
+              )}
 
               {ordensAtrasadas.length > 0 && (
                 <Link href="/producao" className="bg-red-50 border border-red-200 rounded-lg p-4 hover:bg-red-100 transition-all block">
@@ -254,6 +285,9 @@ function DashboardContent() {
               )}
             </div>
           )}
+
+          {/* Contas a pagar (financeiro) */}
+          {painelFin && <ContasAPagarAdmin painel={painelFin} saldoProjetado={saldoProjetado} />}
 
           {/* Indicadores Gerais */}
           <div className="mb-8">
