@@ -16,7 +16,7 @@ import {
   estimarPrecosCotacao,
   responderCotacaoFornecedor,
 } from '@/lib/financeiro-cotacoes'
-import { buscarQuantidadeCompradaUltimosDias } from '@/lib/financeiro-compras-relatorio'
+import { buscarQuantidadeCompradaUltimosDias } from '@/lib/financeiro-compras'
 import { useRouter, useParams } from 'next/navigation'
 import { Loader, FileText, CheckCircle, AlertCircle, Plus, Trash2, ChevronDown } from 'lucide-react'
 import { FinanceiroCotacao, FinanceiroCotacaoItem, FinanceiroCotacaoFornecedor, FinanceiroCotacaoPreco, FinanceiroMateriaPrima } from '@/lib/types'
@@ -276,7 +276,7 @@ export default function DetalheCotacaoPage() {
   if (!cotacao) {
     return (
       <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
-        <NotFoundState title="Cotação não encontrada" backHref="/financeiro/cotacoes" />
+        <NotFoundState title="Cotação não encontrada" backHref="/financeiro/compras?aba=cotacoes" />
       </ProtectedRoute>
     )
   }
@@ -299,7 +299,7 @@ export default function DetalheCotacaoPage() {
               {cotacao.status === 'fechada' && cotacao.fornecedor_vencedor?.nome && ` · Fechada com ${cotacao.fornecedor_vencedor.nome}`}
             </>
           }
-          backHref="/financeiro/cotacoes"
+          backHref="/financeiro/compras?aba=cotacoes"
           maxWidth="max-w-4xl"
         />
 

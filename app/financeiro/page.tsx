@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/useAuth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { Receipt, ShoppingCart, Users, Package, BookOpen, FileSpreadsheet, Wallet, ClipboardList, TrendingUp, Cake, Layers } from 'lucide-react'
+import { Receipt, ShoppingCart, Users, Package, BookOpen, FileSpreadsheet, Wallet, TrendingUp, Cake, Layers } from 'lucide-react'
 import { formatBRL } from '@/lib/ofx'
 import { hojeISO } from '@/lib/financeiro-utils'
 import { buscarResumoHubFinanceiro, ResumoHubFinanceiro } from '@/lib/financeiro-fluxo-mensal'
@@ -18,12 +18,11 @@ interface Card {
   roles: string[]
 }
 
-// Ordem segue o fluxo real de trabalho (cotar/comprar antes de analisar
-// resultado) — Cotações fica perto de Lançar Nota, não isolada no fim.
+// Ordem segue o fluxo real de trabalho (comprar antes de analisar resultado).
+// Compras reúne lançar nota, preço por insumo, melhor compra e cotações.
 const GRUPO_MOVIMENTO: Card[] = [
   { href: '/financeiro/despesas', label: 'Despesas', desc: 'Tudo a pagar e pago, de notas e despesas, numa tela só', icon: Receipt, roles: ['admin', 'loja', 'cozinha'] },
-  { href: '/financeiro/compras/nova', label: 'Lançar Nota de Insumos', desc: 'Nota fiscal de compra — gera a despesa automaticamente', icon: ShoppingCart, roles: ['admin', 'loja', 'cozinha'] },
-  { href: '/financeiro/cotacoes', label: 'Cotações', desc: 'Comparar preços de fornecedores antes de comprar', icon: ClipboardList, roles: ['admin', 'loja', 'cozinha'] },
+  { href: '/financeiro/compras', label: 'Compras', desc: 'Lançar nota de insumos, preço por insumo, melhor compra e cotações de fornecedores', icon: ShoppingCart, roles: ['admin', 'loja', 'cozinha'] },
   { href: '/financeiro/pdv', label: 'Import do PDV', desc: 'Importar vendas do PDV e gerar relatório de faturamento', icon: FileSpreadsheet, roles: ['admin'] },
   { href: '/financeiro/fluxo-caixa', label: 'Fluxo de Caixa', desc: 'Calendário mensal com forecast e conciliação do extrato — orçamento fica em uma tela própria, ligada a partir daqui', icon: Wallet, roles: ['admin'] },
   { href: '/financeiro/dre', label: 'DRE', desc: 'Resultado do mês por competência, com rateio e custo de insumos', icon: TrendingUp, roles: ['admin'] },

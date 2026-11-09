@@ -14,7 +14,7 @@ import {
   PrecoEstimado,
   ItemParaEstimar,
 } from '@/lib/financeiro-cotacoes'
-import { buscarQuantidadeCompradaUltimosDias } from '@/lib/financeiro-compras-relatorio'
+import { buscarQuantidadeCompradaUltimosDias } from '@/lib/financeiro-compras'
 import { useRouter } from 'next/navigation'
 import { Plus, Trash2, AlertCircle, ChevronDown } from 'lucide-react'
 import { FinanceiroParte, FinanceiroMateriaPrima, UnidadeFinanceiro, TipoCotacao } from '@/lib/types'

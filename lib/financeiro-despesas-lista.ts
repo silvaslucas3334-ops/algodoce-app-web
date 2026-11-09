@@ -31,7 +31,7 @@ export const STATUS_CARGA_COMPLETA: StatusLista[] = ['atrasadas', 'vence7', 'abe
 export const TAMANHO_PAGINA = 50
 
 export const SELECT_LISTA =
-  '*, parte:financeiro_partes!parte_id(nome, documento), conta:financeiro_contas(codigo, nome), extrato_transacao:financeiro_extrato_transacoes!extrato_transacao_id(status_conciliacao)'
+  '*, parte:financeiro_partes!parte_id(nome, documento), conta:financeiro_contas(codigo, nome), extrato_transacao:financeiro_extrato_transacoes!extrato_transacao_id(status_conciliacao), itens:financeiro_lancamento_itens(materia_prima:financeiro_materias_primas(nome))'
 
 export function statusPadrao(parteId: string): StatusLista {
   // Quem escolhe um fornecedor quer o histórico dele (em aberto + pago), não só o que falta pagar.

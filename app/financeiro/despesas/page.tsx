@@ -360,6 +360,15 @@ function DespesasContent() {
               {l.parte?.nome} · {UNIDADE_LABEL[l.unidade]}
               {l.conta && <span> · {l.conta.codigo} {l.conta.nome}</span>}
             </p>
+            {l.tipo === 'compra_insumos' && !!l.itens?.length && (() => {
+              const nomes = l.itens.map((i: any) => i.materia_prima?.nome).filter(Boolean) as string[]
+              return (
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {l.itens.length} {l.itens.length === 1 ? 'item' : 'itens'}
+                  {nomes.length > 0 && <span> · {nomes.slice(0, 3).join(', ')}{l.itens.length > 3 ? `, +${l.itens.length - 3}` : ''}</span>}
+                </p>
+              )
+            })()}
             <p className="text-xs text-gray-400 mt-1">
               {l.status === 'pago' && l.data_pagamento
                 ? `Paga em ${formatarDataCurta(l.data_pagamento)}`

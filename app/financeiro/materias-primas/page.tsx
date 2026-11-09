@@ -5,7 +5,7 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import EmptyState from '@/components/EmptyState'
 import PageHeader from '@/components/PageHeader'
 import Link from 'next/link'
-import { Plus, Search, BarChart3, Receipt } from 'lucide-react'
+import { Plus, Search, Receipt } from 'lucide-react'
 import { FinanceiroMateriaPrima } from '@/lib/types'
 import { formatBRL } from '@/lib/ofx'
 import { buscarCustosAtuaisMateriasPrimas, CustoAtualMateriaPrima } from '@/lib/financeiro-cmv'
@@ -41,13 +41,7 @@ export default function MateriasPrimasPage() {
           actions={
             <div className="flex gap-2">
               <Link
-                href="/financeiro/materias-primas/melhor-compra"
-                className="border border-pink-700 text-pink-700 rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-2 hover:bg-pink-50"
-              >
-                <BarChart3 size={16} /> Melhor Compra
-              </Link>
-              <Link
-                href="/financeiro/materias-primas/compras"
+                href="/financeiro/compras"
                 className="border border-pink-700 text-pink-700 rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-2 hover:bg-pink-50"
               >
                 <Receipt size={16} /> Compras

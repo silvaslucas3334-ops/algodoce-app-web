@@ -27,27 +27,59 @@ export async function buscarCustosAtuaisMateriasPrimas(ids: string[]): Promise<M
   const mapa = new Map<string, CustoAtualMateriaPrima>()
   if (ids.length === 0) return mapa
 
-  const [{ data: materias, error: erroManual }, { data: mensal, error: erroMensal }] = await Promise.all([
-    supabase.from('financeiro_materias_primas').select('id, custo_manual_por_unidade_compra, fator_conversao').in('id', ids),
-    supabase
-      .from('financeiro_custo_medio_mensal')
-      .select('materia_prima_id, mes_referencia, custo_medio_por_unidade_medida')
-      .in('materia_prima_id', ids)
-      .order('mes_referencia', { ascending: false }),
-  ])
-  if (erroManual) throw new Error(erroManual.message)
-  if (erroMensal) throw new Error(erroMensal.message)
+  // .in() vai na URL: lista grande é quebrada em blocos.
+  const BLOCO = 100
+  const blocos: string[][] = []
+  for (let i = 0; i < ids.length; i += BLOCO) blocos.push(ids.slice(i, i + BLOCO))
 
+  const materias: any[] = []
+  for (const bloco of blocos) {
+    const { data, error } = await supabase.from('financeiro_materias_primas').select('id, custo_manual_por_unidade_compra, fator_conversao').in('id', bloco)
+    if (error) throw new Error(error.message)
+    materias.push(...(data || []))
+  }
+
+  // Mês mais recente com compra, por insumo. Antes lia a view mensal INTEIRA (insumo × mês),
+  // que passa de 1000 linhas e cortava insumos em silêncio; agora usa a view que já devolve
+  // 1 linha por insumo (financeiro_custo_atual_mp, SQL da fase 5). Se ela ainda não existir
+  // no banco, cai no caminho antigo pra não quebrar a Ficha Técnica.
   const maisRecentePorId = new Map<string, { mes_referencia: string; custo: number }>()
   const temComprasPorId = new Set<string>()
-  ;(mensal || []).forEach((row: any) => {
-    temComprasPorId.add(row.materia_prima_id)
-    if (!maisRecentePorId.has(row.materia_prima_id)) {
-      maisRecentePorId.set(row.materia_prima_id, { mes_referencia: row.mes_referencia, custo: row.custo_medio_por_unidade_medida })
+  let usouViewNova = true
+  for (const bloco of blocos) {
+    const { data, error } = await supabase
+      .from('financeiro_custo_atual_mp')
+      .select('materia_prima_id, mes_referencia, custo_medio_por_unidade_medida')
+      .in('materia_prima_id', bloco)
+    if (error) {
+      usouViewNova = false
+      break
     }
-  })
+    ;(data || []).forEach((row: any) => {
+      temComprasPorId.add(row.materia_prima_id)
+      maisRecentePorId.set(row.materia_prima_id, { mes_referencia: row.mes_referencia, custo: row.custo_medio_por_unidade_medida })
+    })
+  }
+  if (!usouViewNova) {
+    maisRecentePorId.clear()
+    temComprasPorId.clear()
+    for (const bloco of blocos) {
+      const { data: mensal, error: erroMensal } = await supabase
+        .from('financeiro_custo_medio_mensal')
+        .select('materia_prima_id, mes_referencia, custo_medio_por_unidade_medida')
+        .in('materia_prima_id', bloco)
+        .order('mes_referencia', { ascending: false })
+      if (erroMensal) throw new Error(erroMensal.message)
+      ;(mensal || []).forEach((row: any) => {
+        temComprasPorId.add(row.materia_prima_id)
+        if (!maisRecentePorId.has(row.materia_prima_id)) {
+          maisRecentePorId.set(row.materia_prima_id, { mes_referencia: row.mes_referencia, custo: row.custo_medio_por_unidade_medida })
+        }
+      })
+    }
+  }
 
-  ;(materias || []).forEach((mp: any) => {
+  materias.forEach((mp: any) => {
     const temCompras = temComprasPorId.has(mp.id)
 
     if (mp.custo_manual_por_unidade_compra != null) {
