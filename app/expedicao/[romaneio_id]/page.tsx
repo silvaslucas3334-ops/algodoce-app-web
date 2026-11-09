@@ -15,6 +15,7 @@ export default function VisualizarRomaneioPage() {
   const [romaneio, setRomaneio] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [confirmando, setConfirmando] = useState(false)
+  const [erroEnvio, setErroEnvio] = useState('')
   const [cancelando, setCancelando] = useState(false)
   const [salvandoDepois, setSalvandoDepois] = useState(false)
   const [expandidas, setExpandidas] = useState<Record<string, boolean>>({})
@@ -41,52 +42,22 @@ export default function VisualizarRomaneioPage() {
     carregarRomaneio()
   }, [romaneioId])
 
+  // Envia o romaneio numa operação única do banco (etiquetas + movimentações + status juntos ou
+  // nada). Se alguma etiqueta já não está na cozinha, nada é enviado e a mensagem diz quantas.
   async function confirmarRomaneio() {
     if (!romaneio) return
     setConfirmando(true)
+    setErroEnvio('')
 
     try {
-      // Para cada produto no romaneio, marcar etiquetas como enviado
-      for (const linha of romaneio.linhas) {
-        // Atualizar lotes para status 'enviado' e destino correto
-        await supabase
-          .from('lotes_producao')
-          .update({ status: 'enviado', destino: romaneio.unidade_destino })
-          .in('id', linha.etiquetas_selecionadas)
-
-        // Registrar movimentações para a unidade de destino
-        for (const loteId of linha.etiquetas_selecionadas) {
-          await supabase.from('movimentacoes_estoque').insert({
-            lote_id: loteId,
-            tipo: 'transferencia',
-            local_origem: 'cozinha',
-            local_destino: romaneio.unidade_destino,
-            quantidade: 1,
-            registrado_por: usuario?.nome || 'Sistema',
-          })
-        }
-
-        // Criar aviso de parcial se necessário
-        if (linha.aviso) {
-          // Salvar aviso no histórico de romaneios (via tabela auxiliar ou JSON)
-        }
-      }
-
-      // Atualizar status do romaneio
-      await supabase
-        .from('romaneios')
-        .update({
-          status: 'confirmado',
-          confirmado_por: usuario?.id,
-          confirmado_em: new Date().toISOString(),
-        })
-        .eq('id', romaneioId)
+      const { error } = await supabase.rpc('enviar_romaneio', { p_romaneio_id: romaneioId })
+      if (error) throw error
 
       alert('✓ Romaneio enviado com sucesso')
       router.push('/expedicao')
-    } catch (err) {
-      console.error('Erro:', err)
-      alert('Erro ao confirmar romaneio')
+    } catch (err: any) {
+      console.error('Erro ao enviar romaneio:', err)
+      setErroEnvio(err?.message || 'Erro desconhecido.')
     } finally {
       setConfirmando(false)
     }
@@ -272,6 +243,13 @@ export default function VisualizarRomaneioPage() {
             </div>
           ))}
         </div>
+
+        {erroEnvio && (
+          <div className="mt-6 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+            <p className="font-semibold">Não foi possível enviar. Nada foi gravado.</p>
+            <p className="mt-0.5">{erroEnvio}</p>
+          </div>
+        )}
 
         {/* Botões de Ação */}
         {romaneio.status === 'rascunho' && (

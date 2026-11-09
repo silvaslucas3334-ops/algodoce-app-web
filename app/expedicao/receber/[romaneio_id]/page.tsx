@@ -29,6 +29,8 @@ export default function ReceberRomaneioPage() {
   const [conferidas, setConferidas] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [recebendo, setRecebendo] = useState(false)
+  const [erroRecebimento, setErroRecebimento] = useState('')
+  const [concluido, setConcluido] = useState<{ recebidas: number; jaRecebido: boolean } | null>(null)
 
   useEffect(() => {
     const carregarRomaneio = async () => {
@@ -96,59 +98,21 @@ export default function ReceberRomaneioPage() {
     setConferidas((prev) => ({ ...prev, [produtoId]: !prev[produtoId] }))
   }
 
+  // Recebe o romaneio INTEIRO numa operação única do banco (lib/migrations/expedicao-fase7b-...):
+  // etiquetas, movimentações e o fechamento do romaneio entram juntos ou nada entra. A conferência
+  // por produto abaixo é só uma ajuda visual — nunca deixa o romaneio pela metade. Se algo não
+  // veio ou veio com problema, recebe-se assim mesmo e o usuário cria a transferência de volta.
   async function confirmarRecebimento() {
     if (!romaneio) return
-
-    // Linhas marcadas agora que ainda não tinham sido recebidas
-    const linhasParaReceber = linhas.filter((l) => conferidas[l.produto_id] && !l.jaRecebida)
-
-    if (linhasParaReceber.length === 0) {
-      alert('Marque ao menos um produto conferido para receber.')
-      return
-    }
-
     setRecebendo(true)
+    setErroRecebimento('')
     try {
-      const lotesIds = linhasParaReceber.flatMap((l) => l.etiquetas_selecionadas)
-
-      if (lotesIds.length > 0) {
-        const { error: errorLotes } = await supabase
-          .from('lotes_producao')
-          .update({ status: 'na_loja' })
-          .in('id', lotesIds)
-
-        if (errorLotes) throw errorLotes
-
-        for (const loteId of lotesIds) {
-          await supabase.from('movimentacoes_estoque').insert({
-            lote_id: loteId,
-            tipo: 'entrada',
-            local_origem: 'cozinha',
-            local_destino: romaneio.unidade_destino,
-            quantidade: 1,
-            registrado_por: usuario?.nome || 'Sistema',
-          })
-        }
-      }
-
-      // Romaneio só vira "em_estoque" quando TODAS as linhas estiverem conferidas
-      const todasConferidas = linhas.every((l) => l.jaRecebida || conferidas[l.produto_id])
-      if (todasConferidas) {
-        await supabase
-          .from('romaneios')
-          .update({ status: 'em_estoque', atualizado_em: new Date().toISOString() })
-          .eq('id', romaneioId)
-      }
-
-      alert(
-        todasConferidas
-          ? '✓ Romaneio recebido com sucesso!'
-          : '✓ Itens conferidos recebidos. Os produtos não conferidos continuam pendentes.'
-      )
-      router.push('/expedicao')
-    } catch (err) {
-      console.error('Erro:', err)
-      alert('Erro ao receber romaneio')
+      const { data, error } = await supabase.rpc('receber_romaneio', { p_romaneio_id: romaneioId })
+      if (error) throw error
+      setConcluido({ recebidas: Number(data?.recebidas) || 0, jaRecebido: !!data?.ja_recebido })
+    } catch (err: any) {
+      console.error('Erro ao receber romaneio:', err)
+      setErroRecebimento(err?.message || 'Erro desconhecido.')
     } finally {
       setRecebendo(false)
     }
@@ -167,6 +131,43 @@ export default function ReceberRomaneioPage() {
     return (
       <div className="flex items-center justify-center min-h-screen text-gray-400">
         Romaneio não encontrado
+      </div>
+    )
+  }
+
+  // Recebido: mostra o resultado e o atalho para o caso de divergência física (a loja devolve à cozinha).
+  if (concluido) {
+    const destinoEhLoja = romaneio.unidade_destino === 'loja1' || romaneio.unidade_destino === 'loja2'
+    const podeDevolver = destinoEhLoja && (usuario?.role === 'loja' || usuario?.role === 'admin')
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-6 max-w-md w-full text-center">
+          <CheckCircle size={44} className="mx-auto text-green-600 mb-3" />
+          <h1 className="text-xl font-bold text-gray-800">{concluido.jaRecebido ? 'Este romaneio já estava recebido' : 'Romaneio recebido'}</h1>
+          {!concluido.jaRecebido && (
+            <p className="text-sm text-gray-600 mt-1">
+              {concluido.recebidas} etiqueta(s) entraram no estoque de {LOCAL_LABEL[romaneio.unidade_destino] || romaneio.unidade_destino}.
+            </p>
+          )}
+          <div className="mt-5 space-y-2">
+            {podeDevolver && (
+              <button
+                onClick={() =>
+                  router.push(`/expedicao/nova-transferencia?motivo=devolucao_saldo&origem=${romaneio.unidade_destino}`)
+                }
+                className="w-full px-4 py-3 border border-amber-300 bg-amber-50 text-amber-800 rounded-lg font-semibold hover:bg-amber-100"
+              >
+                Houve divergência? Criar transferência para a cozinha
+              </button>
+            )}
+            <button
+              onClick={() => router.push('/expedicao')}
+              className="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700"
+            >
+              Voltar à Expedição
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
@@ -211,8 +212,12 @@ export default function ReceberRomaneioPage() {
           <PackageCheck size={28} className="text-blue-400" />
         </div>
 
-        <p className="text-sm text-gray-600 mb-3">
-          Confira fisicamente cada produto recebido e marque a caixa correspondente.
+        <p className="text-sm text-gray-600 mb-1">
+          Confira fisicamente cada produto e marque a caixa — é só uma ajuda para você.
+        </p>
+        <p className="text-xs text-gray-500 mb-3">
+          Ao confirmar, o romaneio <strong>inteiro</strong> é recebido e fecha. Se algo não veio ou veio com problema, receba assim mesmo e
+          depois crie uma transferência para a cozinha informando o motivo.
         </p>
 
         {/* Lista de produtos */}
@@ -252,6 +257,13 @@ export default function ReceberRomaneioPage() {
           })}
         </div>
 
+        {erroRecebimento && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">
+            <p className="font-semibold">Não foi possível receber. Nada foi gravado.</p>
+            <p className="mt-0.5">{erroRecebimento}</p>
+          </div>
+        )}
+
         {/* Botões */}
         <div className="flex gap-3 pt-4 border-t">
           <button
@@ -273,7 +285,7 @@ export default function ReceberRomaneioPage() {
             ) : (
               <>
                 <CheckCircle size={18} />
-                Confirmar Recebimento
+                Receber tudo
               </>
             )}
           </button>

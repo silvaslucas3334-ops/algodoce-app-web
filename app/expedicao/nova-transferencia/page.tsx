@@ -1,17 +1,21 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { ArrowRightLeft } from 'lucide-react'
 import { LOCAL_LABEL } from '@/lib/constants'
-import { destinosDoMotivo, MotivoTransferencia, MOTIVOS_TRANSFERENCIA, Unidade } from '@/lib/expedicao'
+import { destinosDoMotivo, motivoValido, MotivoTransferencia, MOTIVOS_TRANSFERENCIA, Unidade } from '@/lib/expedicao'
 
-export default function NovaTransferenciaPage() {
+function NovaTransferenciaContent() {
   const { usuario } = useAuth()
   const router = useRouter()
-  const [motivo, setMotivo] = useState<MotivoTransferencia>('transferencia')
+  const searchParams = useSearchParams()
+  // Motivo e origem podem vir pré-preenchidos (ex.: atalho "Houve divergência?" depois de receber).
+  const motivoInicial = searchParams.get('motivo')
+  const origemInicial = searchParams.get('origem')
+  const [motivo, setMotivo] = useState<MotivoTransferencia>(motivoValido(motivoInicial) ? motivoInicial : 'transferencia')
   const [destino, setDestino] = useState<Unidade>('loja1')
-  const [origemAdmin, setOrigemAdmin] = useState<'loja1' | 'loja2'>('loja1')
+  const [origemAdmin, setOrigemAdmin] = useState<'loja1' | 'loja2'>(origemInicial === 'loja2' ? 'loja2' : 'loja1')
 
   // Se não é loja nem admin, redirecionar
   useEffect(() => {
@@ -136,5 +140,13 @@ export default function NovaTransferenciaPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function NovaTransferenciaPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">Carregando...</div>}>
+      <NovaTransferenciaContent />
+    </Suspense>
   )
 }

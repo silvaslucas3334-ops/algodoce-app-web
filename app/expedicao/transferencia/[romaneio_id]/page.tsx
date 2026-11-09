@@ -5,7 +5,7 @@ import { LOCAL_LABEL, ROMANEIO_STATUS_LABEL } from '@/lib/constants'
 import { buscarOrigemDoCriador, nomeUnidade, rotuloMotivo, Unidade } from '@/lib/expedicao'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter, useParams } from 'next/navigation'
-import { ArrowLeft, CheckCircle, Loader, ArrowRightLeft } from 'lucide-react'
+import { ArrowLeft, CheckCircle, Loader, ArrowRightLeft, Printer } from 'lucide-react'
 
 export default function ConfirmarTransferenciaPage() {
   const { usuario } = useAuth()
@@ -16,6 +16,7 @@ export default function ConfirmarTransferenciaPage() {
   const [romaneio, setRomaneio] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [confirmando, setConfirmando] = useState(false)
+  const [erroEnvio, setErroEnvio] = useState('')
 
   const destinoLabel = romaneio ? LOCAL_LABEL[romaneio.unidade_destino as keyof typeof LOCAL_LABEL] || 'Desconhecido' : 'Carregando...'
   const [origem, setOrigem] = useState<Unidade | null>(null)
@@ -42,47 +43,22 @@ export default function ConfirmarTransferenciaPage() {
     carregarRomaneio()
   }, [romaneioId])
 
+  // Envia a transferência numa operação única do banco: confere que todas as etiquetas ainda
+  // estão no estoque da loja de origem e só então move tudo (etiquetas + status juntos ou nada).
   async function confirmarTransferencia() {
     if (!romaneio) return
     setConfirmando(true)
+    setErroEnvio('')
 
     try {
-      // Extrair IDs das etiquetas
-      const lotesIds: string[] = []
-      if (romaneio.linhas && Array.isArray(romaneio.linhas)) {
-        for (const linha of romaneio.linhas) {
-          if (linha.etiquetas_selecionadas && Array.isArray(linha.etiquetas_selecionadas)) {
-            lotesIds.push(...linha.etiquetas_selecionadas)
-          }
-        }
-      }
-
-      // Atualizar lotes para status 'enviado' com novo destino
-      if (lotesIds.length > 0) {
-        const { error: errorLotes } = await supabase
-          .from('lotes_producao')
-          .update({ status: 'enviado', destino: romaneio.unidade_destino })
-          .in('id', lotesIds)
-
-        if (errorLotes) throw errorLotes
-      }
-
-      // Atualizar status do romaneio
-      const { error } = await supabase
-        .from('romaneios')
-        .update({
-          status: 'confirmado',
-          atualizado_em: new Date().toISOString(),
-        })
-        .eq('id', romaneioId)
-
+      const { error } = await supabase.rpc('enviar_romaneio', { p_romaneio_id: romaneioId })
       if (error) throw error
 
       alert('✓ Transferência enviada!')
       router.push('/expedicao')
-    } catch (err) {
-      console.error('Erro:', err)
-      alert('Erro ao confirmar transferência')
+    } catch (err: any) {
+      console.error('Erro ao enviar transferência:', err)
+      setErroEnvio(err?.message || 'Erro desconhecido.')
     } finally {
       setConfirmando(false)
     }
@@ -168,6 +144,13 @@ export default function ConfirmarTransferenciaPage() {
             </div>
           </div>
 
+          {erroEnvio && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+              <p className="font-semibold">Não foi possível enviar. Nada foi gravado.</p>
+              <p className="mt-0.5">{erroEnvio}</p>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-4 border-t">
             <button
               onClick={() => router.back()}
@@ -175,6 +158,14 @@ export default function ConfirmarTransferenciaPage() {
             >
               Voltar
             </button>
+            <button
+              onClick={() => router.push(`/expedicao/transferencia/${romaneioId}/imprimir`)}
+              className="px-4 py-3 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+            >
+              <Printer size={18} />
+              Imprimir
+            </button>
+            {romaneio.status === 'rascunho' && (
             <button
               onClick={confirmarTransferencia}
               disabled={confirmando}
@@ -192,6 +183,7 @@ export default function ConfirmarTransferenciaPage() {
                 </>
               )}
             </button>
+            )}
           </div>
         </div>
       </div>

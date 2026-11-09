@@ -15,6 +15,7 @@ export default function ReceberTransferenciaPage() {
   const [romaneio, setRomaneio] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [recebendo, setRecebendo] = useState(false)
+  const [erroRecebimento, setErroRecebimento] = useState('')
 
   // "De:" é quem enviou a devolução (a unidade de quem criou). Antes mostrava
   // `unidade_destino`, que numa devolução é a própria cozinha.
@@ -43,47 +44,22 @@ export default function ReceberTransferenciaPage() {
     carregarRomaneio()
   }, [romaneioId])
 
+  // Recebe a devolução INTEIRA numa operação única do banco (etiquetas voltam ao estoque da
+  // cozinha e o romaneio fecha juntos, ou nada é gravado).
   async function confirmarRecebimento() {
     if (!romaneio) return
     setRecebendo(true)
+    setErroRecebimento('')
 
     try {
-      // Extrair IDs das etiquetas
-      const lotesIds: string[] = []
-      if (romaneio.linhas && Array.isArray(romaneio.linhas)) {
-        for (const linha of romaneio.linhas) {
-          if (linha.etiquetas_selecionadas && Array.isArray(linha.etiquetas_selecionadas)) {
-            lotesIds.push(...linha.etiquetas_selecionadas)
-          }
-        }
-      }
-
-      // Atualizar lotes para status 'na_cozinha' (voltar para cozinha)
-      if (lotesIds.length > 0) {
-        const { error: errorLotes } = await supabase
-          .from('lotes_producao')
-          .update({ status: 'na_cozinha', destino: 'cozinha' })
-          .in('id', lotesIds)
-
-        if (errorLotes) throw errorLotes
-      }
-
-      // Atualizar status do romaneio para em_estoque
-      const { error } = await supabase
-        .from('romaneios')
-        .update({
-          status: 'em_estoque',
-          atualizado_em: new Date().toISOString(),
-        })
-        .eq('id', romaneioId)
-
+      const { error } = await supabase.rpc('receber_romaneio', { p_romaneio_id: romaneioId })
       if (error) throw error
 
       alert('✓ Devolução recebida com sucesso!')
       router.push('/expedicao')
-    } catch (err) {
-      console.error('Erro:', err)
-      alert('Erro ao receber devolução')
+    } catch (err: any) {
+      console.error('Erro ao receber devolução:', err)
+      setErroRecebimento(err?.message || 'Erro desconhecido.')
     } finally {
       setRecebendo(false)
     }
@@ -169,6 +145,13 @@ export default function ReceberTransferenciaPage() {
             </div>
           </div>
 
+          {erroRecebimento && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+              <p className="font-semibold">Não foi possível receber. Nada foi gravado.</p>
+              <p className="mt-0.5">{erroRecebimento}</p>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-4 border-t">
             <button
               onClick={() => router.back()}
@@ -189,7 +172,7 @@ export default function ReceberTransferenciaPage() {
               ) : (
                 <>
                   <CheckCircle size={18} />
-                  Confirmar Recebimento
+                  Receber tudo
                 </>
               )}
             </button>
