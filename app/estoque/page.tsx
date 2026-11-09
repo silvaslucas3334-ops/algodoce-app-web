@@ -5,6 +5,9 @@ import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
 import { exportarCSV } from '@/lib/csv-export'
+import { baixarEtiquetas, baixarPorQuantidade, MOTIVOS_BAIXA, MotivoBaixa, motivoPadrao, ROTULO_MOTIVO } from '@/lib/estoque-baixa'
+import FechamentoDoDiaModal from '@/components/FechamentoDoDiaModal'
+import FechamentoConfigModal from '@/components/FechamentoConfigModal'
 import { ShoppingCart, Trash2, Send, History, RotateCcw, ChevronDown, Download } from 'lucide-react'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
 
@@ -31,10 +34,15 @@ export default function EstoquePage() {
   const [confirmarRecebimento, setConfirmarRecebimento] = useState(false)
   const [modoBaixa, setModoBaixa] = useState(false)
   const [carrinhoBaixa, setCarrinhoBaixa] = useState<string[]>([])
-  const [confirmarBaixa, setConfirmarBaixa] = useState(false)
+  // Baixa por quantidade: quantas etiquetas de cada produto (as que vencem primeiro) entram na baixa.
+  const [qtdPorProduto, setQtdPorProduto] = useState<Record<string, number>>({})
+  const [mostrarFolhaBaixa, setMostrarFolhaBaixa] = useState(false)
+  const [motivoBaixa, setMotivoBaixa] = useState<MotivoBaixa>('venda')
+  const [baixando, setBaixando] = useState(false)
+  const [mostrarFechamento, setMostrarFechamento] = useState(false)
+  const [mostrarConfigFechamento, setMostrarConfigFechamento] = useState(false)
   const [modoBaixaConsumo, setModoBaixaConsumo] = useState(false)
   const [carrinhoBaixaConsumo, setCarrinhoBaixaConsumo] = useState<string[]>([])
-  const [confirmarBaixaConsumo, setConfirmarBaixaConsumo] = useState(false)
   const [produtosExpandidos, setProdutosExpandidos] = useState<Record<string, boolean>>({})
   const [mostrarRecebimento, setMostrarRecebimento] = useState(false)
   const [mostrarHistoricoBaixas, setMostrarHistoricoBaixas] = useState(false)
@@ -272,31 +280,6 @@ export default function EstoquePage() {
     setProdutosExpandidos(prev => ({ ...prev, [produtoId]: !prev[produtoId] }))
   }
 
-  async function executarBaixa() {
-    if (carrinhoBaixa.length === 0) {
-      alert('Selecione pelo menos um item')
-      return
-    }
-
-    await supabase.from('lotes_producao')
-      .update({ status: 'esgotado' })
-      .in('id', carrinhoBaixa)
-    await supabase.from('movimentacoes_estoque').insert(
-      carrinhoBaixa.map((id: any) => ({
-        lote_id: id,
-        tipo: 'saida',
-        local_origem: local,
-        quantidade: 1,
-        registrado_por: operador || 'Sistema',
-      }))
-    )
-
-    setCarrinhoBaixa([])
-    setModoBaixa(false)
-    setConfirmarBaixa(false)
-    carregarEstoque()
-  }
-
   function toggleCarrinhoBaixaConsumo(loteId: string) {
     setCarrinhoBaixaConsumo(prev => {
       if (prev.includes(loteId)) {
@@ -305,31 +288,6 @@ export default function EstoquePage() {
         return [...prev, loteId]
       }
     })
-  }
-
-  async function executarBaixaConsumo() {
-    if (carrinhoBaixaConsumo.length === 0) {
-      alert('Selecione pelo menos um item')
-      return
-    }
-
-    await supabase.from('lotes_producao')
-      .update({ status: 'esgotado' })
-      .in('id', carrinhoBaixaConsumo)
-    await supabase.from('movimentacoes_estoque').insert(
-      carrinhoBaixaConsumo.map((id: any) => ({
-        lote_id: id,
-        tipo: 'saida',
-        local_origem: 'cozinha',
-        quantidade: 1,
-        registrado_por: operador || 'Sistema',
-      }))
-    )
-
-    setCarrinhoBaixaConsumo([])
-    setModoBaixaConsumo(false)
-    setConfirmarBaixaConsumo(false)
-    carregarEstoque()
   }
 
   async function confirmarRecebimentoIndividual(lote_ids: string[]) {
@@ -349,21 +307,76 @@ export default function EstoquePage() {
     carregarEstoque()
   }
 
-  async function darBaixa(lote_ids: string[]) {
-    if (!operador) { alert('Informe seu nome primeiro'); return }
-    await supabase.from('lotes_producao')
-      .update({ status: 'esgotado' })
-      .in('id', lote_ids)
-    await supabase.from('movimentacoes_estoque').insert(
-      lote_ids.map((id: any) => ({
-        lote_id: id,
-        tipo: 'saida',
-        local_origem: local,
-        quantidade: 1,
-        registrado_por: operador,
-      }))
-    )
-    carregarEstoque()
+  // --- baixa (loja e consumo da cozinha) --------------------------------------
+  // A baixa junta duas coisas: etiquetas escolhidas à mão (toque na etiqueta) e
+  // quantidades por produto (− N +, sempre das que vencem primeiro). Uma única
+  // confirmação, com o motivo; a lógica toda mora em lib/estoque-baixa.ts.
+  const baixaDisponivel = local !== 'cozinha' || modoBaixaConsumo
+  const idsEspecificos = modoBaixaConsumo ? carrinhoBaixaConsumo : local === 'cozinha' ? [] : carrinhoBaixa
+  const totalPorQuantidade = Object.values(qtdPorProduto).reduce((soma, n) => soma + n, 0)
+  const totalParaBaixar = totalPorQuantidade + idsEspecificos.length
+
+  function ajustarQtd(produtoId: string, delta: number, maximo: number) {
+    setQtdPorProduto((prev) => {
+      const novo = Math.max(0, Math.min(maximo, (prev[produtoId] || 0) + delta))
+      const copia = { ...prev }
+      if (novo === 0) delete copia[produtoId]
+      else copia[produtoId] = novo
+      return copia
+    })
+  }
+
+  function limparSelecaoDeBaixa() {
+    setCarrinhoBaixa([])
+    setCarrinhoBaixaConsumo([])
+    setQtdPorProduto({})
+    setMostrarFolhaBaixa(false)
+  }
+
+  function abrirFolhaBaixa() {
+    setMotivoBaixa(motivoPadrao(local))
+    setMostrarFolhaBaixa(true)
+  }
+
+  async function confirmarBaixaNova() {
+    if (totalParaBaixar === 0 || baixando) return
+    setBaixando(true)
+    try {
+      const opcoes = { local, motivo: motivoBaixa, operador: operador || 'Sistema' }
+      let baixadas = 0
+      let ignoradas = 0
+      let faltaram = 0
+
+      if (idsEspecificos.length > 0) {
+        const r = await baixarEtiquetas(idsEspecificos, opcoes)
+        baixadas += r.baixadas.length
+        ignoradas += r.ignoradas.length
+      }
+      for (const [produtoId, qtd] of Object.entries(qtdPorProduto)) {
+        const r = await baixarPorQuantidade(produtoId, qtd, { ...opcoes, excluirIds: idsEspecificos, apenasOrdemInterna: modoBaixaConsumo })
+        baixadas += r.baixadas.length
+        faltaram += r.faltaram
+      }
+
+      limparSelecaoDeBaixa()
+      setModoBaixaConsumo(false)
+      await carregarEstoque()
+      if (ignoradas > 0 || faltaram > 0) {
+        alert(
+          `${baixadas} etiqueta(s) baixada(s).
+` +
+            (ignoradas > 0 ? `${ignoradas} já tinha(m) sido baixada(s) por outra pessoa.
+` : '') +
+            (faltaram > 0 ? `${faltaram} não estava(m) mais no estoque.` : '')
+        )
+      }
+    } catch (err: any) {
+      console.error('Erro ao dar baixa:', err)
+      alert('Erro ao dar baixa: ' + (err?.message || 'desconhecido') + '. Atualize a tela e confira o estoque.')
+      await carregarEstoque()
+    } finally {
+      setBaixando(false)
+    }
   }
 
   const JANELA_REVERSAO_HORAS = 24
@@ -375,7 +388,7 @@ export default function EstoquePage() {
 
       const { data: baixas } = await supabase
         .from('movimentacoes_estoque')
-        .select('id, lote_id, tipo, local_origem, quantidade, registrado_por, created_at, justificativa, estornado_de, lote:lotes_producao(id, codigo_qr, produto:produtos(nome, unidade_medida))')
+        .select('id, lote_id, tipo, local_origem, quantidade, registrado_por, created_at, justificativa, estornado_de, motivo, lote:lotes_producao(id, codigo_qr, produto:produtos(nome, unidade_medida))')
         .eq('tipo', 'saida')
         .eq('local_origem', local)
         .gte('created_at', doisDiasAtras)
@@ -488,7 +501,7 @@ export default function EstoquePage() {
       const loteIds = lotesEncontrados.map((l: any) => l.id)
       const { data: baixasEncontradas } = await supabase
         .from('movimentacoes_estoque')
-        .select('id, lote_id, tipo, local_origem, quantidade, registrado_por, created_at, justificativa, estornado_de')
+        .select('id, lote_id, tipo, local_origem, quantidade, registrado_por, created_at, justificativa, estornado_de, motivo')
         .in('lote_id', loteIds)
         .eq('tipo', 'saida')
         .eq('local_origem', local)
@@ -563,6 +576,9 @@ export default function EstoquePage() {
               {baixa.quantidade} {baixa.lote?.produto?.unidade_medida || 'un'} · {baixa.registrado_por} ·{' '}
               {new Date(baixa.created_at).toLocaleString('pt-BR')}
             </p>
+            {baixa.motivo && (
+              <p className="text-xs text-gray-500 mt-0.5">Motivo: {ROTULO_MOTIVO[baixa.motivo] || baixa.motivo}</p>
+            )}
 
             {baixa.reversao ? (
               <p className="text-xs text-green-700 font-semibold mt-1.5">
@@ -678,8 +694,7 @@ export default function EstoquePage() {
           <button
             onClick={() => {
               setModoBaixaConsumo(false)
-              setCarrinhoBaixaConsumo([])
-              setConfirmarBaixaConsumo(false)
+              limparSelecaoDeBaixa()
             }}
             className="bg-red-700 hover:bg-red-800 text-white rounded-lg px-4 py-2 text-sm font-semibold"
           >
@@ -721,6 +736,14 @@ export default function EstoquePage() {
                       📉 Baixa de Consumo
                     </button>
                   )}
+                  {(local === 'loja1' || local === 'loja2') && (
+                    <button
+                      onClick={() => { setMostrarFechamento(true); setMostrarMenuAcoes(false) }}
+                      className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left"
+                    >
+                      📋 Fechamento do dia (contagem)
+                    </button>
+                  )}
                   <button
                     onClick={() => { setMostrarModalReverter(true); setMostrarMenuAcoes(false) }}
                     className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left"
@@ -733,6 +756,14 @@ export default function EstoquePage() {
                   >
                     <History size={16} /> Histórico de Baixas
                   </button>
+                  {usuario?.role === 'admin' && (
+                    <button
+                      onClick={() => { setMostrarConfigFechamento(true); setMostrarMenuAcoes(false) }}
+                      className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left border-t border-gray-100 mt-1 pt-3"
+                    >
+                      🔒 Fechamento do dia: bloqueio e perdas
+                    </button>
+                  )}
                   {usuario?.role === 'admin' && (
                     <button
                       onClick={() => { setUnidadeRelatorio(local); setMostrarModalRelatorio(true); setMostrarMenuAcoes(false) }}
@@ -1012,94 +1043,79 @@ export default function EstoquePage() {
             </div>
           )}
 
-          {/* MODAL DE DUPLA CONFIRMAÇÃO - VENDA */}
-          {confirmarBaixa && carrinhoBaixa.length > 0 && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
-                <h3 className="text-lg font-bold text-gray-800 mb-4">Confirmar Baixa</h3>
+          {/* FOLHA DE BAIXA: uma única confirmação, com o motivo (substitui os modais "Você conferiu?" de venda e consumo) */}
+          {mostrarFolhaBaixa && totalParaBaixar > 0 && (
+            <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-[70] sm:p-4">
+              <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl p-5 max-h-[90vh] overflow-y-auto">
+                <h3 className="text-lg font-bold text-gray-800 mb-3">Confirmar baixa</h3>
 
-                <div className="bg-red-50 rounded-lg p-4 mb-4 border border-red-200">
-                  <p className="text-sm text-red-800 font-semibold mb-3">📦 Itens a vender:</p>
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {lotes
-                      .filter(l => carrinhoBaixa.includes(l.id))
-                      .map((lote: any) => (
-                        <div key={lote.id} className="text-sm text-gray-700 flex justify-between items-center">
-                          <span>{lote.produto?.nome}</span>
-                          <span className="text-xs text-gray-500">{lote.codigo_qr.substring(0, 16)}...</span>
+                <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 mb-4 space-y-1.5 max-h-48 overflow-y-auto">
+                  {Object.entries(qtdPorProduto).map(([produtoId, qtd]) => {
+                    const nome = lotes.find((l) => l.produto_id === produtoId)?.produto?.nome || 'Produto'
+                    return (
+                      <div key={produtoId} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-800"><strong>{qtd}×</strong> {nome}</span>
+                        <span className="text-xs text-gray-500">as que vencem primeiro</span>
+                      </div>
+                    )
+                  })}
+                  {idsEspecificos.length > 0 &&
+                    lotes
+                      .filter((l) => idsEspecificos.includes(l.id))
+                      .map((l) => (
+                        <div key={l.id} className="flex items-center justify-between text-sm">
+                          <span className="text-gray-800">{l.produto?.nome}</span>
+                          <span className="text-xs text-gray-500 font-mono">{String(l.codigo_qr).substring(0, 16)}…</span>
                         </div>
                       ))}
-                  </div>
-                  <p className="text-sm font-bold text-red-900 mt-3 pt-3 border-t border-red-200">
-                    Total: {carrinhoBaixa.length} etiqueta(s)
-                  </p>
+                  <p className="text-sm font-bold text-gray-900 pt-2 border-t border-gray-200">Total: {totalParaBaixar} etiqueta(s)</p>
                 </div>
 
-                <p className="text-sm text-gray-600 mb-4">
-                  ⚠️ <strong>Você conferiu todos os itens?</strong> Esta ação não pode ser desfeita.
-                </p>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Motivo</p>
+                <div className="flex flex-wrap gap-2 mb-5">
+                  {MOTIVOS_BAIXA.map((m) => (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => setMotivoBaixa(m.key)}
+                      className={`px-3 py-2 rounded-full text-sm font-semibold border ${
+                        motivoBaixa === m.key ? 'bg-pink-700 text-white border-pink-700' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setConfirmarBaixa(false)}
-                    className="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2 font-semibold hover:bg-gray-200"
+                    onClick={() => setMostrarFolhaBaixa(false)}
+                    disabled={baixando}
+                    className="flex-1 bg-gray-100 text-gray-700 rounded-lg py-3 font-semibold hover:bg-gray-200 disabled:opacity-50"
                   >
                     Voltar
                   </button>
                   <button
-                    onClick={executarBaixa}
-                    className="flex-1 bg-red-600 text-white rounded-lg py-2 font-semibold hover:bg-red-700"
+                    onClick={confirmarBaixaNova}
+                    disabled={baixando}
+                    className="flex-1 bg-red-600 text-white rounded-lg py-3 font-semibold hover:bg-red-700 disabled:opacity-50"
                   >
-                    ✓ Confirmar
+                    {baixando ? 'Baixando...' : '✓ Confirmar baixa'}
                   </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* MODAL DE DUPLA CONFIRMAÇÃO - BAIXA POR CONSUMO */}
-          {confirmarBaixaConsumo && carrinhoBaixaConsumo.length > 0 && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
-                <h3 className="text-lg font-bold text-gray-800 mb-4">Confirmar Baixa de Consumo</h3>
+          {mostrarConfigFechamento && <FechamentoConfigModal onFechar={() => setMostrarConfigFechamento(false)} />}
 
-                <div className="bg-red-50 rounded-lg p-4 mb-4 border border-red-200">
-                  <p className="text-sm text-red-800 font-semibold mb-3">📦 Itens consumidos:</p>
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {lotes
-                      .filter(l => carrinhoBaixaConsumo.includes(l.id))
-                      .map((lote: any) => (
-                        <div key={lote.id} className="text-sm text-gray-700 flex justify-between items-center">
-                          <span>{lote.produto?.nome}</span>
-                          <span className="text-xs text-gray-500">{lote.codigo_qr.substring(0, 16)}...</span>
-                        </div>
-                      ))}
-                  </div>
-                  <p className="text-sm font-bold text-red-900 mt-3 pt-3 border-t border-red-200">
-                    Total: {carrinhoBaixaConsumo.length} etiqueta(s)
-                  </p>
-                </div>
-
-                <p className="text-sm text-gray-600 mb-4">
-                  ⚠️ <strong>Esses itens foram consumidos?</strong> Esta ação não pode ser desfeita.
-                </p>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setConfirmarBaixaConsumo(false)}
-                    className="flex-1 bg-gray-100 text-gray-700 rounded-lg py-2 font-semibold hover:bg-gray-200"
-                  >
-                    Voltar
-                  </button>
-                  <button
-                    onClick={executarBaixaConsumo}
-                    className="flex-1 bg-red-600 text-white rounded-lg py-2 font-semibold hover:bg-red-700"
-                  >
-                    ✓ Confirmar
-                  </button>
-                </div>
-              </div>
-            </div>
+          {/* FECHAMENTO DO DIA (voluntário, pelo menu Ações) */}
+          {mostrarFechamento && (local === 'loja1' || local === 'loja2') && (
+            <FechamentoDoDiaModal
+              local={local}
+              onFechar={() => setMostrarFechamento(false)}
+              onConcluido={() => { setMostrarFechamento(false); carregarEstoque() }}
+            />
           )}
 
           {/* BLOCO 2: ESTOQUE DISPONÍVEL (Pendente de Venda) */}
@@ -1176,6 +1192,38 @@ export default function EstoquePage() {
                                   {produto.congelado ? ' ❄️' : ''}
                                 </p>
                               </div>
+                              {baixaDisponivel && (() => {
+                                const escolhidasDoProduto = lotesDoProduto.filter((l: any) => idsEspecificos.includes(l.id)).length
+                                const maximo = lotesDoProduto.length - escolhidasDoProduto
+                                const qtd = qtdPorProduto[produtoId] || 0
+                                return (
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex items-center gap-1 mr-3 bg-white border border-gray-300 rounded-full px-1 py-1"
+                                    aria-label={`Quantidade a baixar de ${produto.nome}`}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => ajustarQtd(produtoId, -1, maximo)}
+                                      disabled={qtd === 0}
+                                      className="w-9 h-9 rounded-full text-xl font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-30"
+                                      aria-label="Menos um"
+                                    >
+                                      −
+                                    </button>
+                                    <span className={`w-8 text-center text-lg font-bold ${qtd > 0 ? 'text-red-600' : 'text-gray-400'}`}>{qtd}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => ajustarQtd(produtoId, 1, maximo)}
+                                      disabled={qtd >= maximo}
+                                      className="w-9 h-9 rounded-full text-xl font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-30"
+                                      aria-label="Mais um"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                )
+                              })()}
                               <div className="text-gray-400 text-xl">
                                 {produtosExpandidos[produtoId] || modoBaixa || modoBaixaConsumo ? '▼' : '▶'}
                               </div>
@@ -1261,33 +1309,18 @@ export default function EstoquePage() {
 
 
 
-                {local !== 'cozinha' && carrinhoBaixa.length > 0 && (
-                  <div className="fixed bottom-28 right-6 bg-gray-800 text-white rounded-lg p-3 shadow-md border border-gray-700 z-40 max-w-xs">
-                    <div className="flex items-center justify-between gap-2">
+                {baixaDisponivel && totalParaBaixar > 0 && (
+                  <div className="fixed bottom-20 left-0 right-0 z-40 px-4">
+                    <div className="max-w-md mx-auto bg-gray-900 text-white rounded-xl p-3 shadow-xl flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-semibold">🛒 {carrinhoBaixa.length} item(ns)</p>
+                        <p className="text-sm font-bold">{totalParaBaixar} etiqueta(s) para baixar</p>
+                        <button onClick={limparSelecaoDeBaixa} className="text-xs text-gray-300 underline">limpar</button>
                       </div>
                       <button
-                        onClick={() => setConfirmarBaixa(true)}
-                        className="bg-gray-700 hover:bg-gray-600 text-white rounded px-3 py-1.5 text-xs font-semibold whitespace-nowrap"
+                        onClick={abrirFolhaBaixa}
+                        className="bg-red-600 hover:bg-red-700 text-white rounded-lg px-5 py-2.5 text-sm font-bold whitespace-nowrap"
                       >
-                        Dar Baixa
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {local === 'cozinha' && modoBaixaConsumo && carrinhoBaixaConsumo.length > 0 && (
-                  <div className="fixed bottom-28 right-6 bg-gray-800 text-white rounded-lg p-3 shadow-md border border-gray-700 z-40 max-w-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="text-xs font-semibold">🛒 {carrinhoBaixaConsumo.length} item(ns)</p>
-                      </div>
-                      <button
-                        onClick={() => setConfirmarBaixaConsumo(true)}
-                        className="bg-gray-700 hover:bg-gray-600 text-white rounded px-3 py-1.5 text-xs font-semibold whitespace-nowrap"
-                      >
-                        Dar Baixa
+                        Dar baixa
                       </button>
                     </div>
                   </div>

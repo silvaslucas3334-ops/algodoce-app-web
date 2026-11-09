@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { CheckCircle, XCircle, ScanLine } from 'lucide-react'
+import { baixarEtiquetas, MOTIVOS_BAIXA, MotivoBaixa } from '@/lib/estoque-baixa'
 
 export default function ScannerPage() {
   const { usuario } = useAuth()
@@ -17,6 +18,7 @@ export default function ScannerPage() {
   const [lojaDestino, setLojaDestino] = useState('loja1')
   const [lotesEnvio, setLotesEnvio] = useState<any[]>([])
   const [acaoSelecionada, setAcaoSelecionada] = useState<'receber' | 'baixa' | null>(null)
+  const [motivoBaixa, setMotivoBaixa] = useState<MotivoBaixa>('venda')
 
   useEffect(() => {
     if (usuario?.nome) {
@@ -142,17 +144,22 @@ export default function ScannerPage() {
 
   async function confirmarBaixa() {
     if (!resultado) return
-    await supabase.from('lotes_producao').update({ status: 'esgotado' }).eq('id', resultado.id)
-    await supabase.from('movimentacoes_estoque').insert({
-      lote_id: resultado.id,
-      tipo: 'saida',
-      local_origem: resultado.destino,
-      quantidade: resultado.quantidade,
-      registrado_por: operador,
-    })
-    setMensagem({ tipo: 'ok', texto: `✓ Baixa de Estoque Registrada`, detalhes: `${resultado.produto?.nome}` })
+    // Mesma baixa da tela de Estoque (lib/estoque-baixa.ts): com motivo e protegida
+    // contra duas pessoas baixando a mesma etiqueta.
+    try {
+      const r = await baixarEtiquetas([resultado.id], { local: resultado.destino, motivo: motivoBaixa, operador })
+      if (r.baixadas.length === 0) {
+        setMensagem({ tipo: 'erro', texto: 'Esta etiqueta já tinha sido baixada', detalhes: `${resultado.produto?.nome}` })
+      } else {
+        setMensagem({ tipo: 'ok', texto: `✓ Baixa de Estoque Registrada`, detalhes: `${resultado.produto?.nome}` })
+      }
+    } catch (err: any) {
+      console.error('Erro ao dar baixa:', err)
+      setMensagem({ tipo: 'erro', texto: 'Erro ao dar baixa', detalhes: err?.message })
+    }
     setAcaoSelecionada(null)
     setResultado(null)
+    setMotivoBaixa('venda')
   }
 
   async function parar() {
@@ -225,13 +232,30 @@ export default function ScannerPage() {
           </button>
         </div>
       ) : acaoSelecionada === 'baixa' ? (
-        <div className="flex gap-2">
-          <button onClick={confirmarBaixa} className="flex-1 bg-red-600 text-white rounded-xl py-3 font-semibold">
-            ✓ Dar Baixa
-          </button>
-          <button onClick={() => { setAcaoSelecionada(null); setMensagem(null) }} className="flex-1 bg-gray-600 text-white rounded-xl py-3 font-semibold">
-            Cancelar
-          </button>
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Motivo</p>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {MOTIVOS_BAIXA.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setMotivoBaixa(m.key)}
+                className={`px-3 py-2 rounded-full text-sm font-semibold border ${
+                  motivoBaixa === m.key ? 'bg-pink-700 text-white border-pink-700' : 'bg-white text-gray-600 border-gray-300'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={confirmarBaixa} className="flex-1 bg-red-600 text-white rounded-xl py-3 font-semibold">
+              ✓ Dar Baixa
+            </button>
+            <button onClick={() => { setAcaoSelecionada(null); setMensagem(null); setMotivoBaixa('venda') }} className="flex-1 bg-gray-600 text-white rounded-xl py-3 font-semibold">
+              Cancelar
+            </button>
+          </div>
         </div>
       ) : !ativo ? (
         <button onClick={iniciarScanner} className="w-full bg-pink-700 text-white rounded-xl py-3 font-semibold">

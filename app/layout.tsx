@@ -3,6 +3,7 @@ import BottomNav from '@/components/BottomNav'
 import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration'
 import IdleLogout from '@/components/IdleLogout'
 import AccessGate from '@/components/AccessGate'
+import FechamentoGate from '@/components/FechamentoGate'
 import { AuthProvider } from '@/hooks/useAuth'
 import './globals.css'
 
@@ -44,10 +45,12 @@ export default function RootLayout({
         <AuthProvider>
           <IdleLogout />
           <AccessGate>
-            <div className="pb-20">
-              {children}
-            </div>
-            <BottomNav />
+            <FechamentoGate>
+              <div className="pb-20">
+                {children}
+              </div>
+              <BottomNav />
+            </FechamentoGate>
           </AccessGate>
         </AuthProvider>
       </body>
