@@ -765,6 +765,14 @@ export default function EstoquePage() {
                     </button>
                   )}
                   {usuario?.role === 'admin' && (
+                    <Link
+                      href="/estoque/posicao"
+                      className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left border-t border-gray-100 mt-1 pt-3"
+                    >
+                      🗂️ Posição de Estoque (todas as unidades)
+                    </Link>
+                  )}
+                  {usuario?.role === 'admin' && (
                     <button
                       onClick={() => { setUnidadeRelatorio(local); setMostrarModalRelatorio(true); setMostrarMenuAcoes(false) }}
                       className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left border-t border-gray-100 mt-1 pt-3"
