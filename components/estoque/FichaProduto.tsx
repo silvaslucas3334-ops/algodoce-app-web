@@ -1,9 +1,11 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import { Loader, X } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { ROTULO_MOTIVO } from '@/lib/estoque-baixa'
-import { ProdutoPosicao } from '@/lib/estoque-posicao'
+import { salvarMinimos } from '@/lib/estoque-minimos'
+import { ProdutoPosicao, UnidadeEstoque, UNIDADES_ESTOQUE } from '@/lib/estoque-posicao'
 import {
   buscarKardex,
   buscarKardexResumo,
@@ -30,10 +32,51 @@ const fmtDataCurta = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateSt
 interface Props {
   produto: ProdutoPosicao
   onFechar: () => void
+  /** Chamado depois de salvar os mínimos, para a grade atualizar sem recarregar tudo. */
+  onMinimosSalvos: (produtoId: string, valores: Record<UnidadeEstoque, number | null>) => void
 }
 
-/** Painel lateral: saldo atual por unidade + histórico de movimentações do produto. */
-export default function FichaProduto({ produto, onFechar }: Props) {
+/** Painel lateral: saldo atual por unidade + estoque mínimo + histórico de movimentações do produto. */
+export default function FichaProduto({ produto, onFechar, onMinimosSalvos }: Props) {
+  const { usuario } = useAuth()
+  // Estoque mínimo (etiquetas disponíveis a manter por unidade); campo vazio = sem mínimo.
+  const [minimosForm, setMinimosForm] = useState<Record<UnidadeEstoque, string>>({
+    cozinha: produto.minimos.cozinha != null ? String(produto.minimos.cozinha) : '',
+    loja1: produto.minimos.loja1 != null ? String(produto.minimos.loja1) : '',
+    loja2: produto.minimos.loja2 != null ? String(produto.minimos.loja2) : '',
+  })
+  const [salvandoMinimos, setSalvandoMinimos] = useState(false)
+  const [msgMinimos, setMsgMinimos] = useState<{ ok: boolean; texto: string } | null>(null)
+  const minimosAlterados = UNIDADES_ESTOQUE.some((u) => (minimosForm[u].trim() === '' ? undefined : Number(minimosForm[u])) !== produto.minimos[u])
+
+  async function gravarMinimos() {
+    const valores = {} as Record<UnidadeEstoque, number | null>
+    for (const u of UNIDADES_ESTOQUE) {
+      const t = minimosForm[u].trim()
+      if (t === '') {
+        valores[u] = null
+        continue
+      }
+      const n = Number(t)
+      if (!Number.isInteger(n) || n < 0) {
+        setMsgMinimos({ ok: false, texto: 'Use só números inteiros, zero ou mais (ou deixe em branco para "sem mínimo").' })
+        return
+      }
+      valores[u] = n
+    }
+    setSalvandoMinimos(true)
+    setMsgMinimos(null)
+    try {
+      await salvarMinimos(produto.produtoId, valores, usuario?.id || null)
+      onMinimosSalvos(produto.produtoId, valores)
+      setMsgMinimos({ ok: true, texto: 'Mínimos salvos.' })
+    } catch (e: any) {
+      setMsgMinimos({ ok: false, texto: 'Não foi possível salvar: ' + (e?.message || 'erro desconhecido') })
+    } finally {
+      setSalvandoMinimos(false)
+    }
+  }
+
   const [periodo, setPeriodo] = useState<PeriodoKardex>('30d')
   const [de, setDe] = useState('')
   const [ate, setAte] = useState('')
@@ -124,6 +167,47 @@ export default function FichaProduto({ produto, onFechar }: Props) {
               {saldo('Paraisópolis', produto.loja1)}
               {saldo('Itajubá', produto.loja2)}
               {saldo('A caminho', produto.aCaminho, true)}
+            </div>
+          </section>
+
+          <section className="bg-white border border-gray-200 rounded-xl p-3">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Estoque mínimo (etiquetas disponíveis)</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {UNIDADES_ESTOQUE.map((u) => {
+                const atual = produto[u].etiquetas
+                const min = minimosForm[u].trim() === '' ? null : Number(minimosForm[u])
+                const abaixo = min !== null && min > 0 && atual < min
+                return (
+                  <label key={u} className="block">
+                    <span className="block text-[11px] text-gray-500 mb-0.5">{LOCAL_LABEL[u]}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      inputMode="numeric"
+                      value={minimosForm[u]}
+                      onChange={(e) => setMinimosForm((prev) => ({ ...prev, [u]: e.target.value }))}
+                      placeholder="sem mínimo"
+                      className={`w-full border rounded-lg px-2 py-1.5 text-sm ${abaixo ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}
+                    />
+                    <span className={`block text-[11px] mt-0.5 ${abaixo ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>
+                      tem {atual}{abaixo ? ' — abaixo' : ''}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+            <div className="flex items-center justify-between gap-3 mt-3">
+              <p className={`text-xs ${msgMinimos ? (msgMinimos.ok ? 'text-green-700' : 'text-red-600') : 'text-gray-400'}`}>
+                {msgMinimos?.texto || 'Etiqueta a caminho não conta como disponível.'}
+              </p>
+              <button
+                onClick={gravarMinimos}
+                disabled={!minimosAlterados || salvandoMinimos}
+                className="flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-pink-700 text-white hover:bg-pink-800 disabled:opacity-40 flex items-center gap-1.5"
+              >
+                {salvandoMinimos && <Loader size={12} className="animate-spin" />} Salvar mínimos
+              </button>
             </div>
           </section>
 

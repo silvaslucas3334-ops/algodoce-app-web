@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { hojeISO, somarDias } from './financeiro-utils'
+import type { MapaMinimos, MinimosDoProduto } from './estoque-minimos'
 
 // Posição de Estoque (admin, desktop): grade produto × unidade (Cozinha | Paraisópolis | Itajubá |
 // Total) + "a caminho", sobre a view estoque_posicao (lib/migrations/estoque-fase8a-posicao.sql).
@@ -42,6 +43,10 @@ export interface ProdutoPosicao {
   loja2: Celula
   total: Celula
   aCaminho: Celula
+  /** Mínimos definidos pelo admin (etiquetas disponíveis); ausente = sem mínimo naquela unidade. */
+  minimos: MinimosDoProduto
+  /** Unidades em que o disponível está abaixo do mínimo definido. */
+  abaixo: UnidadeEstoque[]
 }
 
 export interface ProdutoCadastro {
@@ -51,7 +56,7 @@ export interface ProdutoCadastro {
   categoria: string
 }
 
-export type FiltroRapido = 'todos' | 'vence7' | 'vencidos' | 'a_caminho' | 'sem_estoque'
+export type FiltroRapido = 'todos' | 'vence7' | 'vencidos' | 'a_caminho' | 'sem_estoque' | 'abaixo'
 export type ColunaOrdem = 'nome' | 'cozinha' | 'loja1' | 'loja2' | 'total' | 'aCaminho' | 'validade' | 'vencidas'
 
 export interface FiltrosPosicao {
@@ -111,12 +116,16 @@ export async function buscarProdutosAtivos(): Promise<ProdutoCadastro[]> {
 }
 
 /** Pivô: uma linha por produto, com as colunas de cada unidade. Produtos sem estoque entram zerados. */
-export function montarGrade(linhas: LinhaPosicao[], produtos: ProdutoCadastro[]): ProdutoPosicao[] {
+export function montarGrade(linhas: LinhaPosicao[], produtos: ProdutoCadastro[], minimos?: MapaMinimos): ProdutoPosicao[] {
   const mapa = new Map<string, ProdutoPosicao>()
   const garantir = (id: string, nome: string, categoria: string, unidadeMedida: string | null) => {
     let p = mapa.get(id)
     if (!p) {
-      p = { produtoId: id, nome, categoria, unidadeMedida: unidadeMedida || 'Unidade', cozinha: vazia(), loja1: vazia(), loja2: vazia(), total: vazia(), aCaminho: vazia() }
+      p = {
+        produtoId: id, nome, categoria, unidadeMedida: unidadeMedida || 'Unidade',
+        cozinha: vazia(), loja1: vazia(), loja2: vazia(), total: vazia(), aCaminho: vazia(),
+        minimos: minimos?.get(id) || {}, abaixo: [],
+      }
       mapa.set(id, p)
     }
     return p
@@ -131,6 +140,10 @@ export function montarGrade(linhas: LinhaPosicao[], produtos: ProdutoCadastro[])
       somar(p.total, l)
     }
   })
+  // abaixo do mínimo: só unidades com mínimo definido (> 0); a caminho NÃO conta como disponível
+  mapa.forEach((p) => {
+    p.abaixo = UNIDADES_ESTOQUE.filter((u) => (p.minimos[u] || 0) > 0 && p[u].etiquetas < (p.minimos[u] || 0))
+  })
   return Array.from(mapa.values())
 }
 
@@ -143,6 +156,8 @@ export function filtrarGrade(grade: ProdutoPosicao[], f: FiltrosPosicao): Produt
     if (f.categoria && p.categoria !== f.categoria) return false
     const c = celulaDaUnidade(p, f.unidade)
     switch (f.rapido) {
+      case 'abaixo':
+        return f.unidade ? p.abaixo.includes(f.unidade) : p.abaixo.length > 0
       case 'sem_estoque':
         return c.etiquetas === 0 && p.aCaminho.etiquetas === 0
       case 'vence7':
@@ -187,11 +202,13 @@ export interface ResumoPosicao {
   vence7d: number
   vencidas: number
   aCaminho: number
+  abaixoDoMinimo: number
 }
 
 export function resumirGrade(grade: ProdutoPosicao[]): ResumoPosicao {
-  const r: ResumoPosicao = { etiquetas: 0, produtosComEstoque: 0, vence7d: 0, vencidas: 0, aCaminho: 0 }
+  const r: ResumoPosicao = { etiquetas: 0, produtosComEstoque: 0, vence7d: 0, vencidas: 0, aCaminho: 0, abaixoDoMinimo: 0 }
   grade.forEach((p) => {
+    if (p.abaixo.length > 0) r.abaixoDoMinimo += 1
     r.etiquetas += p.total.etiquetas
     if (p.total.etiquetas > 0) r.produtosComEstoque += 1
     r.vence7d += p.total.vence7d
@@ -201,7 +218,12 @@ export function resumirGrade(grade: ProdutoPosicao[]): ResumoPosicao {
   return r
 }
 
-export const CABECALHO_CSV = ['produto', 'categoria', 'unidade_medida', 'cozinha', 'paraisopolis', 'itajuba', 'total', 'quantidade_total', 'a_caminho', 'proxima_validade', 'vencidas', 'vence_em_7_dias']
+export const CABECALHO_CSV = [
+  'produto', 'categoria', 'unidade_medida', 'cozinha', 'paraisopolis', 'itajuba', 'total', 'quantidade_total', 'a_caminho',
+  'proxima_validade', 'vencidas', 'vence_em_7_dias', 'minimo_cozinha', 'minimo_paraisopolis', 'minimo_itajuba', 'abaixo_do_minimo',
+]
+
+const NOME_UNIDADE: Record<UnidadeEstoque, string> = { cozinha: 'Cozinha', loja1: 'Paraisópolis', loja2: 'Itajubá' }
 
 export function linhasCsv(grade: ProdutoPosicao[]) {
   return grade.map((p) => ({
@@ -217,7 +239,37 @@ export function linhasCsv(grade: ProdutoPosicao[]) {
     proxima_validade: p.total.proxima || '',
     vencidas: p.total.vencidas,
     vence_em_7_dias: p.total.vence7d,
+    minimo_cozinha: p.minimos.cozinha ?? '',
+    minimo_paraisopolis: p.minimos.loja1 ?? '',
+    minimo_itajuba: p.minimos.loja2 ?? '',
+    abaixo_do_minimo: p.abaixo.map((u) => NOME_UNIDADE[u]).join(' / '),
   }))
+}
+
+export interface LinhaCategoria {
+  categoria: string
+  produtos: number // produtos diferentes com estoque
+  cozinha: number
+  loja1: number
+  loja2: number
+  total: number
+  aCaminho: number
+}
+
+/** Visão "Por categoria" (substitui a do Relatório Gerencial antigo): etiquetas por unidade. */
+export function agruparPorCategoria(grade: ProdutoPosicao[]): LinhaCategoria[] {
+  const mapa = new Map<string, LinhaCategoria>()
+  grade.forEach((p) => {
+    const l = mapa.get(p.categoria) || { categoria: p.categoria, produtos: 0, cozinha: 0, loja1: 0, loja2: 0, total: 0, aCaminho: 0 }
+    if (p.total.etiquetas > 0) l.produtos += 1
+    l.cozinha += p.cozinha.etiquetas
+    l.loja1 += p.loja1.etiquetas
+    l.loja2 += p.loja2.etiquetas
+    l.total += p.total.etiquetas
+    l.aCaminho += p.aCaminho.etiquetas
+    mapa.set(p.categoria, l)
+  })
+  return Array.from(mapa.values()).filter((l) => l.total > 0 || l.aCaminho > 0).sort((a, b) => a.categoria.localeCompare(b.categoria))
 }
 
 export interface EtiquetaEstoque {

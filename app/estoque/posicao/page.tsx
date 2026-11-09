@@ -7,7 +7,9 @@ import PageHeader from '@/components/PageHeader'
 import FichaProduto from '@/components/estoque/FichaProduto'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { exportarCSV } from '@/lib/csv-export'
+import { buscarMinimos, MapaMinimos, MinimosDoProduto } from '@/lib/estoque-minimos'
 import {
+  agruparPorCategoria,
   buscarEtiquetasDoProduto,
   buscarPosicao,
   buscarProdutosAtivos,
@@ -31,6 +33,7 @@ const RAPIDOS: { key: FiltroRapido; label: string }[] = [
   { key: 'vence7', label: 'Vence em 7 dias' },
   { key: 'vencidos', label: 'Vencidos' },
   { key: 'a_caminho', label: 'A caminho' },
+  { key: 'abaixo', label: 'Abaixo do mínimo' },
   { key: 'sem_estoque', label: 'Sem estoque' },
 ]
 
@@ -56,15 +59,22 @@ function abreviar(unidade: string): string {
   return unidade
 }
 
-/** Etiquetas em destaque; a quantidade/peso aparece embaixo só quando difere da contagem. */
-function CelulaEstoque({ c, unidadeMedida }: { c: Celula; unidadeMedida: string }) {
-  if (c.etiquetas === 0) return <span className="text-gray-300">—</span>
+/**
+ * Etiquetas em destaque; a quantidade/peso aparece embaixo só quando difere da contagem.
+ * Com mínimo definido, mostra "mín N" e fica vermelho quando o disponível está abaixo dele
+ * (inclusive em 0, que sem mínimo apareceria só como "—").
+ */
+function CelulaEstoque({ c, unidadeMedida, minimo }: { c: Celula; unidadeMedida: string; minimo?: number }) {
+  const temMinimo = (minimo || 0) > 0
+  const abaixo = temMinimo && c.etiquetas < (minimo || 0)
+  if (c.etiquetas === 0 && !temMinimo) return <span className="text-gray-300">—</span>
   return (
     <div>
-      <span className="font-semibold text-gray-800">{c.etiquetas}</span>
+      <span className={`font-semibold ${abaixo ? 'text-red-600' : 'text-gray-800'}`}>{c.etiquetas}</span>
       {c.quantidade > 0 && c.quantidade !== c.etiquetas && (
         <span className="block text-[11px] text-gray-400">{fmtNum(c.quantidade)} {abreviar(unidadeMedida)}</span>
       )}
+      {temMinimo && <span className={`block text-[11px] ${abaixo ? 'text-red-500' : 'text-gray-400'}`}>mín {minimo}</span>}
     </div>
   )
 }
@@ -112,14 +122,17 @@ function PosicaoContent() {
   const [erro, setErro] = useState('')
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
   const [etiquetas, setEtiquetas] = useState<Record<string, EtiquetaEstoque[] | 'carregando' | 'erro'>>({})
+  const [minimos, setMinimos] = useState<MapaMinimos>(new Map())
+  const visao = searchParams.get('vis') === 'categoria' ? 'categoria' : 'produto'
 
   useEffect(() => {
     let cancelado = false
-    Promise.all([buscarPosicao(), buscarProdutosAtivos()])
-      .then(([l, p]) => {
+    Promise.all([buscarPosicao(), buscarProdutosAtivos(), buscarMinimos()])
+      .then(([l, p, m]) => {
         if (cancelado) return
         setLinhas(l)
         setProdutos(p)
+        setMinimos(m)
       })
       .catch((e: any) => {
         if (!cancelado) setErro('Erro ao carregar a posição de estoque: ' + (e?.message || 'desconhecido'))
@@ -130,7 +143,8 @@ function PosicaoContent() {
     return () => { cancelado = true }
   }, [])
 
-  const grade = useMemo(() => montarGrade(linhas, produtos), [linhas, produtos])
+  const grade = useMemo(() => montarGrade(linhas, produtos, minimos), [linhas, produtos, minimos])
+  const porCategoria = useMemo(() => agruparPorCategoria(grade), [grade])
   // Ficha do produto (painel lateral): o produto aberto vive na URL (?ficha=<id>) — dá pra compartilhar o link.
   const fichaId = searchParams.get('ficha') || ''
   const fichaProduto = useMemo(() => (fichaId ? grade.find((p) => p.produtoId === fichaId) : undefined), [grade, fichaId])
@@ -193,16 +207,19 @@ function PosicaoContent() {
         <PageHeader title="Posição de Estoque" backHref="/estoque" maxWidth="max-w-7xl" />
 
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
             {tile('Etiquetas em estoque', resumo.etiquetas, 'neutro')}
             {tile('Produtos com estoque', resumo.produtosComEstoque, 'neutro')}
             {tile('Vencem em 7 dias', resumo.vence7d, 'laranja')}
             {tile('Vencidas', resumo.vencidas, 'vermelho')}
             {tile('A caminho', resumo.aCaminho, 'azul')}
+            {tile('Abaixo do mínimo', resumo.abaixoDoMinimo, 'vermelho')}
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-3 mb-4 space-y-3">
             <div className="flex flex-wrap items-center gap-3">
+              {visao === 'produto' && (
+              <>
               <div className="relative flex-1 min-w-[220px]">
                 <Search size={15} className="absolute left-3 top-2.5 text-gray-400" />
                 <input
@@ -233,14 +250,36 @@ function PosicaoContent() {
                   <option key={u} value={u}>{LOCAL_LABEL[u]}</option>
                 ))}
               </select>
+              </>
+              )}
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                {(['produto', 'categoria'] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => atualizar({ vis: v === 'produto' ? null : v })}
+                    className={`px-3 py-1.5 rounded text-sm font-medium ${visao === v ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
+                  >
+                    {v === 'produto' ? 'Por produto' : 'Por categoria'}
+                  </button>
+                ))}
+              </div>
               <button
-                onClick={() => exportarCSV(linhasCsv(visiveis), CABECALHO_CSV, 'posicao-estoque')}
-                disabled={visiveis.length === 0}
+                onClick={() =>
+                  visao === 'categoria'
+                    ? exportarCSV(
+                        porCategoria.map((c) => ({ categoria: c.categoria, produtos_com_estoque: c.produtos, cozinha: c.cozinha, paraisopolis: c.loja1, itajuba: c.loja2, total: c.total, a_caminho: c.aCaminho })),
+                        ['categoria', 'produtos_com_estoque', 'cozinha', 'paraisopolis', 'itajuba', 'total', 'a_caminho'],
+                        'posicao-estoque-por-categoria'
+                      )
+                    : exportarCSV(linhasCsv(visiveis), CABECALHO_CSV, 'posicao-estoque')
+                }
+                disabled={visao === 'categoria' ? porCategoria.length === 0 : visiveis.length === 0}
                 className="flex items-center gap-2 bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
               >
                 <Download size={16} /> CSV
               </button>
             </div>
+            {visao === 'produto' && (
             <div className="flex flex-wrap gap-2">
               {RAPIDOS.map((r) => (
                 <button
@@ -258,12 +297,44 @@ function PosicaoContent() {
                 {filtros.unidade && ` · só ${LOCAL_LABEL[filtros.unidade]}`}
               </span>
             </div>
+            )}
           </div>
 
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">{erro}</div>}
 
           {loading ? (
             <div className="text-center py-12 text-gray-400">Carregando...</div>
+          ) : visao === 'categoria' ? (
+            <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600">Categoria</th>
+                    <th className="px-3 py-2 text-center font-semibold text-gray-600">Produtos</th>
+                    <th className="px-3 py-2 text-center font-semibold text-gray-600">Cozinha</th>
+                    <th className="px-3 py-2 text-center font-semibold text-gray-600">Paraisópolis</th>
+                    <th className="px-3 py-2 text-center font-semibold text-gray-600">Itajubá</th>
+                    <th className="px-3 py-2 text-center font-semibold text-gray-600 bg-gray-100">Total</th>
+                    <th className="px-3 py-2 text-center font-semibold text-gray-600">A caminho</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {porCategoria.map((c) => (
+                    <tr key={c.categoria} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer" onClick={() => atualizar({ vis: null, cat: c.categoria, f: null, un: null, q: null })}>
+                      <td className="px-3 py-2 font-medium text-gray-800">{c.categoria}</td>
+                      <td className="px-3 py-2 text-center text-gray-500">{c.produtos}</td>
+                      <td className="px-3 py-2 text-center">{c.cozinha || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-center">{c.loja1 || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-center">{c.loja2 || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-center font-semibold bg-gray-50/60">{c.total}</td>
+                      <td className="px-3 py-2 text-center">{c.aCaminho > 0 ? <span className="font-semibold text-blue-600">{c.aCaminho}</span> : <span className="text-gray-300">—</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {porCategoria.length === 0 && <div className="text-center py-10 text-gray-400">Nenhuma categoria com estoque.</div>}
+              <p className="text-[11px] text-gray-400 px-3 py-2 border-t border-gray-100">Toque numa categoria para ver os produtos dela.</p>
+            </div>
           ) : (
             <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
               <table className="w-full text-sm">
@@ -293,6 +364,11 @@ function PosicaoContent() {
                               <div>
                                 <p className="font-medium text-gray-800">{p.nome}</p>
                                 <p className="text-xs text-gray-400">{p.categoria}</p>
+                                {p.abaixo.length > 0 && (
+                                  <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-semibold">
+                                    abaixo do mínimo
+                                  </span>
+                                )}
                               </div>
                               <button
                                 onClick={(e) => {
@@ -305,9 +381,9 @@ function PosicaoContent() {
                               </button>
                             </div>
                           </td>
-                          <td className="px-3 py-2 text-center"><CelulaEstoque c={p.cozinha} unidadeMedida={p.unidadeMedida} /></td>
-                          <td className="px-3 py-2 text-center"><CelulaEstoque c={p.loja1} unidadeMedida={p.unidadeMedida} /></td>
-                          <td className="px-3 py-2 text-center"><CelulaEstoque c={p.loja2} unidadeMedida={p.unidadeMedida} /></td>
+                          <td className="px-3 py-2 text-center"><CelulaEstoque c={p.cozinha} unidadeMedida={p.unidadeMedida} minimo={p.minimos.cozinha} /></td>
+                          <td className="px-3 py-2 text-center"><CelulaEstoque c={p.loja1} unidadeMedida={p.unidadeMedida} minimo={p.minimos.loja1} /></td>
+                          <td className="px-3 py-2 text-center"><CelulaEstoque c={p.loja2} unidadeMedida={p.unidadeMedida} minimo={p.minimos.loja2} /></td>
                           <td className="px-3 py-2 text-center bg-gray-50/60"><CelulaEstoque c={p.total} unidadeMedida={p.unidadeMedida} /></td>
                           <td className="px-3 py-2 text-center">
                             {p.aCaminho.etiquetas > 0 ? <span className="font-semibold text-blue-600">{p.aCaminho.etiquetas}</span> : <span className="text-gray-300">—</span>}
@@ -369,7 +445,26 @@ function PosicaoContent() {
         </div>
       </div>
 
-      {fichaProduto && <FichaProduto key={fichaProduto.produtoId} produto={fichaProduto} onFechar={() => atualizar({ ficha: null })} />}
+      {fichaProduto && (
+        <FichaProduto
+          key={fichaProduto.produtoId}
+          produto={fichaProduto}
+          onFechar={() => atualizar({ ficha: null })}
+          onMinimosSalvos={(id, valores) =>
+            setMinimos((prev) => {
+              const novo = new Map(prev)
+              const def: MinimosDoProduto = {}
+              ;(Object.keys(valores) as UnidadeEstoque[]).forEach((u) => {
+                const v = valores[u]
+                if (v !== null) def[u] = v
+              })
+              if (Object.keys(def).length === 0) novo.delete(id)
+              else novo.set(id, def)
+              return novo
+            })
+          }
+        />
+      )}
     </ProtectedRoute>
   )
 }

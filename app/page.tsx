@@ -14,6 +14,7 @@ import { buscarResumoPainelLoja, buscarResumoPainelCozinha, PainelResumo } from 
 import ContasAPagarAdmin from '@/components/painel/ContasAPagarAdmin'
 import { buscarPainelFinanceiro, linksPainelFinanceiro, PainelFinanceiro } from '@/lib/financeiro-painel'
 import { buscarResumoHubFinanceiro } from '@/lib/financeiro-fluxo-mensal'
+import { contarProdutosAbaixoDoMinimo } from '@/lib/estoque-minimos'
 import { formatBRL } from '@/lib/ofx'
 
 function DashboardContent() {
@@ -28,6 +29,7 @@ function DashboardContent() {
   // Painel financeiro (só admin): carrega em segundo plano, sem segurar o resto do Início.
   const [painelFin, setPainelFin] = useState<PainelFinanceiro | null>(null)
   const [saldoProjetado, setSaldoProjetado] = useState<number | null>(null)
+  const [abaixoDoMinimo, setAbaixoDoMinimo] = useState(0) // produtos abaixo do estoque mínimo (admin)
 
   // Redirecionar para login se não há usuário
   useEffect(() => {
@@ -63,6 +65,7 @@ function DashboardContent() {
     setStats((prev: any) => ({ ...prev, totalEstoque: totalEstoque || 0, vencendo: vencendo || 0 }))
 
     // Não esperam (sem await): o resto do Início aparece sem depender do financeiro. Falha = bloco some.
+    contarProdutosAbaixoDoMinimo().then(setAbaixoDoMinimo).catch(() => setAbaixoDoMinimo(0))
     buscarPainelFinanceiro().then(setPainelFin).catch(() => setPainelFin(null))
     buscarResumoHubFinanceiro()
       .then((r) => setSaldoProjetado(r.saldoAtual))
@@ -224,9 +227,23 @@ function DashboardContent() {
           </div>
 
           {/* Indicadores Críticos (Atrasados/Vencendo) */}
-          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0 || stats.vencendo > 0 || (painelFin?.atrasadas.qtd ?? 0) > 0) && (
+          {(ordensAtrasadas.length > 0 || tarefasAtrasadas.length > 0 || stats.vencendo > 0 || (painelFin?.atrasadas.qtd ?? 0) > 0 || abaixoDoMinimo > 0) && (
             <div className="mb-8 space-y-3">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Atenção Necessária</h2>
+
+              {abaixoDoMinimo > 0 && (
+                <Link href="/estoque/posicao?f=abaixo" className="bg-red-50 border border-red-200 rounded-lg p-4 hover:bg-red-100 transition-all block">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold text-red-700 flex items-center gap-2">
+                        <AlertCircle size={18} /> Estoque Abaixo do Mínimo
+                      </p>
+                      <p className="text-sm text-red-600 mt-1">Produtos com menos etiquetas que o mínimo definido</p>
+                    </div>
+                    <span className="bg-red-200 text-red-700 px-3 py-1 rounded-full text-sm font-bold">{abaixoDoMinimo}</span>
+                  </div>
+                </Link>
+              )}
 
               {painelFin && painelFin.atrasadas.qtd > 0 && (
                 <Link href={linksPainelFinanceiro().atrasadas} className="bg-red-50 border border-red-200 rounded-lg p-4 hover:bg-red-100 transition-all block">
@@ -335,7 +352,7 @@ function DashboardContent() {
               </Link>
 
               {/* Estoque Total */}
-              <Link href="/estoque" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
+              <Link href="/estoque/posicao" className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-gray-300 transition-all">
                 <div className="flex items-center justify-between mb-2">
                   <Package size={20} className="text-green-600" />
                   <span className="text-xs text-gray-500">Total</span>

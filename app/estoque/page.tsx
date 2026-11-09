@@ -4,11 +4,10 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { useAuth } from '@/hooks/useAuth'
-import { exportarCSV } from '@/lib/csv-export'
 import { baixarEtiquetas, baixarPorQuantidade, MOTIVOS_BAIXA, MotivoBaixa, motivoPadrao, ROTULO_MOTIVO } from '@/lib/estoque-baixa'
 import FechamentoDoDiaModal from '@/components/FechamentoDoDiaModal'
 import FechamentoConfigModal from '@/components/FechamentoConfigModal'
-import { ShoppingCart, Trash2, Send, History, RotateCcw, ChevronDown, Download } from 'lucide-react'
+import { ShoppingCart, Trash2, Send, History, RotateCcw, ChevronDown } from 'lucide-react'
 import OluquinhasLogo from '@/components/OluquinhasLogo'
 
 export default function EstoquePage() {
@@ -56,11 +55,6 @@ export default function EstoquePage() {
   const [buscandoEtiqueta, setBuscandoEtiqueta] = useState(false)
   const [mostrarMenuAcoes, setMostrarMenuAcoes] = useState(false)
   const [mostrarModalReverter, setMostrarModalReverter] = useState(false)
-  const [mostrarModalRelatorio, setMostrarModalRelatorio] = useState(false)
-  const [visaoRelatorio, setVisaoRelatorio] = useState<'item' | 'categoria'>('item')
-  const [unidadeRelatorio, setUnidadeRelatorio] = useState('cozinha')
-  const [relatorioData, setRelatorioData] = useState<any[]>([])
-  const [carregandoRelatorio, setCarregandoRelatorio] = useState(false)
 
   // Refs pra o handler do realtime sempre chamar a versão mais recente da
   // consulta e pra descartar resposta de uma unidade que já deixou de ser a atual.
@@ -93,11 +87,6 @@ export default function EstoquePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [local, pronto])
-
-  useEffect(() => {
-    if (mostrarModalRelatorio) carregarRelatorioGerencial()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mostrarModalRelatorio, unidadeRelatorio])
 
   async function carregarEstoque() {
     const localDaConsulta = local
@@ -182,20 +171,6 @@ export default function EstoquePage() {
   }, {} as Record<string, any>)
 
   const lotesAgrupList = Object.values(lotesAgrupados)
-
-  const relatorioPorCategoria = Array.from(
-    relatorioData
-      .reduce((mapa: Map<string, any>, item: any) => {
-        if (!mapa.has(item.categoria)) {
-          mapa.set(item.categoria, { categoria: item.categoria, quantidade_total: 0, itens: 0 })
-        }
-        const c = mapa.get(item.categoria)
-        c.quantidade_total += item.quantidade_total
-        c.itens += 1
-        return mapa
-      }, new Map<string, any>())
-      .values()
-  ).sort((a: any, b: any) => a.categoria.localeCompare(b.categoria))
 
   function toggleCarrinho(loteId: string) {
     setCarrinho(prev => {
@@ -418,62 +393,6 @@ export default function EstoquePage() {
     reversoes?.forEach((r: any) => revertidoPorBaixa.set(r.estornado_de, r))
 
     return baixas.map((b) => ({ ...b, reversao: revertidoPorBaixa.get(b.id) || null }))
-  }
-
-  // Ciclo de estoque (entrada×saída) da própria unidade, no período — sem somar entre unidades
-  function montarRelatorioDeLotes(lotesFonte: any[]) {
-    const porItem = new Map<string, any>()
-    lotesFonte.forEach((lote: any) => {
-      const nomeProduto = lote.produto?.nome || 'Desconhecido'
-      if (!porItem.has(nomeProduto)) {
-        porItem.set(nomeProduto, {
-          produto: nomeProduto,
-          categoria: lote.produto?.categoria?.nome || 'Sem categoria',
-          unidade_medida: lote.produto?.unidade_medida || 'un',
-          quantidade_total: 0,
-          contador: 0,
-        })
-      }
-      const item = porItem.get(nomeProduto)
-      item.quantidade_total += lote.quantidade || lote.peso_gramas || 0
-      item.contador += 1
-    })
-    return Array.from(porItem.values()).sort((a, b) => a.produto.localeCompare(b.produto))
-  }
-
-  // Unidade = aba atual: reaproveita os lotes que a própria página já
-  // carregou (garante que o relatório nunca diverge da lista abaixo dele —
-  // mesma fonte de dados). Unidade diferente ou "todas": busca dedicada,
-  // com a mesma regra de status/destino que carregarEstoque() já usa certo
-  // (destino='cozinha' não reflete a realidade — o que importa pra cozinha
-  // é o status do lote, não o destino, que aponta pra qual loja ele é).
-  async function carregarRelatorioGerencial() {
-    if (unidadeRelatorio === local) {
-      setRelatorioData(montarRelatorioDeLotes(lotes))
-      return
-    }
-
-    setCarregandoRelatorio(true)
-    try {
-      let query = supabase
-        .from('lotes_producao')
-        .select('quantidade, peso_gramas, destino, produto:produtos(nome, categoria_id, unidade_medida, categoria:categorias(nome))')
-
-      if (unidadeRelatorio === 'cozinha') {
-        query = query.eq('status', 'na_cozinha')
-      } else if (unidadeRelatorio === 'todas') {
-        query = query.in('status', ['na_cozinha', 'enviado', 'na_loja'])
-      } else {
-        query = query.eq('destino', unidadeRelatorio).in('status', ['enviado', 'na_loja'])
-      }
-
-      const { data } = await query
-      setRelatorioData(montarRelatorioDeLotes(data || []))
-    } catch (err) {
-      console.error('Erro ao carregar relatório gerencial:', err)
-    } finally {
-      setCarregandoRelatorio(false)
-    }
   }
 
   async function buscarPorEtiqueta() {
@@ -772,14 +691,6 @@ export default function EstoquePage() {
                       🗂️ Posição de Estoque (todas as unidades)
                     </Link>
                   )}
-                  {usuario?.role === 'admin' && (
-                    <button
-                      onClick={() => { setUnidadeRelatorio(local); setMostrarModalRelatorio(true); setMostrarMenuAcoes(false) }}
-                      className="w-full flex items-center gap-2.5 p-3 rounded-lg hover:bg-gray-50 text-sm text-gray-700 text-left border-t border-gray-100 mt-1 pt-3"
-                    >
-                      📊 Relatório Gerencial
-                    </button>
-                  )}
                 </div>
               )}
             </div>
@@ -853,110 +764,6 @@ export default function EstoquePage() {
                   <p className="text-sm text-gray-400 text-center py-4">Nenhuma baixa nas últimas 48h para {LOCAL_LABEL[local]}</p>
                 ) : (
                   <div className="space-y-2">{baixasRecentes.map(renderBaixaCard)}</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* MODAL: RELATÓRIO GERENCIAL (admin — migrado de Admin > Relatórios > Posição de Estoque) */}
-          {mostrarModalRelatorio && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6 max-h-[85vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-800">📊 Relatório Gerencial</h3>
-                  <button onClick={() => setMostrarModalRelatorio(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 mb-4">
-                  <select
-                    value={unidadeRelatorio}
-                    onChange={(e) => setUnidadeRelatorio(e.target.value)}
-                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-                  >
-                    <option value="cozinha">Cozinha</option>
-                    <option value="loja1">Paraisópolis</option>
-                    <option value="loja2">Itajubá</option>
-                    <option value="todas">Todas as unidades</option>
-                  </select>
-                  <div className="flex bg-gray-100 rounded-lg p-1">
-                    <button
-                      onClick={() => setVisaoRelatorio('item')}
-                      className={`px-3 py-1.5 rounded text-sm font-medium ${visaoRelatorio === 'item' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
-                    >
-                      Por Item
-                    </button>
-                    <button
-                      onClick={() => setVisaoRelatorio('categoria')}
-                      className={`px-3 py-1.5 rounded text-sm font-medium ${visaoRelatorio === 'categoria' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
-                    >
-                      Por Categoria
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (visaoRelatorio === 'item') {
-                        exportarCSV(relatorioData, ['produto', 'categoria', 'unidade_medida', 'quantidade_total', 'contador'], 'relatorio-estoque-por-item')
-                      } else {
-                        exportarCSV(relatorioPorCategoria, ['categoria', 'quantidade_total', 'itens'], 'relatorio-estoque-por-categoria')
-                      }
-                    }}
-                    className="flex items-center gap-2 bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-green-700"
-                  >
-                    <Download size={16} /> CSV
-                  </button>
-                </div>
-
-                {carregandoRelatorio ? (
-                  <p className="text-sm text-gray-400 text-center py-8">Carregando...</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    {visaoRelatorio === 'item' ? (
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50 border-b">
-                          <tr>
-                            <th className="px-3 py-2 text-left">Produto</th>
-                            <th className="px-3 py-2 text-left">Categoria</th>
-                            <th className="px-3 py-2 text-left">Un. Medida</th>
-                            <th className="px-3 py-2 text-center">Qtd Disponível</th>
-                            <th className="px-3 py-2 text-center">Etiquetas</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {relatorioData.map((item, idx) => (
-                            <tr key={idx} className="border-b hover:bg-gray-50">
-                              <td className="px-3 py-2 font-medium">{item.produto}</td>
-                              <td className="px-3 py-2">{item.categoria}</td>
-                              <td className="px-3 py-2">{item.unidade_medida}</td>
-                              <td className="px-3 py-2 text-center font-semibold text-blue-600">{item.quantidade_total}</td>
-                              <td className="px-3 py-2 text-center text-gray-500">{item.contador}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50 border-b">
-                          <tr>
-                            <th className="px-3 py-2 text-left">Categoria</th>
-                            <th className="px-3 py-2 text-center">Qtd Total</th>
-                            <th className="px-3 py-2 text-center">Itens Diferentes</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {relatorioPorCategoria.map((cat: any, idx) => (
-                            <tr key={idx} className="border-b hover:bg-gray-50">
-                              <td className="px-3 py-2 font-medium">{cat.categoria}</td>
-                              <td className="px-3 py-2 text-center font-semibold text-blue-600">{cat.quantidade_total}</td>
-                              <td className="px-3 py-2 text-center text-gray-500">{cat.itens}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                    {relatorioData.length === 0 && (
-                      <div className="text-center py-8 text-gray-400">Nenhum produto encontrado</div>
-                    )}
-                  </div>
                 )}
               </div>
             </div>
