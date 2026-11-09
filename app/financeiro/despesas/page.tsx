@@ -14,6 +14,8 @@ import { UNIDADE_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR, ETIQ
 import { formatBRL } from '@/lib/ofx'
 import { hojeISO, statusExibicao } from '@/lib/financeiro-utils'
 import EtiquetaAprovacaoSeletor from '@/components/EtiquetaAprovacaoSeletor'
+import DespesasAcoesLote from '@/components/DespesasAcoesLote'
+import { descreverResultadoLote, ResultadoLote } from '@/lib/financeiro-despesas-lote'
 import {
   Agrupamento,
   buscarPagina,
@@ -135,6 +137,12 @@ function DespesasContent() {
   const [partes, setPartes] = useState<OpcaoFornecedor[]>([])
   const [destacadoId, setDestacadoId] = useState<string | null>(null)
 
+  // Ações em lote (só admin): modo "Selecionar" mostra caixinhas nas despesas em aberto.
+  const ehAdmin = usuario?.role === 'admin'
+  const [modoSelecao, setModoSelecao] = useState(false)
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [aviso, setAviso] = useState<{ texto: string; ok: boolean } | null>(null)
+
   const paginado = !STATUS_CARGA_COMPLETA.includes(filtros.status)
   const chaveConsulta = [filtros.status, filtros.q, filtros.parteId, filtros.etiqueta, filtros.de, filtros.ate].join('|')
 
@@ -211,6 +219,20 @@ function DespesasContent() {
       setTimeout(() => setDestacadoId(null), 2500)
     }, 50)
   }, [loading, lancamentos])
+
+  // Mudou o filtro: a seleção anterior não vale mais. Recarregou a lista: só ficam selecionadas
+  // as que ainda estão na tela e em aberto (paga/cancelada em outra sessão sai da seleção).
+  useEffect(() => {
+    setSelecionados(new Set())
+  }, [chaveConsulta])
+  useEffect(() => {
+    setSelecionados((prev) => {
+      if (prev.size === 0) return prev
+      const validos = new Set(lancamentos.filter((l) => l.status === 'aberto').map((l) => l.id))
+      const filtrado = new Set([...prev].filter((id) => validos.has(id)))
+      return filtrado.size === prev.size ? prev : filtrado
+    })
+  }, [lancamentos])
 
   // Fornecedores pra o filtro (todos os cadastrados, não só os da página atual).
   useEffect(() => {
@@ -323,6 +345,41 @@ function DespesasContent() {
     }
   }
 
+  // --- ações em lote ------------------------------------------------------
+  const abertasNaTela = lancamentos.filter((l) => l.status === 'aberto')
+  const podeSelecionar = ehAdmin && abertasNaTela.length > 0
+  const selecionadasObjs = abertasNaTela.filter((l) => selecionados.has(l.id))
+
+  function alternarSelecao(id: string) {
+    setSelecionados((prev) => {
+      const novo = new Set(prev)
+      if (novo.has(id)) novo.delete(id)
+      else novo.add(id)
+      return novo
+    })
+  }
+  function alternarTodas() {
+    setSelecionados((prev) => (prev.size === abertasNaTela.length ? new Set() : new Set(abertasNaTela.map((l) => l.id))))
+  }
+  function alternarGrupo(itens: FinanceiroLancamento[]) {
+    const ids = itens.filter((l) => l.status === 'aberto').map((l) => l.id)
+    setSelecionados((prev) => {
+      const novo = new Set(prev)
+      const todos = ids.length > 0 && ids.every((id) => novo.has(id))
+      ids.forEach((id) => (todos ? novo.delete(id) : novo.add(id)))
+      return novo
+    })
+  }
+  function sairDaSelecao() {
+    setModoSelecao(false)
+    setSelecionados(new Set())
+  }
+  async function concluirLote(resultado: ResultadoLote) {
+    setAviso(descreverResultadoLote(resultado))
+    setSelecionados(new Set())
+    await carregar({ silencioso: true, quantidade: lancamentos.length })
+  }
+
   // --- derivados ----------------------------------------------------------
   const grupos = filtros.status === 'aberto' ? (filtros.agrupar === 'mes' ? agruparPorMes(lancamentos) : agruparPorEtiqueta(lancamentos)) : null
 
@@ -339,15 +396,39 @@ function DespesasContent() {
   function renderCard(l: FinanceiroLancamento) {
     const st = statusExibicao(l.status, l.data_vencimento, l.valor_pago_conciliado)
     const href = `/financeiro/despesas/${l.id}?voltarPara=${encodeURIComponent(urlAtual)}`
+    const selecionavel = modoSelecao && ehAdmin && l.status === 'aberto'
+    const marcado = selecionados.has(l.id)
     return (
       <div
         key={l.id}
-        className={`bg-white rounded-xl p-4 shadow-sm border hover:shadow-md transition-all ${
-          destacadoId === l.id ? 'border-pink-400 ring-2 ring-pink-300' : 'border-gray-100'
+        className={`rounded-xl p-4 shadow-sm border hover:shadow-md transition-all ${
+          destacadoId === l.id
+            ? 'bg-white border-pink-400 ring-2 ring-pink-300'
+            : selecionavel && marcado
+              ? 'bg-pink-50/60 border-pink-400 ring-1 ring-pink-300'
+              : 'bg-white border-gray-100'
         }`}
       >
         <div className="flex items-start justify-between gap-3">
-          <Link href={href} onClick={() => guardarPosicao(l.id)} className="flex-1 cursor-pointer">
+          {selecionavel && (
+            <input
+              type="checkbox"
+              checked={marcado}
+              onChange={() => alternarSelecao(l.id)}
+              aria-label={`Selecionar ${l.descricao}`}
+              className="mt-1 h-5 w-5 flex-shrink-0 accent-pink-700"
+            />
+          )}
+          <Link
+            href={href}
+            onClick={(e) => {
+              if (selecionavel) {
+                e.preventDefault() // no modo seleção, tocar no card marca/desmarca em vez de abrir
+                alternarSelecao(l.id)
+              } else guardarPosicao(l.id)
+            }}
+            className="flex-1 cursor-pointer"
+          >
             <div className="flex items-center gap-2">
               {l.tipo === 'compra_insumos' ? (
                 <ShoppingCart size={14} className="text-blue-600 flex-shrink-0" />
@@ -397,7 +478,7 @@ function DespesasContent() {
                 Não-caixa
               </span>
             )}
-            {usuario?.role === 'admin' && l.status === 'aberto' && (
+            {ehAdmin && l.status === 'aberto' && !modoSelecao && (
               <EtiquetaAprovacaoSeletor valor={l.etiqueta_aprovacao} onChange={(nova) => mudarEtiqueta(l, nova)} />
             )}
             {l.extrato_transacao ? (
@@ -417,7 +498,7 @@ function DespesasContent() {
                 </span>
               )
             )}
-            {l.status === 'aberto' && (
+            {l.status === 'aberto' && !modoSelecao && (
               <button
                 onClick={() => marcarPago(l)}
                 disabled={pagandoId === l.id}
@@ -434,7 +515,7 @@ function DespesasContent() {
 
   return (
     <ProtectedRoute allowedRoles={['admin', 'loja', 'cozinha']}>
-      <div className="min-h-screen bg-gray-50 pb-20">
+      <div className={`min-h-screen bg-gray-50 ${selecionadasObjs.length > 0 ? 'pb-44' : 'pb-20'}`}>
         <PageHeader
           title="Despesas"
           backHref="/financeiro"
@@ -574,16 +655,48 @@ function DespesasContent() {
 
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-sm text-red-700">{erro}</div>}
 
+          {aviso && (
+            <div
+              className={`flex items-start justify-between gap-2 rounded-lg p-3 mb-3 text-sm border ${
+                aviso.ok ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800'
+              }`}
+            >
+              <span>{aviso.texto}</span>
+              <button onClick={() => setAviso(null)} className="flex-shrink-0 p-0.5 rounded hover:bg-black/5" aria-label="Fechar aviso">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
           {!loading && lancamentos.length > 0 && (
-            <p className="text-xs text-gray-500 mb-3">
-              {total} lançamento{total > 1 ? 's' : ''} · total {formatBRL(totalDoFiltro)}
-              {filtros.status === 'todas' && resumo && (
-                <span>
-                  {' '}· em aberto {formatBRL(resumo.aberto.total)} ({resumo.aberto.quantidade}) · pago {formatBRL(resumo.pago.total)} ({resumo.pago.quantidade})
-                </span>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <p className="text-xs text-gray-500">
+                {total} lançamento{total > 1 ? 's' : ''} · total {formatBRL(totalDoFiltro)}
+                {filtros.status === 'todas' && resumo && (
+                  <span>
+                    {' '}· em aberto {formatBRL(resumo.aberto.total)} ({resumo.aberto.quantidade}) · pago {formatBRL(resumo.pago.total)} ({resumo.pago.quantidade})
+                  </span>
+                )}
+                {nomeFornecedor && <span> · {nomeFornecedor}</span>}
+              </p>
+              {podeSelecionar && (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {modoSelecao && (
+                    <button onClick={alternarTodas} className="text-xs text-pink-700 font-semibold hover:underline">
+                      {selecionados.size === abertasNaTela.length ? 'Desmarcar todas' : `Marcar todas (${abertasNaTela.length})`}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => (modoSelecao ? sairDaSelecao() : setModoSelecao(true))}
+                    className={`text-xs px-3 py-1 rounded-full border font-semibold ${
+                      modoSelecao ? 'bg-gray-800 text-white border-transparent' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {modoSelecao ? 'Concluir seleção' : 'Selecionar'}
+                  </button>
+                </div>
               )}
-              {nomeFornecedor && <span> · {nomeFornecedor}</span>}
-            </p>
+            </div>
           )}
 
           {loading ? (
@@ -604,7 +717,16 @@ function DespesasContent() {
               {grupos.map((g) => (
                 <div key={g.chave}>
                   <div className="flex items-center gap-2 px-1 mb-2">
-                    {g.corBadge && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${g.corBadge}`}>{g.label}</span>}
+                    {modoSelecao && ehAdmin && (
+                      <input
+                        type="checkbox"
+                        checked={g.itens.length > 0 && g.itens.every((l) => selecionados.has(l.id))}
+                        onChange={() => alternarGrupo(g.itens)}
+                        aria-label={`Selecionar todas de ${g.label}`}
+                        className="h-4 w-4 accent-pink-700"
+                      />
+                    )}
+                    {g.corBadge &&<span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${g.corBadge}`}>{g.label}</span>}
                     {!g.corBadge && <h3 className="text-sm font-semibold text-gray-700">{g.label}</h3>}
                     <span className="text-xs text-gray-400 ml-auto">
                       {g.itens.length} · {formatBRL(g.subtotal)}
@@ -632,6 +754,10 @@ function DespesasContent() {
           )}
         </div>
       </div>
+
+      {ehAdmin && selecionadasObjs.length > 0 && (
+        <DespesasAcoesLote selecionadas={selecionadasObjs} onLimpar={() => setSelecionados(new Set())} onConcluido={concluirLote} />
+      )}
     </ProtectedRoute>
   )
 }
