@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { buscarOrigemDoCriador, nomeUnidade, Unidade } from '@/lib/expedicao'
+import { buscarOrigemDoCriador, nomeUnidade, rotuloMotivo, Unidade } from '@/lib/expedicao'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter, useParams } from 'next/navigation'
 import { ArrowLeft, CheckCircle, Loader, ArrowRightLeft } from 'lucide-react'
@@ -32,7 +32,7 @@ export default function ReceberTransferenciaPage() {
 
         if (error) throw error
         setRomaneio(data)
-        setOrigem(await buscarOrigemDoCriador(data.criado_por))
+        setOrigem(data.unidade_origem ?? (await buscarOrigemDoCriador(data.criado_por)))
       } catch (err) {
         console.error('Erro:', err)
       } finally {
@@ -118,7 +118,10 @@ export default function ReceberTransferenciaPage() {
               <ArrowRightLeft size={24} />
               Confirmar Recebimento de Devolução
             </h1>
-            <p className="text-sm text-gray-600">De: {origemLabel}</p>
+            <p className="text-sm text-gray-600">
+              De: {origemLabel}
+              {romaneio?.motivo && <span> · Motivo: {rotuloMotivo(romaneio.motivo)}</span>}
+            </p>
           </div>
         </div>
       </div>

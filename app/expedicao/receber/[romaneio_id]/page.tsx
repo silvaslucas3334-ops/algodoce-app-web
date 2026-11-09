@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter, useParams } from 'next/navigation'
 import { ArrowLeft, CheckCircle, Loader, PackageCheck } from 'lucide-react'
-import { buscarOrigemDoCriador, nomeUnidade, Unidade } from '@/lib/expedicao'
+import { buscarOrigemDoCriador, nomeUnidade, rotuloMotivo, Unidade } from '@/lib/expedicao'
 import { LOCAL_LABEL } from '@/lib/constants'
 
 interface LinhaConferencia {
@@ -42,7 +42,7 @@ export default function ReceberRomaneioPage() {
         if (error) throw error
         setRomaneio(data)
         // Envio sai sempre da cozinha; transferência, da unidade de quem criou.
-        setOrigem(data.tipo === 'envio' ? 'cozinha' : await buscarOrigemDoCriador(data.criado_por))
+        setOrigem(data.unidade_origem ?? (data.tipo === 'envio' ? 'cozinha' : await buscarOrigemDoCriador(data.criado_por)))
 
         // Verificar status atual de cada etiqueta para saber o que já foi recebido
         const todosLoteIds: string[] = (data.linhas || []).flatMap(
@@ -190,6 +190,7 @@ export default function ReceberRomaneioPage() {
             <h1 className="text-xl font-bold text-gray-800">Conferir Recebimento</h1>
             <p className="text-sm text-gray-600">
               De: {nomeUnidade(origem)} · Para: {LOCAL_LABEL[romaneio.unidade_destino] || romaneio.unidade_destino} · Entrega: {new Date(romaneio.data_entrega + 'T00:00:00').toLocaleDateString('pt-BR')}
+              {romaneio.tipo === 'transferencia' && romaneio.motivo && <span> · Motivo: {rotuloMotivo(romaneio.motivo)}</span>}
             </p>
           </div>
         </div>

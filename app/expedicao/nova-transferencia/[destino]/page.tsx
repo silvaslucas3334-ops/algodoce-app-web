@@ -4,6 +4,8 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Package } from 'lucide-react'
+import Link from 'next/link'
+import { rotuloMotivo, validarTransferencia } from '@/lib/expedicao'
 
 interface ProdutoAgrupado {
   produto_id: string
@@ -21,6 +23,10 @@ function SelecionarEstoqueTransferenciaForm() {
   const searchParams = useSearchParams()
   const destino = params.destino as string
   const origemEfetiva = usuario?.role === 'admin' ? searchParams.get('origem') : usuario?.loja_id
+  // O motivo vem da tela anterior. Quem chega aqui sem motivo (link antigo) ou com uma combinação
+  // que a regra não permite volta para escolher de novo — nunca cria romaneio inconsistente.
+  const motivo = searchParams.get('motivo')
+  const erroRegra = usuario ? validarTransferencia(motivo, origemEfetiva, destino) : null
 
   const [estoque, setEstoque] = useState<Map<string, ProdutoAgrupado>>(new Map())
   const [loading, setLoading] = useState(true)
@@ -104,6 +110,10 @@ function SelecionarEstoqueTransferenciaForm() {
   }
 
   async function criarTransferencia() {
+    if (erroRegra) {
+      alert(erroRegra)
+      return
+    }
     const linhas = Array.from(estoque.values())
       .filter((p) => p.selecionadas.length > 0)
       .map((p) => ({
@@ -129,7 +139,9 @@ function SelecionarEstoqueTransferenciaForm() {
           status: 'rascunho',
           tipo: 'transferencia',
           criado_por: usuario?.id || null,
+          unidade_origem: origemEfetiva,
           unidade_destino: destino,
+          motivo,
           linhas,
         }])
         .select()
@@ -148,6 +160,20 @@ function SelecionarEstoqueTransferenciaForm() {
     }
   }
 
+  if (erroRegra) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-6 max-w-md text-center">
+          <p className="text-gray-800 font-semibold mb-2">Não dá para continuar com esses dados</p>
+          <p className="text-sm text-gray-600 mb-4">{erroRegra}</p>
+          <Link href="/expedicao/nova-transferencia" className="inline-block bg-blue-600 text-white rounded-lg px-4 py-2 font-semibold hover:bg-blue-700">
+            Escolher motivo e destino
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   if (loading) {
     return <div className="flex items-center justify-center min-h-screen text-gray-400">Carregando estoque...</div>
   }
@@ -161,7 +187,9 @@ function SelecionarEstoqueTransferenciaForm() {
           </button>
           <div>
             <h1 className="text-2xl font-bold text-gray-800">Selecionar Estoque</h1>
-            <p className="text-sm text-gray-600">Destinado para: {destinoLabel}</p>
+            <p className="text-sm text-gray-600">
+              Destinado para: {destinoLabel} · Motivo: {rotuloMotivo(motivo)}
+            </p>
           </div>
         </div>
       </div>

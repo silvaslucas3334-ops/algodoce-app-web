@@ -65,9 +65,9 @@ export interface EstoqueItem {
   lotes: LoteProducao[]
 }
 
-// Romaneio (Expedição). Não há unidade_origem na tabela — origem é sempre
-// implícita: tipo='envio' vem da cozinha, tipo='transferencia' vem de quem
-// criou (criado_por), nunca gravada diretamente na linha.
+// Romaneio (Expedição). Desde a fase 7a a origem é gravada em unidade_origem (romaneios antigos
+// podem ter null: aí tipo='envio' vem da cozinha e tipo='transferencia' de quem criou) e a
+// transferência tem um motivo (transferencia / devolucao_saldo / devolucao_problema).
 export interface RomaneioLinha {
   produto_id: string
   nome_produto: string
@@ -78,7 +78,11 @@ export interface Romaneio {
   id: string
   tipo: 'envio' | 'transferencia'
   status: 'rascunho' | 'confirmado' | 'em_estoque' | 'cancelado'
+  unidade_origem?: Local | null
   unidade_destino: Local
+  motivo?: 'transferencia' | 'devolucao_saldo' | 'devolucao_problema' | null
+  recebido_em?: string | null
+  recebido_por?: string | null
   data_entrega: string
   linhas: RomaneioLinha[]
   criado_por: string

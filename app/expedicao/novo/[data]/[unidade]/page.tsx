@@ -265,6 +265,7 @@ export default function VerificacaoOrdensPage() {
             data_entrega: data,
             status: 'rascunho',
             criado_por: usuario?.id || null,
+            unidade_origem: 'cozinha',
             unidade_destino: unidade,
             tipo: 'envio',
             linhas,

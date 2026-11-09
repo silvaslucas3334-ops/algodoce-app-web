@@ -1,24 +1,71 @@
 import { supabase } from './supabase'
 import { LOCAL_LABEL } from './constants'
 
-// Apoio da tela de Expedição (romaneios): origem, progresso de recebimento e
-// idade do envio. Tudo derivado — NÃO há migration nesta fase.
+// Apoio da tela de Expedição (romaneios): origem, motivo da transferência, progresso de
+// recebimento e idade do envio.
 //
-// Limitação conhecida: a tabela `romaneios` não guarda a origem (só
-// `unidade_destino`; ver comentário em lib/types.ts). Aqui ela é deduzida:
+// Origem: desde a fase 7a a tabela `romaneios` guarda `unidade_origem`. Para romaneios antigos
+// (sem a coluna preenchida) a origem continua sendo deduzida:
 //   - tipo 'envio'         → sempre sai da cozinha;
 //   - tipo 'transferencia' → a unidade de quem criou (usuarios.role/loja_id).
-// Transferência criada por admin não deixa rastro → origem null ("não
-// registrada"). A fase 7 do plano passa a gravar `unidade_origem` de verdade.
+// Transferência antiga criada por admin não deixa rastro → origem null ("não registrada").
 
 export type Unidade = 'cozinha' | 'loja1' | 'loja2'
 export const UNIDADES: Unidade[] = ['cozinha', 'loja1', 'loja2']
+
+// Motivo da transferência (fase 7a). Quem recebe, valida fisicamente e encontra divergência,
+// cria ele mesmo uma transferência de volta para a cozinha informando o motivo.
+export type MotivoTransferencia = 'transferencia' | 'devolucao_saldo' | 'devolucao_problema'
+
+export const MOTIVOS_TRANSFERENCIA: { key: MotivoTransferencia; label: string; descricao: string; paraCozinha: boolean }[] = [
+  { key: 'transferencia', label: 'Transferência simples', descricao: 'De uma loja para a outra.', paraCozinha: false },
+  { key: 'devolucao_saldo', label: 'Devolução de saldo', descricao: 'O produto não veio fisicamente: devolve o saldo para a cozinha.', paraCozinha: true },
+  { key: 'devolucao_problema', label: 'Devolução de produto com problema', descricao: 'Avaria, vencido ou errado: volta para a cozinha.', paraCozinha: true },
+]
+
+export function motivoValido(m: string | null | undefined): m is MotivoTransferencia {
+  return MOTIVOS_TRANSFERENCIA.some((x) => x.key === m)
+}
+
+export function motivoEhDevolucao(m: string | null | undefined): boolean {
+  return m === 'devolucao_saldo' || m === 'devolucao_problema'
+}
+
+export function rotuloMotivo(m: string | null | undefined): string {
+  return MOTIVOS_TRANSFERENCIA.find((x) => x.key === m)?.label || 'Transferência simples'
+}
+
+/** Destinos permitidos para o motivo: simples = a outra loja; devoluções = cozinha. */
+export function destinosDoMotivo(motivo: MotivoTransferencia, origem: Unidade | null | undefined): Unidade[] {
+  if (motivoEhDevolucao(motivo)) return ['cozinha']
+  return (['loja1', 'loja2'] as Unidade[]).filter((l) => l !== origem)
+}
+
+/** Mensagem de erro se a combinação motivo/origem/destino não é permitida; null se está ok. */
+export function validarTransferencia(
+  motivo: string | null | undefined,
+  origem: string | null | undefined,
+  destino: string | null | undefined
+): string | null {
+  if (!motivoValido(motivo)) return 'Escolha o motivo da transferência.'
+  if (origem !== 'loja1' && origem !== 'loja2') return 'Não foi possível identificar a loja de origem.'
+  if (!destino) return 'Escolha o destino.'
+  if (destino === origem) return 'O destino não pode ser a própria unidade de origem.'
+  if (!destinosDoMotivo(motivo, origem as Unidade).includes(destino as Unidade)) {
+    return motivoEhDevolucao(motivo)
+      ? 'Devoluções sempre voltam para a cozinha.'
+      : 'Transferência simples é entre lojas. Para devolver à cozinha, escolha um dos motivos de devolução.'
+  }
+  return null
+}
 
 export interface RomaneioBase {
   id: string
   tipo: 'envio' | 'transferencia'
   status: 'rascunho' | 'confirmado' | 'em_estoque' | 'cancelado'
+  unidade_origem?: Unidade | null
   unidade_destino: Unidade
+  motivo?: MotivoTransferencia | null
   data_entrega: string
   linhas: any[] | null
   criado_por: string | null
@@ -92,8 +139,9 @@ async function etiquetasEmTransito(): Promise<Set<string>> {
 
 /** Acrescenta origem, rótulo, progresso de recebimento e idade a linhas cruas de `romaneios`. */
 export async function enriquecerRomaneios(linhas: RomaneioBase[]): Promise<RomaneioEnriquecido[]> {
+  // Só precisa descobrir a origem pelo criador nos romaneios antigos (sem unidade_origem gravada).
   const idsCriadores = Array.from(
-    new Set(linhas.filter((r) => r.tipo === 'transferencia' && r.criado_por).map((r) => r.criado_por as string))
+    new Set(linhas.filter((r) => r.tipo === 'transferencia' && !r.unidade_origem && r.criado_por).map((r) => r.criado_por as string))
   )
   const precisaProgresso = linhas.some((r) => r.status === 'confirmado')
 
@@ -113,13 +161,14 @@ export async function enriquecerRomaneios(linhas: RomaneioBase[]): Promise<Roman
     const etiquetasPendentes = idsPorLinha.reduce((s, ids) => s + ids.filter((id) => emTransito.has(id)).length, 0)
     const produtosPendentes = idsPorLinha.filter((ids) => ids.some((id) => emTransito.has(id))).length
 
-    const origem: Unidade | null = r.tipo === 'envio' ? 'cozinha' : origemDoUsuario(r.criado_por ? usuarioPorId.get(r.criado_por) : null)
+    const origem: Unidade | null =
+      r.unidade_origem ?? (r.tipo === 'envio' ? 'cozinha' : origemDoUsuario(r.criado_por ? usuarioPorId.get(r.criado_por) : null))
 
     const enviadoEm = r.confirmado_em || r.atualizado_em || r.criado_em
     return {
       ...r,
       origem,
-      rotulo: r.tipo === 'envio' ? 'Envio' : r.unidade_destino === 'cozinha' ? 'Devolução' : 'Transferência',
+      rotulo: r.tipo === 'envio' ? 'Envio' : motivoEhDevolucao(r.motivo) || r.unidade_destino === 'cozinha' ? 'Devolução' : 'Transferência',
       produtosTotal: linhasRomaneio.length,
       etiquetasTotal,
       produtosPendentes,

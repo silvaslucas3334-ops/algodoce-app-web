@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { LOCAL_LABEL, ROMANEIO_STATUS_LABEL } from '@/lib/constants'
-import { buscarOrigemDoCriador, nomeUnidade, Unidade } from '@/lib/expedicao'
+import { buscarOrigemDoCriador, nomeUnidade, rotuloMotivo, Unidade } from '@/lib/expedicao'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter, useParams } from 'next/navigation'
 import { ArrowLeft, CheckCircle, Loader, ArrowRightLeft } from 'lucide-react'
@@ -31,7 +31,7 @@ export default function ConfirmarTransferenciaPage() {
 
         if (error) throw error
         setRomaneio(data)
-        setOrigem(await buscarOrigemDoCriador(data.criado_por))
+        setOrigem(data.unidade_origem ?? (await buscarOrigemDoCriador(data.criado_por)))
       } catch (err) {
         console.error('Erro:', err)
       } finally {
@@ -117,7 +117,10 @@ export default function ConfirmarTransferenciaPage() {
               <ArrowRightLeft size={24} />
               Confirmar Transferência
             </h1>
-            <p className="text-sm text-gray-600">De: {nomeUnidade(origem)} · Para: {destinoLabel}</p>
+            <p className="text-sm text-gray-600">
+              De: {nomeUnidade(origem)} · Para: {destinoLabel}
+              {romaneio?.motivo && <span> · Motivo: {rotuloMotivo(romaneio.motivo)}</span>}
+            </p>
           </div>
         </div>
       </div>

@@ -3,7 +3,7 @@ import { ReactNode } from 'react'
 import Link from 'next/link'
 import { ArrowRight, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { LOCAL_LABEL, ROMANEIO_STATUS_LABEL } from '@/lib/constants'
-import { RomaneioEnriquecido, rotuloIdade, Unidade } from '@/lib/expedicao'
+import { motivoEhDevolucao, RomaneioEnriquecido, rotuloIdade, rotuloMotivo, Unidade } from '@/lib/expedicao'
 
 // Uma cor fixa por unidade, igual em todas as telas da Expedição — assim o admin
 // (que vê as lojas misturadas) bate o olho e sabe de qual loja é cada romaneio.
@@ -56,6 +56,15 @@ export default function RomaneioCard({ romaneio: r, href, acao, mostrarAndamento
         <ArrowRight size={14} className="text-gray-400 flex-shrink-0" />
         <ChipUnidade unidade={r.unidade_destino} />
         <span className="text-xs text-gray-500 font-medium">{r.rotulo}</span>
+        {r.tipo === 'transferencia' && r.motivo && (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+              motivoEhDevolucao(r.motivo) ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            {rotuloMotivo(r.motivo)}
+          </span>
+        )}
         <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ml-auto ${COR_STATUS[r.status] || 'bg-gray-100 text-gray-600'}`}>
           {ROMANEIO_STATUS_LABEL[r.status] || r.status}
         </span>
