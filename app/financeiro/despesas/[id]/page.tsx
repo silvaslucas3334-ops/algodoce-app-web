@@ -16,6 +16,7 @@ import { caminhoInternoSeguro } from '@/lib/navegacao'
 import Link from 'next/link'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
 import EtiquetaAprovacaoSeletor from '@/components/EtiquetaAprovacaoSeletor'
+import HistoricoLancamento from '@/components/HistoricoLancamento'
 
 function itemParaItemNota(item: FinanceiroLancamentoItem): ItemNota {
   return {
@@ -979,6 +980,14 @@ function DetalheDespesaContent() {
                 </button>
               )}
             </div>
+          )}
+
+          {ehAdmin && (
+            <HistoricoLancamento
+              lancamentoId={lancamentoId}
+              recarregarChave={`${lancamento.updated_at || ''}|${itens.length}`}
+              criadoEm={lancamento.created_at}
+            />
           )}
         </div>
       </div>
