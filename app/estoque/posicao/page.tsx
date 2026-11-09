@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Download, Search } from 'lucide-react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import PageHeader from '@/components/PageHeader'
+import FichaProduto from '@/components/estoque/FichaProduto'
 import { LOCAL_LABEL } from '@/lib/constants'
 import { exportarCSV } from '@/lib/csv-export'
 import {
@@ -130,6 +131,9 @@ function PosicaoContent() {
   }, [])
 
   const grade = useMemo(() => montarGrade(linhas, produtos), [linhas, produtos])
+  // Ficha do produto (painel lateral): o produto aberto vive na URL (?ficha=<id>) — dá pra compartilhar o link.
+  const fichaId = searchParams.get('ficha') || ''
+  const fichaProduto = useMemo(() => (fichaId ? grade.find((p) => p.produtoId === fichaId) : undefined), [grade, fichaId])
   const resumo = useMemo(() => resumirGrade(grade), [grade])
   const categorias = useMemo(() => Array.from(new Set(grade.map((p) => p.categoria))).sort((a, b) => a.localeCompare(b)), [grade])
   const visiveis = useMemo(
@@ -285,8 +289,21 @@ function PosicaoContent() {
                         <tr className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer" onClick={() => alternar(p.produtoId)}>
                           <td className="pl-3 text-gray-400">{aberto ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</td>
                           <td className="px-3 py-2">
-                            <p className="font-medium text-gray-800">{p.nome}</p>
-                            <p className="text-xs text-gray-400">{p.categoria}</p>
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="font-medium text-gray-800">{p.nome}</p>
+                                <p className="text-xs text-gray-400">{p.categoria}</p>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation() // não expande a linha
+                                  atualizar({ ficha: p.produtoId })
+                                }}
+                                className="flex-shrink-0 text-xs font-semibold text-pink-700 hover:underline whitespace-nowrap"
+                              >
+                                Ficha →
+                              </button>
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-center"><CelulaEstoque c={p.cozinha} unidadeMedida={p.unidadeMedida} /></td>
                           <td className="px-3 py-2 text-center"><CelulaEstoque c={p.loja1} unidadeMedida={p.unidadeMedida} /></td>
@@ -351,6 +368,8 @@ function PosicaoContent() {
           )}
         </div>
       </div>
+
+      {fichaProduto && <FichaProduto key={fichaProduto.produtoId} produto={fichaProduto} onFechar={() => atualizar({ ficha: null })} />}
     </ProtectedRoute>
   )
 }
