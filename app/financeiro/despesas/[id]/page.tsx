@@ -44,6 +44,12 @@ function DetalheDespesaContent() {
   const voltarPara = caminhoInternoSeguro(searchParams.get('voltarPara'))
 
   const [lancamento, setLancamento] = useState<any>(null)
+  // Pagamento previsto (admin, só em aberto): digita a data e confirma em "Salvar" — não grava a cada tecla.
+  const [dataPrevistaForm, setDataPrevistaForm] = useState('')
+  const [salvandoPrevista, setSalvandoPrevista] = useState(false)
+  useEffect(() => {
+    setDataPrevistaForm(lancamento?.data_prevista_pagamento || '')
+  }, [lancamento?.data_prevista_pagamento])
   const [itens, setItens] = useState<FinanceiroLancamentoItem[]>([])
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [partes, setPartes] = useState<FinanceiroParte[]>([])
@@ -183,6 +189,33 @@ function DetalheDespesaContent() {
     } finally {
       setProcessando(false)
     }
+  }
+
+  async function salvarDataPrevista(nova: string | null) {
+    if (!lancamento) return
+    if (nova && nova < hojeISO()) {
+      setErro('A data prevista não pode estar no passado.')
+      return
+    }
+    setSalvandoPrevista(true)
+    setErro('')
+    const agora = new Date().toISOString()
+    const { data, error } = await supabase
+      .from('financeiro_lancamentos')
+      .update({ data_prevista_pagamento: nova, updated_at: agora })
+      .eq('id', lancamentoId)
+      .eq('status', 'aberto') // se mudou de status em outra sessão, não grava
+      .select('id')
+    setSalvandoPrevista(false)
+    if (error) {
+      setErro('Erro ao salvar a data prevista: ' + error.message)
+      return
+    }
+    if (!data || data.length === 0) {
+      setErro('Este lançamento mudou de status em outra sessão — atualize a tela.')
+      return
+    }
+    setLancamento((prev: any) => ({ ...prev, data_prevista_pagamento: nova, updated_at: agora }))
   }
 
   async function mudarEtiqueta(nova: EtiquetaAprovacao | null) {
@@ -601,6 +634,47 @@ function DetalheDespesaContent() {
                 <div className="flex justify-between"><span className="text-gray-500">Valor</span><span className="font-semibold text-gray-800">{formatBRL(lancamento.valor_total)}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Data do lançamento</span><span className="text-gray-800">{new Date(lancamento.data_lancamento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Vencimento</span><span className="text-gray-800">{new Date(lancamento.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
+                {lancamento.status === 'aberto' && (ehAdmin || lancamento.data_prevista_pagamento) && (
+                  <div>
+                    <div className="flex justify-between items-center gap-3">
+                      <span className="text-gray-500">Pagamento previsto</span>
+                      {ehAdmin ? (
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="date"
+                            value={dataPrevistaForm}
+                            min={hojeISO()}
+                            onChange={(e) => setDataPrevistaForm(e.target.value)}
+                            className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
+                          />
+                          {dataPrevistaForm && dataPrevistaForm !== (lancamento.data_prevista_pagamento || '') && (
+                            <button
+                              onClick={() => salvarDataPrevista(dataPrevistaForm)}
+                              disabled={salvandoPrevista}
+                              className="text-xs font-semibold px-2 py-1 rounded-lg bg-pink-700 text-white hover:bg-pink-800 disabled:opacity-50"
+                            >
+                              {salvandoPrevista ? 'Salvando...' : 'Salvar'}
+                            </button>
+                          )}
+                          {lancamento.data_prevista_pagamento && (dataPrevistaForm === lancamento.data_prevista_pagamento || dataPrevistaForm === '') && (
+                            <button
+                              onClick={() => salvarDataPrevista(null)}
+                              disabled={salvandoPrevista}
+                              className="text-xs font-medium text-gray-500 hover:text-red-600 disabled:opacity-50"
+                            >
+                              Limpar
+                            </button>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-gray-800">{new Date(lancamento.data_prevista_pagamento + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      O Fluxo de Caixa projeta a saída neste dia. Se a data passar sem o pagamento, volta a valer o vencimento.
+                    </p>
+                  </div>
+                )}
                 {lancamento.data_pagamento && (
                   <div className="flex justify-between"><span className="text-gray-500">Paga em</span><span className="text-gray-800">{new Date(lancamento.data_pagamento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
                 )}

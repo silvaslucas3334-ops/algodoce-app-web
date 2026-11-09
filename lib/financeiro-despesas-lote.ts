@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { EtiquetaAprovacao } from './types'
+import { hojeISO } from './financeiro-utils'
 
 // Ações em lote da tela Despesas (admin): pagar, alterar vencimento e etiquetar várias
 // despesas de uma vez. Cada bloco é UM comando no banco (`update ... where id in (...)`),
@@ -14,6 +15,7 @@ export type AcaoLote =
   | { tipo: 'pagar'; dataPagamento: string }
   | { tipo: 'vencimento'; dataVencimento: string }
   | { tipo: 'etiqueta'; etiqueta: EtiquetaAprovacao | null }
+  | { tipo: 'prevista'; dataPrevista: string | null } // null = remove a data prevista
 
 export interface ResultadoLote {
   acao: AcaoLote['tipo']
@@ -34,6 +36,10 @@ export async function aplicarLote(ids: string[], acao: AcaoLote): Promise<Result
 
   if (acao.tipo === 'pagar' && !DATA_ISO.test(acao.dataPagamento)) return vazio('Informe a data do pagamento.')
   if (acao.tipo === 'vencimento' && !DATA_ISO.test(acao.dataVencimento)) return vazio('Informe o novo vencimento.')
+  if (acao.tipo === 'prevista' && acao.dataPrevista !== null) {
+    if (!DATA_ISO.test(acao.dataPrevista)) return vazio('Informe a data prevista.')
+    if (acao.dataPrevista < hojeISO()) return vazio('A data prevista não pode estar no passado.')
+  }
 
   const agora = new Date().toISOString()
   const campos: Record<string, any> =
@@ -41,14 +47,19 @@ export async function aplicarLote(ids: string[], acao: AcaoLote): Promise<Result
       ? { status: 'pago', data_pagamento: acao.dataPagamento, updated_at: agora }
       : acao.tipo === 'vencimento'
         ? { data_vencimento: acao.dataVencimento, updated_at: agora }
-        : { etiqueta_aprovacao: acao.etiqueta, updated_at: agora }
+        : acao.tipo === 'prevista'
+          ? { data_prevista_pagamento: acao.dataPrevista, updated_at: agora }
+          : { etiqueta_aprovacao: acao.etiqueta, updated_at: agora }
 
   const alterados: string[] = []
   let erro: string | null = null
   for (let i = 0; i < ids.length; i += TAMANHO_BLOCO) {
     const bloco = ids.slice(i, i + TAMANHO_BLOCO)
     let consulta = supabase.from('financeiro_lancamentos').update(campos).in('id', bloco).eq('status', 'aberto')
-    if (acao.tipo !== 'etiqueta') consulta = consulta.or('valor_pago_conciliado.is.null,valor_pago_conciliado.eq.0')
+    // etiqueta e data prevista valem também para quem já pagou parte (planeja o que falta)
+    if (acao.tipo === 'pagar' || acao.tipo === 'vencimento') {
+      consulta = consulta.or('valor_pago_conciliado.is.null,valor_pago_conciliado.eq.0')
+    }
     const { data, error } = await consulta.select('id')
     if (error) {
       erro = error.message
@@ -68,7 +79,9 @@ export function descreverResultadoLote(r: ResultadoLote): { texto: string; ok: b
       ? ['paga', 'pagas']
       : r.acao === 'vencimento'
         ? ['com vencimento alterado', 'com vencimento alterado']
-        : ['com etiqueta atualizada', 'com etiqueta atualizada']
+        : r.acao === 'prevista'
+          ? ['com pagamento previsto atualizado', 'com pagamento previsto atualizado']
+          : ['com etiqueta atualizada', 'com etiqueta atualizada']
   const feitas = r.alterados.length
   const verbo = feitas === 1 ? singular : plural
   if (r.erro) {
@@ -81,7 +94,7 @@ export function descreverResultadoLote(r: ResultadoLote): { texto: string; ok: b
   if (r.ignorados.length === 0) return { ok: true, texto: `${base}.` }
   const uma = r.ignorados.length === 1
   const motivo =
-    r.acao === 'etiqueta'
+    r.acao === 'etiqueta' || r.acao === 'prevista'
       ? uma ? 'ela já não estava em aberto' : 'elas já não estavam em aberto'
       : uma
         ? 'ela já não estava em aberto ou tem pagamento parcial conciliado'

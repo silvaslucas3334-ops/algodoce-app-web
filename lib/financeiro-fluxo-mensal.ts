@@ -4,7 +4,7 @@ import { CATEGORIA_RECEITA_LABEL } from './constants'
 import { buscarPedidosDoPeriodo, gerarItensVendidosFlat } from './pdv-report'
 import { buscarFaturamentoDiarioPeriodo, somaFaturamentoDiario } from './financeiro-faturamento-diario'
 import { PontoHistorico, calcularMediaPorDiaSemana, inicioJanelaHistorico } from './financeiro-forecast'
-import { hojeISO } from './financeiro-utils'
+import { dataNoFluxo, hojeISO } from './financeiro-utils'
 import { buscarOrcamento } from './financeiro-orcamento'
 
 export type VisaoFluxoMensal = 'loja1' | 'loja2' | 'rateio' | 'consolidado'
@@ -517,13 +517,14 @@ export async function buscarDespesasFixasFuturas(
   const [{ data: abertosFuturos, error: erroAbertos }, { data: recorrenciasAtivas, error: erroRecorrencias }] = await Promise.all([
     supabase
       .from('financeiro_lancamentos')
-      .select('id, valor_total, valor_pago_conciliado, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
+      .select('id, valor_total, valor_pago_conciliado, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento, data_prevista_pagamento')
       .in('unidade', unidadesDespesa)
       .eq('status', 'aberto')
       .eq('tipo', 'despesa')
       .eq('afeta_fluxo_caixa', true)
-      .gte('data_vencimento', hoje)
-      .lte('data_vencimento', fim),
+      // Superconjunto: quem entra em [hoje, fim] pela data efetiva (prevista ou vencimento) tem
+      // uma das duas datas <= fim. O recorte exato é feito abaixo com dataNoFluxo.
+      .or(`data_vencimento.lte.${fim},data_prevista_pagamento.lte.${fim}`),
     supabase
       .from('financeiro_recorrencias')
       .select('id, valor, dia_vencimento, parte_id, parte:financeiro_partes(nome), conta_id, conta:financeiro_contas(nome)')
@@ -547,16 +548,19 @@ export async function buscarDespesasFixasFuturas(
     recorrenciasJaMaterializadas = new Set((jaLancadas || []).map((l: any) => l.recorrencia_id))
   }
 
-  const itens: LinhaDespesaFixaFutura[] = (abertosFuturos || []).map((l: any) => ({
-    id: l.id,
-    data: l.data_vencimento,
-    valor: l.valor_total - (l.valor_pago_conciliado || 0),
-    parteId: l.parte_id || 'sem-parte',
-    parteNome: l.parte?.nome || 'Sem beneficiário',
-    contaId: l.conta_id || 'sem-conta',
-    contaNome: l.conta?.nome || 'Sem classificação',
-    origem: 'lancamento',
-  }))
+  const itens: LinhaDespesaFixaFutura[] = (abertosFuturos || [])
+    .map((l: any) => ({ l, dia: dataNoFluxo(l, hoje) }))
+    .filter(({ dia }) => dia >= hoje && dia <= fim)
+    .map(({ l, dia }) => ({
+      id: l.id,
+      data: dia,
+      valor: l.valor_total - (l.valor_pago_conciliado || 0),
+      parteId: l.parte_id || 'sem-parte',
+      parteNome: l.parte?.nome || 'Sem beneficiário',
+      contaId: l.conta_id || 'sem-conta',
+      contaNome: l.conta?.nome || 'Sem classificação',
+      origem: 'lancamento' as const,
+    }))
 
   ;(recorrenciasAtivas || []).forEach((r: any) => {
     if (recorrenciasJaMaterializadas.has(r.id)) return
@@ -623,7 +627,7 @@ export async function buscarLancamentosDoDiaSaida(
     return supabase
       .from('financeiro_lancamentos')
       .select(
-        'id, descricao, valor_total, valor_pago_conciliado, status, numero_documento, data_pagamento, parte:financeiro_partes!parte_id(nome)'
+        'id, descricao, valor_total, valor_pago_conciliado, status, numero_documento, data_pagamento, data_vencimento, data_prevista_pagamento, parte:financeiro_partes!parte_id(nome)'
       )
       .in('unidade', unidadesDespesa)
       .eq('tipo', tipo)
@@ -635,7 +639,8 @@ export async function buscarLancamentosDoDiaSaida(
     await Promise.all([
       baseQuery().eq('status', 'pago').eq('data_pagamento', dia),
       baseQuery().eq('status', 'aberto').gt('valor_pago_conciliado', 0),
-      baseQuery().eq('status', 'aberto').eq('data_vencimento', dia),
+      // candidatas: vencem no dia OU têm pagamento previsto no dia; o recorte exato (dia efetivo) vem abaixo
+      baseQuery().eq('status', 'aberto').or(`data_vencimento.eq.${dia},data_prevista_pagamento.eq.${dia}`),
     ])
   if (erroPagos) throw new Error(erroPagos.message)
   if (erroParciais) throw new Error(erroParciais.message)
@@ -682,16 +687,19 @@ export async function buscarLancamentosDoDiaSaida(
     }
   })
 
-  ;(previstos || []).forEach((l: any) => {
-    resultado.push({
-      id: l.id,
-      descricao: l.descricao,
-      valor_total: l.valor_total - (l.valor_pago_conciliado || 0),
-      situacao: 'previsto',
-      numero_documento: l.numero_documento,
-      parte_nome: l.parte?.nome || 'Sem beneficiário',
+  const hojeDia = hojeISO()
+  ;(previstos || [])
+    .filter((l: any) => dataNoFluxo(l, hojeDia) === dia)
+    .forEach((l: any) => {
+      resultado.push({
+        id: l.id,
+        descricao: l.descricao,
+        valor_total: l.valor_total - (l.valor_pago_conciliado || 0),
+        situacao: 'previsto',
+        numero_documento: l.numero_documento,
+        parte_nome: l.parte?.nome || 'Sem beneficiário',
+      })
     })
-  })
 
   return resultado
 }
@@ -853,13 +861,13 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
       .gt('valor_pago_conciliado', 0),
     supabase
       .from('financeiro_lancamentos')
-      .select('valor_total, valor_pago_conciliado, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento')
+      .select('valor_total, valor_pago_conciliado, parte_id, parte:financeiro_partes!parte_id(nome), conta_id, conta:financeiro_contas(nome), data_vencimento, data_prevista_pagamento')
       .in('unidade', unidadesDespesa)
       .eq('status', 'aberto')
       .eq('tipo', 'compra_insumos')
       .eq('afeta_fluxo_caixa', true)
-      .gte('data_vencimento', hoje)
-      .lte('data_vencimento', fim),
+      // superconjunto; o recorte exato por dia efetivo (prevista ou vencimento) é feito abaixo
+      .or(`data_vencimento.lte.${fim},data_prevista_pagamento.lte.${fim}`),
     buscarDespesasFixasFuturas(unidade, ano, mes),
     buscarOrcamento(ano, mes, 'geral'),
   ])
@@ -867,6 +875,12 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
   if (erroParciais) throw new Error(erroParciais.message)
   if (erroAbertos) throw new Error(erroAbertos.message)
   const todosItens = orcamentoGeral?.itens || []
+
+  // Notas em aberto no dia efetivo (data prevista de pagamento, se ainda não passou; senão o
+  // vencimento) dentro de [hoje, fim]. Sem data prevista = idêntico ao filtro por vencimento.
+  const abertosVariavelNoMes = (abertosVariavelFuturos || [])
+    .map((l: any) => ({ ...l, dia: dataNoFluxo(l, hoje) }))
+    .filter((l: any) => l.dia >= hoje && l.dia <= fim)
 
   const pagamentosPorLancamento = await buscarPagamentosPorLancamentos([
     ...(pagos || []).map((l: any) => l.id),
@@ -941,9 +955,9 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
     })
   })
 
-  ;(abertosVariavelFuturos || []).forEach((l: any) => {
+  abertosVariavelNoMes.forEach((l: any) => {
     linhasVariavel.push({
-      data: l.data_vencimento,
+      data: l.dia,
       valor: l.valor_total - (l.valor_pago_conciliado || 0),
       parteId: l.parte_id || 'sem-parte',
       parteNome: l.parte?.nome || 'Sem beneficiário',
@@ -962,7 +976,7 @@ export async function buscarFluxoMensal(unidade: VisaoFluxoMensal, ano: number, 
   // exige data > hoje).
   const saidasAbertasHoje =
     despesasFixasFuturas.itens.filter((i) => i.data === hoje).reduce((s, i) => s + i.valor, 0) +
-    (abertosVariavelFuturos || []).filter((l: any) => l.data_vencimento === hoje).reduce((s: number, l: any) => s + l.valor_total, 0)
+    abertosVariavelNoMes.filter((l: any) => l.dia === hoje).reduce((s: number, l: any) => s + l.valor_total, 0)
 
   function agruparLinhasPorDia(linhas: LinhaSaida[]): number[] {
     const porDia = new Map<string, number>()
@@ -1169,6 +1183,9 @@ export async function buscarAtrasados(unidade: VisaoFluxoMensal): Promise<FluxoM
     .eq('status', 'aberto')
     .eq('afeta_fluxo_caixa', true)
     .lt('data_vencimento', hoje)
+    // Conta atrasada com data prevista de hoje em diante já está projetada no calendário: não
+    // entra aqui (senão seria contada duas vezes, ex.: ao simular o pagamento). Prevista vencida volta.
+    .or(`data_prevista_pagamento.is.null,data_prevista_pagamento.lt.${hoje}`)
     .order('data_vencimento')
   if (error) throw new Error(error.message)
 

@@ -391,6 +391,8 @@ export interface FinanceiroLancamento {
   data_lancamento: string
   data_vencimento: string
   data_pagamento?: string
+  /** Quando o admin planeja pagar (≠ vencimento). Só vale enquanto está em aberto e ainda não passou: o Fluxo de Caixa projeta a saída nesse dia (ver dataNoFluxo). */
+  data_prevista_pagamento?: string | null
   data_competencia: string // regime de competência (DRE) — distinto de data_lancamento/data_pagamento (regime de caixa)
   status: StatusFinanceiro
   forma_pagamento?: FormaPagamento

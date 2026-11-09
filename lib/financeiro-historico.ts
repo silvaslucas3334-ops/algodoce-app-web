@@ -63,6 +63,7 @@ const ROTULO_CAMPO: Record<string, string> = {
   data_lancamento: 'Data do lançamento',
   data_vencimento: 'Vencimento',
   data_pagamento: 'Data do pagamento',
+  data_prevista_pagamento: 'Pagamento previsto',
   data_competencia: 'Competência',
   status: 'Situação',
   forma_pagamento: 'Forma de pagamento',

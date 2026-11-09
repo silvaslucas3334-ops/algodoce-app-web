@@ -454,6 +454,12 @@ function DespesasContent() {
               {l.status === 'pago' && l.data_pagamento
                 ? `Paga em ${formatarDataCurta(l.data_pagamento)}`
                 : `Vencimento: ${formatarDataCurta(l.data_vencimento)}`}
+              {l.status === 'aberto' && l.data_prevista_pagamento && (
+                <span className={l.data_prevista_pagamento >= hojeISO() ? 'ml-2 text-blue-600 font-medium' : 'ml-2 text-amber-600'}>
+                  · pagamento previsto {formatarDataCurta(l.data_prevista_pagamento)}
+                  {l.data_prevista_pagamento < hojeISO() && ' (passou)'}
+                </span>
+              )}
               {l.tipo === 'despesa' && !l.conta_id && <span className="ml-2 text-amber-600">· sem conta</span>}
             </p>
           </Link>

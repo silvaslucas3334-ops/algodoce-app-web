@@ -91,6 +91,20 @@ export function calcularVencimento(
   return dataBase
 }
 
+/**
+ * Dia em que uma conta EM ABERTO entra no Fluxo de Caixa: a data prevista de pagamento, se
+ * existir e ainda não passou; senão o vencimento. Prevista que já passou sem pagar perde o
+ * efeito (a conta volta ao vencimento) — assim a conta nunca some do fluxo por esquecimento.
+ * Datas no formato YYYY-MM-DD (comparação de texto é cronológica).
+ */
+export function dataNoFluxo(
+  l: { data_vencimento: string; data_prevista_pagamento?: string | null },
+  hoje: string
+): string {
+  const prevista = l.data_prevista_pagamento
+  return prevista && prevista >= hoje ? prevista : l.data_vencimento
+}
+
 /** Data de hoje (YYYY-MM-DD) no fuso de São Paulo. */
 export function hojeISO(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
