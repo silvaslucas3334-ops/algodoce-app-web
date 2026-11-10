@@ -7,6 +7,7 @@ import { formatBRL } from '@/lib/ofx'
 import { CATEGORIA_RECEITA_LABEL } from '@/lib/constants'
 import { FinanceiroExtratoTransacao, CategoriaReceita, FinanceiroConta } from '@/lib/types'
 import { X, Loader, CheckCircle } from 'lucide-react'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 
 interface Props {
   transacao: FinanceiroExtratoTransacao
@@ -33,6 +34,7 @@ const CATEGORIAS: Exclude<CategoriaReceita, 'dinheiro'>[] = [
 const CATEGORIAS_COM_TAXA: Exclude<CategoriaReceita, 'dinheiro'>[] = ['venda_cartao', 'repasse_ifood', 'repasse_aiqfome']
 
 export default function CategorizarReceitaModal({ transacao, unidade, usuarioId, onClose, onResolvido }: Props) {
+  useEscapeKey(onClose)
   const [categoria, setCategoria] = useState<Exclude<CategoriaReceita, 'dinheiro'> | ''>('')
   const [valorBruto, setValorBruto] = useState('')
   const [contasReserva, setContasReserva] = useState<FinanceiroConta[]>([])
@@ -93,11 +95,11 @@ export default function CategorizarReceitaModal({ transacao, unidade, usuarioId,
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label="Categorizar entrada">
       <div className="bg-white rounded-2xl shadow-lg max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-gray-800">Categorizar entrada</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={onClose} aria-label="Fechar" className="text-gray-400 hover:text-gray-600">
             <X size={24} />
           </button>
         </div>

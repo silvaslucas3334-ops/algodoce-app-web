@@ -7,6 +7,7 @@ import { formatarDocumento } from '@/lib/financeiro-utils'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { FinanceiroExtratoTransacao, FinanceiroParte, FinanceiroConta, UnidadeFinanceiro } from '@/lib/types'
 import { X, Loader, CheckCircle, AlertTriangle } from 'lucide-react'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 
 interface Props {
   transacoes: FinanceiroExtratoTransacao[]
@@ -18,6 +19,7 @@ interface Props {
 const CONTA_BANCARIA_PARA_UNIDADE: Record<string, UnidadeFinanceiro> = { loja1: 'loja1', loja2: 'loja2' }
 
 export default function CriarDespesasLoteModal({ transacoes, usuarioId, onClose, onResolvido }: Props) {
+  useEscapeKey(onClose)
   const [partes, setPartes] = useState<FinanceiroParte[]>([])
   const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [parteId, setParteId] = useState('')
@@ -98,11 +100,11 @@ export default function CriarDespesasLoteModal({ transacoes, usuarioId, onClose,
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label="Criar despesas em lote">
       <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-gray-800">Criar despesas em lote</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+          <button onClick={onClose} aria-label="Fechar" className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
         </div>
 
         {!resultado ? (

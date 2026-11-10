@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { listarImportacoesRecentes, reverterImportacao, LoteImportacao } from '@/lib/financeiro-reconciliacao'
 import { UNIDADE_LABEL } from '@/lib/constants'
 import { X, Loader, Trash2 } from 'lucide-react'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 
 interface Props {
   onClose: () => void
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export default function ReverterImportacaoModal({ onClose, onResolvido }: Props) {
+  useEscapeKey(onClose)
   const [lotes, setLotes] = useState<LoteImportacao[]>([])
   const [loading, setLoading] = useState(true)
   const [processando, setProcessando] = useState<string | null>(null)
@@ -50,11 +52,12 @@ export default function ReverterImportacaoModal({ onClose, onResolvido }: Props)
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label="Importações recentes">
+
       <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-gray-800">Importações recentes</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={onClose} aria-label="Fechar" className="text-gray-400 hover:text-gray-600">
             <X size={24} />
           </button>
         </div>
