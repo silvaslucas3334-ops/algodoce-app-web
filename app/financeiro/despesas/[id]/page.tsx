@@ -11,7 +11,7 @@ import { EtiquetaAprovacao, FinanceiroConta, FinanceiroLancamentoItem, Financeir
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL, CONDICAO_PAGAMENTO_LABEL, TIPO_LANCAMENTO_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
 import { formatarDocumento, hojeISO, statusExibicao, somarMeses } from '@/lib/financeiro-utils'
-import { desfazerConciliacao } from '@/lib/financeiro-reconciliacao'
+import { contarTransacoesVinculadas, desfazerConciliacao } from '@/lib/financeiro-reconciliacao'
 import { caminhoInternoSeguro } from '@/lib/navegacao'
 import Link from 'next/link'
 import SelecionarMateriaPrimaModal, { ItemNota } from '@/components/SelecionarMateriaPrimaModal'
@@ -44,6 +44,9 @@ function DetalheDespesaContent() {
   const voltarPara = caminhoInternoSeguro(searchParams.get('voltarPara'))
 
   const [lancamento, setLancamento] = useState<any>(null)
+  // Transações do extrato ligadas a esta despesa por conciliação em grupo/parcial (tx.lancamento_id) — o
+  // vínculo direto (extrato_transacao_id) já vem no próprio lançamento.
+  const [transacoesVinculadas, setTransacoesVinculadas] = useState(0)
   // Pagamento previsto (admin, só em aberto): digita a data e confirma em "Salvar" — não grava a cada tecla.
   const [dataPrevistaForm, setDataPrevistaForm] = useState('')
   const [salvandoPrevista, setSalvandoPrevista] = useState(false)
@@ -121,6 +124,9 @@ function DetalheDespesaContent() {
       .single()
     if (error) console.error('Erro:', error)
     setLancamento(data)
+    contarTransacoesVinculadas(lancamentoId)
+      .then(setTransacoesVinculadas)
+      .catch((e) => console.error('Erro ao contar vínculos do extrato:', e))
 
     if (data?.recorrencia_id) {
       const { data: ocorrencias } = await supabase
@@ -172,8 +178,19 @@ function DetalheDespesaContent() {
     }
   }
 
+  // Despesa ligada ao extrato bancário (vínculo direto, em grupo ou pagamento parcial): cancelar ou mudar o
+  // valor derrubaria o vínculo em silêncio e deixaria a transação "conciliada" sem despesa (a saída some do
+  // fluxo de caixa). Antes é preciso desfazer a conciliação.
+  const temVinculoExtrato =
+    !!lancamento?.extrato_transacao_id || transacoesVinculadas > 0 || Number(lancamento?.valor_pago_conciliado || 0) > 0
+  const MSG_CONCILIADA = 'Esta despesa está conciliada com o extrato bancário. Desfaça a conciliação antes de cancelá-la.'
+
   async function cancelar() {
     if (!lancamento) return
+    if (temVinculoExtrato) {
+      setErro(MSG_CONCILIADA)
+      return
+    }
     if (!window.confirm('Cancelar este lançamento?')) return
     setProcessando(true)
     setErro('')
@@ -349,6 +366,17 @@ function DetalheDespesaContent() {
       setErro(
         `Esta despesa já tem pagamentos parciais conciliados — só dá pra editar o valor se o novo valor for igual ao já conciliado (${formatBRL(valorPagoConciliado)}). Outros campos continuam travados por aqui.`
       )
+      return
+    }
+    // Valor de despesa conciliada com o extrato não muda por aqui: o valor casa com o débito do banco. Para
+    // acertar uma diferença, use o ajuste na própria conciliação (ou desfaça a conciliação antes).
+    if (
+      temVinculoExtrato &&
+      lancamento.tipo === 'despesa' &&
+      !corrigindoParaValorConciliado &&
+      Math.abs(Number(formEdicao.valor_total) - Number(lancamento.valor_total)) >= 0.005
+    ) {
+      setErro('Esta despesa está conciliada com o extrato — o valor não pode ser alterado por aqui. Desfaça a conciliação antes de mudar o valor.')
       return
     }
 
@@ -770,8 +798,16 @@ function DetalheDespesaContent() {
                       type="number" step="0.01" min={0}
                       value={formEdicao.valor_total}
                       onChange={(e) => setFormEdicao({ ...formEdicao, valor_total: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"
+                      readOnly={temVinculoExtrato && !(Number(lancamento.valor_pago_conciliado || 0) > 0)}
+                      className={`w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm ${
+                        temVinculoExtrato && !(Number(lancamento.valor_pago_conciliado || 0) > 0) ? 'bg-gray-50 text-gray-500' : ''
+                      }`}
                     />
+                    {temVinculoExtrato && !(Number(lancamento.valor_pago_conciliado || 0) > 0) && (
+                      <p className="text-[11px] text-amber-600 mt-1">
+                        Conciliada com o extrato — o valor casa com o débito do banco. Desfaça a conciliação para mudá-lo.
+                      </p>
+                    )}
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-3">
@@ -1039,7 +1075,8 @@ function DetalheDespesaContent() {
             <div className="flex gap-3">
               <button
                 onClick={cancelar}
-                disabled={processando}
+                disabled={processando || temVinculoExtrato}
+                title={temVinculoExtrato ? MSG_CONCILIADA : undefined}
                 className="flex-1 px-4 py-3 border border-red-300 rounded-lg font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 <XCircle size={18} /> Cancelar
@@ -1054,6 +1091,12 @@ function DetalheDespesaContent() {
                 </button>
               )}
             </div>
+          )}
+
+          {podeEditar && !editando && lancamento.status !== 'cancelado' && temVinculoExtrato && (
+            <p className="text-xs text-amber-600 -mt-2">
+              Conciliada com o extrato bancário — para cancelar, desfaça a conciliação antes.
+            </p>
           )}
 
           {ehAdmin && (

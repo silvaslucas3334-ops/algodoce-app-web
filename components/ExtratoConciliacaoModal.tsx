@@ -5,8 +5,14 @@ import { sugerirCorrespondencias, confirmarConciliacao, confirmarConciliacaoJaPa
 import { formatBRL } from '@/lib/ofx'
 import { CandidatoConciliacao, FinanceiroExtratoTransacao } from '@/lib/types'
 import { TIPO_LANCAMENTO_LABEL } from '@/lib/constants'
+import { diasEntreISO, JANELA_PAGAS_DIAS } from '@/lib/conciliacao-diferenca'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 import ConciliarManualModal from './ConciliarManualModal'
-import { X, Loader, CheckCircle, Receipt, ShoppingCart, ListChecks } from 'lucide-react'
+import { X, Loader, CheckCircle, Receipt, ShoppingCart, ListChecks, AlertTriangle } from 'lucide-react'
+
+const fmtData = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR')
+// Até quantos dias de diferença entre o pagamento registrado e o débito do banco o acerto de data vem marcado.
+const DIAS_ACERTO_AUTOMATICO = 7
 
 interface Props {
   transacao: FinanceiroExtratoTransacao
@@ -26,11 +32,14 @@ const CONFIANCA_LABEL: Record<string, { label: string; color: string }> = {
 
 export default function ExtratoConciliacaoModal({ transacao, voltarPara, onClose, onResolvido }: Props) {
   const router = useRouter()
+  useEscapeKey(onClose)
   const [candidatos, setCandidatos] = useState<CandidatoConciliacao[]>([])
   const [loading, setLoading] = useState(true)
   const [processando, setProcessando] = useState(false)
   const [erro, setErro] = useState('')
   const [modalManual, setModalManual] = useState(false)
+  // "Atualizar a data de pagamento para a do banco" por despesa já paga (id → marcado). Ausente = padrão.
+  const [acertarData, setAcertarData] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     sugerirCorrespondencias(transacao.valor, transacao.data, transacao.documento_extraido || null)
@@ -39,12 +48,29 @@ export default function ExtratoConciliacaoModal({ transacao, voltarPara, onClose
       .finally(() => setLoading(false))
   }, [transacao.id])
 
+  // Despesa já paga com data de pagamento diferente da data do débito no banco.
+  function diasDeDiferencaPagamento(c: CandidatoConciliacao): number | null {
+    const dp = c.lancamento.data_pagamento
+    if (!c.jaPago || !dp || dp === transacao.data) return null
+    return Math.abs(diasEntreISO(dp, transacao.data))
+  }
+  function acertarDataMarcado(c: CandidatoConciliacao): boolean {
+    const dias = diasDeDiferencaPagamento(c)
+    if (dias === null) return false
+    return acertarData[c.lancamento.id] ?? dias <= DIAS_ACERTO_AUTOMATICO
+  }
+
   async function confirmar(candidato: CandidatoConciliacao) {
     setProcessando(true)
     setErro('')
     try {
       if (candidato.jaPago) {
-        await confirmarConciliacaoJaPago(transacao.id, candidato.lancamento.id, candidato.lancamento.parte_id)
+        await confirmarConciliacaoJaPago(
+          transacao.id,
+          candidato.lancamento.id,
+          candidato.lancamento.parte_id,
+          acertarDataMarcado(candidato) ? transacao.data : undefined
+        )
       } else {
         await confirmarConciliacao(transacao.id, candidato, transacao.data)
       }
@@ -82,11 +108,11 @@ export default function ExtratoConciliacaoModal({ transacao, voltarPara, onClose
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label="Conciliar transação">
       <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-gray-800">Conciliar transação</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+          <button onClick={onClose} aria-label="Fechar" className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
         </div>
 
         <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm">
@@ -134,6 +160,32 @@ export default function ExtratoConciliacaoModal({ transacao, voltarPara, onClose
                     </div>
                     <span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${conf.color}`}>{conf.label}</span>
                   </div>
+                  {(() => {
+                    const dias = diasDeDiferencaPagamento(c)
+                    if (dias === null) return null
+                    return (
+                      <div className="mb-2 rounded-lg bg-purple-50 border border-purple-100 px-2.5 py-2 text-xs text-purple-900 space-y-1">
+                        <p>
+                          Pago no sistema em <strong>{fmtData(l.data_pagamento!)}</strong>; o banco debitou em{' '}
+                          <strong>{fmtData(transacao.data)}</strong> ({dias} dia{dias === 1 ? '' : 's'} de diferença).
+                        </p>
+                        {dias > JANELA_PAGAS_DIAS && (
+                          <p className="text-amber-800 font-medium flex items-start gap-1">
+                            <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" /> Mais de {JANELA_PAGAS_DIAS} dias de diferença — confira se é mesmo o mesmo pagamento antes de vincular.
+                          </p>
+                        )}
+                        <label className="flex items-start gap-1.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={acertarDataMarcado(c)}
+                            onChange={(e) => setAcertarData((prev) => ({ ...prev, [l.id]: e.target.checked }))}
+                            className="mt-0.5 accent-purple-700"
+                          />
+                          <span>Atualizar a data de pagamento para a do banco ({fmtData(transacao.data)}) — o fluxo de caixa passa a bater com o extrato.</span>
+                        </label>
+                      </div>
+                    )
+                  })()}
                   <button
                     onClick={() => confirmar(c)}
                     disabled={processando}

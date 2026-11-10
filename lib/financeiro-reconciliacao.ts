@@ -2,6 +2,85 @@ import { supabase } from './supabase'
 import { parseOFX, TransacaoOFX } from './ofx'
 import { normalizarTitulo } from './tarefas-utils'
 import { FinanceiroLancamento, CandidatoConciliacao, UnidadeFinanceiro } from './types'
+import { AjusteConciliacao, anexarObservacao, arredondar2, montarObservacaoAjuste } from './conciliacao-diferenca'
+
+// O builder do Supabase é "thenable" (PromiseLike), não uma Promise de verdade.
+type Desfazer = () => PromiseLike<unknown>
+
+/** Roda os "desfazer" em ordem inversa, engolindo erros (melhor esforço) — usado quando um passo de uma conciliação falha no meio. */
+async function reverterPassos(passos: Desfazer[]): Promise<void> {
+  for (const desfazer of passos.slice().reverse()) {
+    try {
+      await desfazer()
+    } catch (e) {
+      console.error('Falha ao reverter passo da conciliação:', e)
+    }
+  }
+}
+
+/**
+ * Grava, na própria despesa, o ajuste escolhido na conciliação (alterar o valor para o valor pago, ou
+ * registrar a diferença como juros/taxa) e anota o motivo em `observacoes`. A mudança de valor também
+ * entra na trilha de auditoria do lançamento (gatilho da Fase 6a). Devolve o "desfazer" do ajuste, para
+ * o chamador reverter se um passo seguinte da conciliação falhar.
+ */
+async function aplicarAjusteLancamento(ajuste: AjusteConciliacao, dataISO: string): Promise<Desfazer> {
+  if (ajuste.tipo === 'juros_taxa' && !(ajuste.delta > 0)) {
+    throw new Error('Juros/taxa só se aplica quando o banco pagou a mais que a despesa.')
+  }
+  const { data: atual, error: erroBusca } = await supabase
+    .from('financeiro_lancamentos')
+    .select('valor_total, valor_juros_multa, observacoes')
+    .eq('id', ajuste.lancamentoId)
+    .single()
+  if (erroBusca) throw new Error(erroBusca.message)
+
+  const valorAntes = Number(atual.valor_total)
+  const valorDepois = arredondar2(valorAntes + ajuste.delta)
+  if (!(valorDepois > 0)) throw new Error('O ajuste deixaria o valor da despesa zerado ou negativo — confira a seleção.')
+
+  const patch: Record<string, unknown> = {
+    valor_total: valorDepois,
+    observacoes: anexarObservacao(
+      atual.observacoes,
+      montarObservacaoAjuste({ dataISO, tipo: ajuste.tipo, de: valorAntes, para: valorDepois, motivo: ajuste.motivo })
+    ),
+    updated_at: new Date().toISOString(),
+  }
+  if (ajuste.tipo === 'juros_taxa') patch.valor_juros_multa = Number(atual.valor_juros_multa || 0) + ajuste.delta
+
+  const { data: gravado, error: erroAjuste } = await supabase
+    .from('financeiro_lancamentos')
+    .update(patch)
+    .eq('id', ajuste.lancamentoId)
+    .eq('valor_total', atual.valor_total) // se mudou enquanto o usuário conciliava, não sobrescreve
+    .select('id')
+  if (erroAjuste) throw new Error(erroAjuste.message)
+  if (!gravado || gravado.length === 0) {
+    throw new Error('A despesa foi alterada em outra sessão enquanto você conciliava — atualize a tela e tente de novo.')
+  }
+
+  return () =>
+    supabase
+      .from('financeiro_lancamentos')
+      .update({
+        valor_total: atual.valor_total,
+        valor_juros_multa: atual.valor_juros_multa ?? 0,
+        observacoes: atual.observacoes ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', ajuste.lancamentoId)
+}
+
+/** Quantas transações do extrato estão vinculadas à despesa por conciliação em grupo/parcial (tx.lancamento_id). */
+export async function contarTransacoesVinculadas(lancamentoId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('financeiro_extrato_transacoes')
+    .select('id', { count: 'exact', head: true })
+    .eq('lancamento_id', lancamentoId)
+  if (error) throw new Error(error.message)
+  return count || 0
+}
 
 const RE_CNPJ = /\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}/
 const RE_CPF = /\d{3}\.?\d{3}\.?\d{3}-?\d{2}/
@@ -197,7 +276,11 @@ function classificarConfianca(
   lancamento: FinanceiroLancamento
 ): 'alta' | 'media' | 'baixa' {
   if (documentoExtraido && lancamento.parte?.documento === documentoExtraido) return 'alta'
-  return diasEntre(transacaoData, lancamento.data_vencimento) <= 5 ? 'media' : 'baixa'
+  // Despesa já paga: o que importa é quão perto o pagamento registrado está do débito do banco (o
+  // vencimento antigo de uma compra já paga não diz nada sobre este débito).
+  const dataReferencia =
+    lancamento.status === 'pago' && lancamento.data_pagamento ? lancamento.data_pagamento : lancamento.data_vencimento
+  return diasEntre(transacaoData, dataReferencia) <= 5 ? 'media' : 'baixa'
 }
 
 function ordenarPorConfianca(candidatos: CandidatoConciliacao[]): CandidatoConciliacao[] {
@@ -298,16 +381,19 @@ export async function sugerirCorrespondenciasPorSoma(
 
 /**
  * Confirma a conciliação: marca a transação como conciliada e o lançamento
- * como pago. Duas atualizações sequenciais (não atômicas, mesmo padrão já
- * aceito em PagamentosOFXModal) — se a segunda falhar, o erro sobe pro
- * chamador e o usuário pode tentar de novo (idempotente).
+ * como pago. Duas atualizações sequenciais (não atômicas). Cada uma tem
+ * guarda de estado e conferência de linha afetada — a transação só passa de
+ * 'pendente' e o lançamento só de 'aberto' sem vínculo de extrato, então
+ * duplo clique ou duas sessões não conciliam duas vezes. Se o segundo
+ * passo falhar, o primeiro é desfeito (a transação volta pra fila) em vez de
+ * ficar "conciliada" sem despesa e sumir dos pendentes.
  */
 export async function confirmarConciliacao(
   transacaoId: string,
   candidato: CandidatoConciliacao,
   dataPagamento: string
 ): Promise<void> {
-  const { error: erroTransacao } = await supabase
+  const { data: transacaoAtualizada, error: erroTransacao } = await supabase
     .from('financeiro_extrato_transacoes')
     .update({
       status_conciliacao: 'conciliado',
@@ -315,9 +401,20 @@ export async function confirmarConciliacao(
       parte_id: candidato.lancamento.parte_id,
     })
     .eq('id', transacaoId)
+    .eq('status_conciliacao', 'pendente')
+    .select('id')
   if (erroTransacao) throw new Error(erroTransacao.message)
+  if (!transacaoAtualizada || transacaoAtualizada.length === 0) {
+    throw new Error('Esta transação já foi conciliada em outra sessão — atualize a tela.')
+  }
 
-  const { error: erroLancamento } = await supabase
+  const desfazerTransacao = () =>
+    supabase
+      .from('financeiro_extrato_transacoes')
+      .update({ status_conciliacao: 'pendente', lancamento_id: null, parte_id: null })
+      .eq('id', transacaoId)
+
+  const { data: lancamentoAtualizado, error: erroLancamento } = await supabase
     .from('financeiro_lancamentos')
     .update({
       status: 'pago',
@@ -326,7 +423,15 @@ export async function confirmarConciliacao(
       updated_at: new Date().toISOString(),
     })
     .eq('id', candidato.lancamento.id)
-  if (erroLancamento) throw new Error(erroLancamento.message)
+    .eq('status', 'aberto')
+    .is('extrato_transacao_id', null)
+    .select('id')
+  if (erroLancamento || !lancamentoAtualizado || lancamentoAtualizado.length === 0) {
+    await reverterPassos([desfazerTransacao])
+    throw new Error(
+      erroLancamento?.message || 'Esta despesa já foi paga ou vinculada em outra sessão — atualize a tela e tente de novo.'
+    )
+  }
 }
 
 /**
@@ -380,7 +485,9 @@ export async function desfazerConciliacao(lancamentoId: string): Promise<void> {
 export async function confirmarConciliacaoJaPago(
   transacaoId: string,
   lancamentoId: string,
-  parteId: string
+  parteId: string,
+  /** Se informada, também acerta data_pagamento da despesa para a data do débito no banco (fluxo de caixa fica igual ao extrato). */
+  atualizarDataPagamentoPara?: string
 ): Promise<void> {
   const { data, error } = await supabase
     .from('financeiro_extrato_transacoes')
@@ -391,12 +498,25 @@ export async function confirmarConciliacaoJaPago(
   if (error) throw new Error(error.message)
   if (!data || data.length === 0) throw new Error('Transação já foi conciliada em outra sessão.')
 
-  const { error: erroLancamento } = await supabase
+  const patch: Record<string, unknown> = { extrato_transacao_id: transacaoId, updated_at: new Date().toISOString() }
+  if (atualizarDataPagamentoPara) patch.data_pagamento = atualizarDataPagamentoPara
+  const { data: vinculada, error: erroLancamento } = await supabase
     .from('financeiro_lancamentos')
-    .update({ extrato_transacao_id: transacaoId, updated_at: new Date().toISOString() })
+    .update(patch)
     .eq('id', lancamentoId)
     .is('extrato_transacao_id', null)
-  if (erroLancamento) throw new Error(erroLancamento.message)
+    .select('id')
+  if (erroLancamento || !vinculada || vinculada.length === 0) {
+    // não deixa a transação "conciliada" sem despesa: volta pra fila
+    await reverterPassos([
+      () =>
+        supabase
+          .from('financeiro_extrato_transacoes')
+          .update({ status_conciliacao: 'pendente', lancamento_id: null, parte_id: null })
+          .eq('id', transacaoId),
+    ])
+    throw new Error(erroLancamento?.message || 'Esta despesa já foi vinculada a outra transação — atualize a tela e tente de novo.')
+  }
 }
 
 /**
@@ -424,34 +544,53 @@ export async function confirmarConciliacaoJaPago(
 export async function confirmarConciliacaoGrupo(
   transacaoIds: string[],
   candidato: CandidatoConciliacao,
-  dataPagamento: string
+  dataPagamento: string,
+  /** Diferença entre a soma dos débitos e a despesa, quando acima da tolerância: alterar o valor ou registrar como juros/taxa (com motivo). */
+  ajuste?: AjusteConciliacao
 ): Promise<void> {
-  const { data: atualizadas, error: erroTransacoes } = await supabase
-    .from('financeiro_extrato_transacoes')
-    .update({
-      status_conciliacao: 'conciliado',
-      lancamento_id: candidato.lancamento.id,
-      parte_id: candidato.lancamento.parte_id,
-    })
-    .in('id', transacaoIds)
-    .eq('status_conciliacao', 'pendente')
-    .select('id')
-  if (erroTransacoes) throw new Error(erroTransacoes.message)
-  if (!atualizadas || atualizadas.length !== transacaoIds.length) {
-    throw new Error('Uma ou mais transações já foram conciliadas em outra sessão — atualize a tela e tente de novo.')
-  }
+  const passos: Desfazer[] = []
+  try {
+    if (ajuste) passos.push(await aplicarAjusteLancamento(ajuste, dataPagamento))
 
-  if (candidato.jaPago) return
+    const { data: atualizadas, error: erroTransacoes } = await supabase
+      .from('financeiro_extrato_transacoes')
+      .update({
+        status_conciliacao: 'conciliado',
+        lancamento_id: candidato.lancamento.id,
+        parte_id: candidato.lancamento.parte_id,
+      })
+      .in('id', transacaoIds)
+      .eq('status_conciliacao', 'pendente')
+      .select('id')
+    if (erroTransacoes) throw new Error(erroTransacoes.message)
+    const idsAtualizados = (atualizadas || []).map((t: { id: string }) => t.id)
+    if (idsAtualizados.length > 0) {
+      passos.push(() =>
+        supabase
+          .from('financeiro_extrato_transacoes')
+          .update({ status_conciliacao: 'pendente', lancamento_id: null, parte_id: null })
+          .in('id', idsAtualizados)
+      )
+    }
+    if (idsAtualizados.length !== transacaoIds.length) {
+      throw new Error('Uma ou mais transações já foram conciliadas em outra sessão — atualize a tela e tente de novo.')
+    }
 
-  const { data: lancAtualizado, error: erroLancamento } = await supabase
-    .from('financeiro_lancamentos')
-    .update({ status: 'pago', data_pagamento: dataPagamento, updated_at: new Date().toISOString() })
-    .eq('id', candidato.lancamento.id)
-    .eq('status', 'aberto')
-    .select('id')
-  if (erroLancamento) throw new Error(erroLancamento.message)
-  if (!lancAtualizado || lancAtualizado.length === 0) {
-    throw new Error('Este lançamento já foi marcado como pago em outra sessão.')
+    if (candidato.jaPago) return
+
+    const { data: lancAtualizado, error: erroLancamento } = await supabase
+      .from('financeiro_lancamentos')
+      .update({ status: 'pago', data_pagamento: dataPagamento, updated_at: new Date().toISOString() })
+      .eq('id', candidato.lancamento.id)
+      .eq('status', 'aberto')
+      .select('id')
+    if (erroLancamento) throw new Error(erroLancamento.message)
+    if (!lancAtualizado || lancAtualizado.length === 0) {
+      throw new Error('Este lançamento já foi marcado como pago em outra sessão.')
+    }
+  } catch (err) {
+    await reverterPassos(passos)
+    throw err
   }
 }
 
@@ -523,6 +662,9 @@ export async function criarDespesasEmLote(
           descricao: `${descricaoBase} — ${dataFormatada}`,
           valor_total: d.valor,
           data_lancamento: d.data,
+          // Competência = dia da transação no banco. Sem isto o banco usa CURRENT_DATE (o dia em que se
+          // concilia, em UTC), e despesas conciliadas no mês seguinte caíam no mês errado do DRE.
+          data_competencia: d.data,
           data_vencimento: d.data,
           data_pagamento: d.data,
           status: 'pago',
@@ -564,8 +706,10 @@ export async function buscarDespesasParaVinculoManual(
     .select('*, parte:financeiro_partes!parte_id(*), conta:financeiro_contas(codigo, nome)')
     .in('status', ['aberto', 'pago'])
     .is('extrato_transacao_id', null)
-    .order('data_lancamento', { ascending: true })
-    .limit(300)
+    // Mais recentes primeiro: com a ordem crescente + limite, o corte descartava justamente as despesas
+    // mais novas (as mais prováveis). A relevância fina (fornecedor, proximidade) é aplicada na tela.
+    .order('data_lancamento', { ascending: false })
+    .limit(800)
   if (error) throw new Error(error.message)
 
   const lista = (data || []) as FinanceiroLancamento[]
@@ -646,9 +790,13 @@ export async function confirmarConciliacaoManual(
   transacaoId: string,
   lancamentoIds: string[],
   dataPagamento: string,
-  ajusteJurosMulta?: { lancamentoId: string; valor: number }
+  /** Diferença acima da tolerância: alterar o valor da despesa ou registrar como juros/taxa (sempre com motivo). */
+  ajuste?: AjusteConciliacao
 ): Promise<void> {
   if (lancamentoIds.length === 0) throw new Error('Selecione ao menos uma despesa.')
+  if (ajuste && !lancamentoIds.includes(ajuste.lancamentoId)) {
+    throw new Error('O ajuste precisa ser aplicado a uma das despesas selecionadas.')
+  }
 
   const { data: partesLancamentos, error: erroPartes } = await supabase
     .from('financeiro_lancamentos')
@@ -657,57 +805,80 @@ export async function confirmarConciliacaoManual(
   if (erroPartes) throw new Error(erroPartes.message)
   const partesUnicas = new Set((partesLancamentos || []).map((l) => l.parte_id))
 
-  const { data: transacaoAtualizada, error: erroTransacao } = await supabase
-    .from('financeiro_extrato_transacoes')
-    .update({
-      status_conciliacao: 'conciliado',
-      parte_id: partesUnicas.size === 1 ? partesLancamentos![0].parte_id : null,
-    })
-    .eq('id', transacaoId)
-    .eq('status_conciliacao', 'pendente')
-    .select('id')
-  if (erroTransacao) throw new Error(erroTransacao.message)
-  if (!transacaoAtualizada || transacaoAtualizada.length === 0) {
-    throw new Error('Transação já foi conciliada em outra sessão.')
-  }
+  // Cada passo registra como se desfaz; se um passo seguinte falhar, tudo que já foi gravado volta ao
+  // estado anterior (antes, uma falha no meio deixava a transação "conciliada" e some da fila de pendentes).
+  const passos: Desfazer[] = []
+  try {
+    // 1) ajuste de valor/juros primeiro: valida (valor > 0, despesa não mudou) antes de tocar no resto
+    if (ajuste) passos.push(await aplicarAjusteLancamento(ajuste, dataPagamento))
 
-  const { data: lancamentosVinculados, error: erroVinculo } = await supabase
-    .from('financeiro_lancamentos')
-    .update({ extrato_transacao_id: transacaoId, updated_at: new Date().toISOString() })
-    .in('id', lancamentoIds)
-    .is('extrato_transacao_id', null)
-    .select('id, status')
-  if (erroVinculo) throw new Error(erroVinculo.message)
-  if (!lancamentosVinculados || lancamentosVinculados.length !== lancamentoIds.length) {
-    throw new Error('Uma ou mais despesas já foram vinculadas a outra transação — atualize a tela e tente de novo.')
-  }
-
-  const idsParaPagar = lancamentosVinculados.filter((l) => l.status === 'aberto').map((l) => l.id)
-  if (idsParaPagar.length > 0) {
-    const { error: erroPagar } = await supabase
-      .from('financeiro_lancamentos')
-      .update({ status: 'pago', data_pagamento: dataPagamento, updated_at: new Date().toISOString() })
-      .in('id', idsParaPagar)
-      .eq('status', 'aberto')
-    if (erroPagar) throw new Error(erroPagar.message)
-  }
-
-  if (ajusteJurosMulta && ajusteJurosMulta.valor > 0) {
-    const { data: lancamentoAtual, error: erroBusca } = await supabase
-      .from('financeiro_lancamentos')
-      .select('valor_total, valor_juros_multa')
-      .eq('id', ajusteJurosMulta.lancamentoId)
-      .single()
-    if (erroBusca) throw new Error(erroBusca.message)
-    const { error: erroAjuste } = await supabase
-      .from('financeiro_lancamentos')
+    // 2) transação do extrato
+    const { data: transacaoAtualizada, error: erroTransacao } = await supabase
+      .from('financeiro_extrato_transacoes')
       .update({
-        valor_total: Number(lancamentoAtual.valor_total || 0) + ajusteJurosMulta.valor,
-        valor_juros_multa: Number(lancamentoAtual.valor_juros_multa || 0) + ajusteJurosMulta.valor,
-        updated_at: new Date().toISOString(),
+        status_conciliacao: 'conciliado',
+        parte_id: partesUnicas.size === 1 ? partesLancamentos![0].parte_id : null,
       })
-      .eq('id', ajusteJurosMulta.lancamentoId)
-    if (erroAjuste) throw new Error(erroAjuste.message)
+      .eq('id', transacaoId)
+      .eq('status_conciliacao', 'pendente')
+      .select('id')
+    if (erroTransacao) throw new Error(erroTransacao.message)
+    if (!transacaoAtualizada || transacaoAtualizada.length === 0) {
+      throw new Error('Transação já foi conciliada em outra sessão.')
+    }
+    passos.push(() =>
+      supabase.from('financeiro_extrato_transacoes').update({ status_conciliacao: 'pendente', parte_id: null }).eq('id', transacaoId)
+    )
+
+    // 3) vínculo das despesas
+    const { data: lancamentosVinculados, error: erroVinculo } = await supabase
+      .from('financeiro_lancamentos')
+      .update({ extrato_transacao_id: transacaoId, updated_at: new Date().toISOString() })
+      .in('id', lancamentoIds)
+      .is('extrato_transacao_id', null)
+      .select('id, status')
+    if (erroVinculo) throw new Error(erroVinculo.message)
+    const idsVinculados = (lancamentosVinculados || []).map((l: { id: string }) => l.id)
+    if (idsVinculados.length > 0) {
+      passos.push(() =>
+        supabase
+          .from('financeiro_lancamentos')
+          .update({ extrato_transacao_id: null, updated_at: new Date().toISOString() })
+          .in('id', idsVinculados)
+          .eq('extrato_transacao_id', transacaoId)
+      )
+    }
+    if (!lancamentosVinculados || lancamentosVinculados.length !== lancamentoIds.length) {
+      throw new Error('Uma ou mais despesas já foram vinculadas a outra transação — atualize a tela e tente de novo.')
+    }
+
+    // 4) despesas em aberto passam a pagas (as já pagas só ficam vinculadas, sem mexer em data/status)
+    const idsParaPagar = lancamentosVinculados.filter((l: { status: string }) => l.status === 'aberto').map((l: { id: string }) => l.id)
+    if (idsParaPagar.length > 0) {
+      const { data: pagas, error: erroPagar } = await supabase
+        .from('financeiro_lancamentos')
+        .update({ status: 'pago', data_pagamento: dataPagamento, updated_at: new Date().toISOString() })
+        .in('id', idsParaPagar)
+        .eq('status', 'aberto')
+        .select('id')
+      if (erroPagar) throw new Error(erroPagar.message)
+      const idsPagos = (pagas || []).map((l: { id: string }) => l.id)
+      if (idsPagos.length > 0) {
+        passos.push(() =>
+          supabase
+            .from('financeiro_lancamentos')
+            .update({ status: 'aberto', data_pagamento: null, updated_at: new Date().toISOString() })
+            .in('id', idsPagos)
+            .eq('status', 'pago')
+        )
+      }
+      if (idsPagos.length !== idsParaPagar.length) {
+        throw new Error('Uma ou mais despesas mudaram de status em outra sessão — atualize a tela e tente de novo.')
+      }
+    }
+  } catch (err) {
+    await reverterPassos(passos)
+    throw err
   }
 }
 
