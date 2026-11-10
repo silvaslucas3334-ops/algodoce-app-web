@@ -116,6 +116,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     { data: receitas, error: erroReceitas },
     { data: despesas, error: erroDespesas },
     { data: comprasLancamentos, error: erroCompras },
+    { data: jurosPagos, error: erroJuros },
     faturamentoFiscalPorLoja,
   ] = await Promise.all([
     supabase.from('financeiro_contas').select('id, codigo, nome, linha_dre, afeta_dre'),
@@ -126,7 +127,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
       .lte('data', dataFim),
     supabase
       .from('financeiro_lancamentos')
-      .select('valor_total, unidade, parte_id, conta_id, parte:financeiro_partes!parte_id(nome)')
+      .select('valor_total, valor_juros_multa, unidade, parte_id, conta_id, parte:financeiro_partes!parte_id(nome)')
       .eq('tipo', 'despesa')
       .neq('status', 'cancelado')
       .gte('data_competencia', dataInicio)
@@ -138,15 +139,29 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
       .neq('status', 'cancelado')
       .gte('data_competencia', dataInicio)
       .lte('data_competencia', dataFim),
+    // Juros/multa/taxa por atraso registrados na conciliação (valor_juros_multa): despesa financeira, no mês
+    // em que foram PAGOS (é quando o encargo acontece). Vale para despesas e para notas de insumos.
+    supabase
+      .from('financeiro_lancamentos')
+      .select('valor_juros_multa, unidade, parte_id, parte:financeiro_partes!parte_id(nome)')
+      .in('tipo', ['despesa', 'compra_insumos'])
+      .neq('status', 'cancelado')
+      .gt('valor_juros_multa', 0)
+      .gte('data_pagamento', dataInicio)
+      .lte('data_pagamento', dataFim),
     buscarFaturamentoPorLojaDoMes(ano, mes),
   ])
   if (erroContas) throw new Error(erroContas.message)
   if (erroReceitas) throw new Error(erroReceitas.message)
   if (erroDespesas) throw new Error(erroDespesas.message)
   if (erroCompras) throw new Error(erroCompras.message)
+  if (erroJuros) throw new Error(erroJuros.message)
 
   const contas = (contasData || []) as FinanceiroConta[]
   const contasPorId = new Map(contas.map((c) => [c.id, c]))
+  // Despesas Financeiras (3005): destino dos juros/multa. Se a conta não existir, o juros fica onde estava
+  // (dentro do valor da despesa) em vez de sumir.
+  const contaJurosId = contas.find((c) => c.codigo === '3005')?.id
 
   const idsCompras = (comprasLancamentos || []).map((c: any) => c.id)
   const { data: itens, error: erroItens } =
@@ -235,12 +250,30 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
 
   ;(despesas || []).forEach((d: any) => {
     const parteNome = d.parte?.nome || 'Sem beneficiário'
+    // valor_total já inclui o juros/multa da conciliação: a conta da despesa fica só com o valor original e o
+    // juros vai para Despesas Financeiras (3005) mais abaixo, no mês do pagamento.
+    const juros = contaJurosId ? Number(d.valor_juros_multa || 0) : 0
+    const valorBase = Number(d.valor_total) - juros
     if (unidade === 'consolidado' || d.unidade === unidade) {
-      acumular(d.conta_id, d.valor_total, d.parte_id, parteNome)
+      acumular(d.conta_id, valorBase, d.parte_id, parteNome)
     } else if (d.unidade === 'rateio') {
-      acumular(d.conta_id, d.valor_total * (percentualRateio || 0), d.parte_id, parteNome)
+      acumular(d.conta_id, valorBase * (percentualRateio || 0), d.parte_id, parteNome)
     }
   })
+
+  // Juros/multa/taxa por atraso → Despesas Financeiras (3005). Antes o juros das notas de insumos não entrava
+  // no DRE (a nota só conta pelos itens) e o das despesas ficava dentro da conta da própria despesa.
+  if (contaJurosId) {
+    ;(jurosPagos || []).forEach((l: any) => {
+      const parteNome = l.parte?.nome || 'Sem beneficiário'
+      const juros = Number(l.valor_juros_multa || 0)
+      if (unidade === 'consolidado' || l.unidade === unidade) {
+        acumular(contaJurosId, juros, l.parte_id, parteNome)
+      } else if (l.unidade === 'rateio') {
+        acumular(contaJurosId, juros * (percentualRateio || 0), l.parte_id, parteNome)
+      }
+    })
+  }
 
   const compraPorLancamento = new Map((comprasLancamentos || []).map((c: any) => [c.id, c]))
   ;(itens || []).forEach((item: any) => {

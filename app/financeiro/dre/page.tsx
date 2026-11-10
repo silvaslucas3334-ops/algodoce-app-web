@@ -47,6 +47,11 @@ function montarAvisos(dados: DreResultado, unidade: VisaoDre): Aviso[] {
         '"CMV" é o valor das notas de compra no mês de competência — não é CMV real (não desconta estoque nem considera o que foi de fato consumido/vendido).',
     },
     {
+      tom: 'azul',
+      texto:
+        'Juros, multa e taxa por atraso registrados na conciliação do extrato aparecem em Despesas Financeiras (3005), no mês do PAGAMENTO — tanto os de despesas quanto os de notas de insumos. A conta original da despesa fica só com o valor sem o juros.',
+    },
+    {
       tom: 'ambar',
       texto:
         'Competência de lançamentos antigos (antes desta funcionalidade) é aproximada pela data de lançamento/pagamento — só despesas recorrentes configuradas depois têm competência deslocada de verdade.' +
