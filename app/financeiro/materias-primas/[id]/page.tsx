@@ -75,6 +75,12 @@ export default function DetalheMateriaPrimaPage() {
 
   async function salvar() {
     if (!materia) return
+    // Matéria-prima ativa precisa de conta contábil: as compras herdam a conta, e item de nota sem conta
+    // distorce o DRE. (Inativa pode ficar sem conta — não entra em compra nova.)
+    if (materia.ativo && !materia.conta_id) {
+      setErro('Escolha a conta contábil do item — sem ela as compras deste item ficam fora do DRE.')
+      return
+    }
     setSalvando(true)
     setErro('')
     try {
@@ -226,13 +232,16 @@ export default function DetalheMateriaPrimaPage() {
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Conta contábil do item</label>
+              <label htmlFor="conta-mp" className="block text-sm font-medium text-gray-700 mb-2">
+                Conta contábil do item{materia.ativo ? ' (obrigatória)' : ''}
+              </label>
               <select
+                id="conta-mp"
                 value={materia.conta_id || ''}
                 onChange={(e) => setMateria({ ...materia, conta_id: e.target.value || undefined })}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white"
+                className={`w-full border rounded-lg px-3 py-2.5 text-sm bg-white ${materia.ativo && !materia.conta_id ? 'border-amber-400' : 'border-gray-300'}`}
               >
-                <option value="">Não definida</option>
+                <option value="">{materia.ativo ? 'Selecione a conta…' : 'Não definida'}</option>
                 {contas.map((c) => (
                   <option key={c.id} value={c.id}>{c.codigo} — {c.nome}</option>
                 ))}

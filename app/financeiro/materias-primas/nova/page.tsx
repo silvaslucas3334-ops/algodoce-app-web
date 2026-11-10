@@ -31,11 +31,17 @@ export default function NovaMateriaPrimaPage() {
       .then(({ data }) => setContas(data || []))
   }, [])
 
-  const podeSalvar = nome.trim() && unidadeMedida.trim() && unidadeCompra.trim() && Number(fatorConversao) > 0
+  // A conta contábil é OBRIGATÓRIA: toda compra deste item herda a conta, e item de nota sem conta cai em
+  // "Sem conta contábil" no DRE (distorce o resultado). Sem conta, não salva.
+  const podeSalvar = nome.trim() && unidadeMedida.trim() && unidadeCompra.trim() && Number(fatorConversao) > 0 && !!contaId
 
   async function salvar() {
     if (!podeSalvar) {
-      setErro('Preencha nome, unidades e um fator de conversão maior que zero.')
+      setErro(
+        !contaId
+          ? 'Escolha a conta contábil do item — sem ela as compras deste item ficam fora do DRE.'
+          : 'Preencha nome, unidades e um fator de conversão maior que zero.'
+      )
       return
     }
     setSalvando(true)
@@ -52,7 +58,7 @@ export default function NovaMateriaPrimaPage() {
         unidade_fornecedor: fornecedorCompleto ? unidadeFornecedor.trim() : null,
         fator_unidade_fornecedor: fornecedorCompleto ? Number(fatorUnidadeFornecedor) : null,
         custo_manual_por_unidade_compra: custoManual.trim() ? Number(custoManual) : null,
-        conta_id: contaId || null,
+        conta_id: contaId,
         descricao: descricao.trim() || null,
       })
       if (error) throw error
@@ -173,9 +179,15 @@ export default function NovaMateriaPrimaPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Conta contábil do item</label>
-              <select value={contaId} onChange={(e) => setContaId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white">
-                <option value="">Definir depois</option>
+              <label htmlFor="conta-mp" className="block text-sm font-medium text-gray-700 mb-2">Conta contábil do item (obrigatória)</label>
+              <select
+                id="conta-mp"
+                value={contaId}
+                onChange={(e) => setContaId(e.target.value)}
+                aria-required="true"
+                className={`w-full border rounded-lg px-3 py-2.5 text-sm bg-white ${contaId ? 'border-gray-300' : 'border-amber-400'}`}
+              >
+                <option value="">Selecione a conta…</option>
                 {contas.map((c) => (
                   <option key={c.id} value={c.id}>{c.codigo} — {c.nome}</option>
                 ))}

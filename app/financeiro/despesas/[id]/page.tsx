@@ -503,6 +503,13 @@ function DetalheDespesaContent() {
   }
 
   async function salvarItem(itemNota: ItemNota) {
+    // Mesma trava da nota nova: item sem conta contábil distorce o DRE.
+    if (!itemNota.conta_id) {
+      setErro(
+        `"${itemNota.materia_prima_nome}" está sem conta contábil no cadastro da matéria-prima. Classifique a conta em Matérias-primas antes de salvar este item.`
+      )
+      return
+    }
     setProcessando(true)
     setErro('')
     try {

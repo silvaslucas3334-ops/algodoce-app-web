@@ -206,8 +206,17 @@ function LancarNotaForm() {
   const totalNota = itens.reduce((acc, i) => acc + i.valor_total, 0)
   const diferencaExtrato = extratoValor != null ? totalNota - extratoValor : null
   const bateComExtrato = diferencaExtrato == null || Math.abs(diferencaExtrato) <= TOLERANCIA_CENTAVOS
+  // TRAVA: item sem conta contábil distorce o DRE ("Sem conta contábil" é subtraído do resultado). A conta
+  // vem do cadastro da matéria-prima; sem ela a nota não é lançada.
+  const itensSemConta = itens.filter((i) => !i.conta_id)
   const podeSalvar =
-    fornecedorId && dataCompra && itens.length > 0 && totalNota > 0 && (!jaPago ? dataVencimento : dataPagamento) && bateComExtrato
+    fornecedorId &&
+    dataCompra &&
+    itens.length > 0 &&
+    totalNota > 0 &&
+    (!jaPago ? dataVencimento : dataPagamento) &&
+    bateComExtrato &&
+    itensSemConta.length === 0
 
   function removerItem(indice: number) {
     setItens((prev) => prev.filter((_, i) => i !== indice))
@@ -216,9 +225,11 @@ function LancarNotaForm() {
   async function salvar() {
     if (!podeSalvar || !usuario || !fornecedor) {
       setErro(
-        !bateComExtrato
-          ? 'O total da nota precisa bater com o valor da transação do extrato.'
-          : 'Preencha fornecedor, data e adicione pelo menos um item.'
+        itensSemConta.length > 0
+          ? `${itensSemConta.length === 1 ? 'Uma matéria-prima está' : `${itensSemConta.length} matérias-primas estão`} sem conta contábil no cadastro: ${itensSemConta.map((i) => i.materia_prima_nome).join(', ')}. Classifique em Matérias-primas (admin) antes de lançar a nota.`
+          : !bateComExtrato
+            ? 'O total da nota precisa bater com o valor da transação do extrato.'
+            : 'Preencha fornecedor, data e adicione pelo menos um item.'
       )
       return
     }
@@ -408,9 +419,20 @@ function LancarNotaForm() {
                       <p className="text-xs text-gray-500">
                         {item.quantidade} {item.unidade_nota} × {formatBRL(item.valor_unitario)}
                       </p>
-                      <p className={`text-[11px] mt-0.5 ${item.conta_label ? 'text-blue-600' : 'text-amber-600'}`}>
-                        {item.conta_label || 'Sem conta no cadastro — admin classifica depois'}
-                      </p>
+                      {item.conta_id ? (
+                        <p className="text-[11px] mt-0.5 text-blue-600">{item.conta_label}</p>
+                      ) : (
+                        <p className="text-[11px] mt-0.5 text-red-600 font-medium">
+                          Sem conta contábil no cadastro — não dá para lançar a nota{' '}
+                          {usuario?.role === 'admin' ? (
+                            <a href={`/financeiro/materias-primas/${item.materia_prima_id}`} target="_blank" rel="noreferrer" className="underline">
+                              Classificar agora
+                            </a>
+                          ) : (
+                            '(peça ao admin para classificar em Matérias-primas)'
+                          )}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-3">
                       <p className="font-semibold text-gray-800">{formatBRL(item.valor_total)}</p>
@@ -525,6 +547,14 @@ function LancarNotaForm() {
               </div>
             )}
           </div>
+
+          {itensSemConta.length > 0 && (
+            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
+              {itensSemConta.length === 1 ? '1 item está' : `${itensSemConta.length} itens estão`} sem conta contábil no cadastro da matéria-prima
+              ({itensSemConta.map((i) => i.materia_prima_nome).join(', ')}). Classifique a conta em Matérias-primas para poder lançar a nota — assim a
+              compra entra no DRE.
+            </p>
+          )}
 
           <button onClick={salvar} disabled={salvando || !podeSalvar} className="w-full bg-green-600 text-white rounded-lg py-3 font-semibold disabled:opacity-50">
             {salvando ? 'Salvando...' : `Lançar nota${itens.length > 0 ? ` (${itens.length} ${itens.length === 1 ? 'item' : 'itens'} · ${formatBRL(totalNota)})` : ''}`}

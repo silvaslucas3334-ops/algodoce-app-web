@@ -1,7 +1,7 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { FinanceiroMateriaPrima } from '@/lib/types'
+import { FinanceiroConta, FinanceiroMateriaPrima } from '@/lib/types'
 import { X } from 'lucide-react'
 
 interface Props {
@@ -9,21 +9,37 @@ interface Props {
   onCreated: (materia: FinanceiroMateriaPrima) => void
 }
 
-// Cadastro rápido — só os campos obrigatórios. Conta contábil e descrição
-// continuam só na tela cheia /financeiro/materias-primas/[id].
+// Cadastro rápido — nome, unidades e CONTA CONTÁBIL (obrigatória: toda compra herda a conta, e item de
+// nota sem conta distorce o DRE). A descrição continua só na tela cheia /financeiro/materias-primas/[id].
 export default function NovaMateriaPrimaRapidaModal({ onClose, onCreated }: Props) {
   const [nome, setNome] = useState('')
   const [unidadeCompra, setUnidadeCompra] = useState('kg')
   const [unidadeMedida, setUnidadeMedida] = useState('g')
   const [fatorConversao, setFatorConversao] = useState('1000')
+  const [contaId, setContaId] = useState('')
+  const [contas, setContas] = useState<FinanceiroConta[]>([])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
-  const podeSalvar = nome.trim() && unidadeMedida.trim() && unidadeCompra.trim() && Number(fatorConversao) > 0
+  useEffect(() => {
+    supabase
+      .from('financeiro_contas')
+      .select('*')
+      .in('aplicavel_a', ['compras_insumos', 'ambos'])
+      .eq('ativo', true)
+      .order('codigo')
+      .then(({ data }) => setContas(data || []))
+  }, [])
+
+  const podeSalvar = nome.trim() && unidadeMedida.trim() && unidadeCompra.trim() && Number(fatorConversao) > 0 && !!contaId
 
   async function salvar() {
     if (!podeSalvar) {
-      setErro('Preencha nome, unidades e um fator de conversão maior que zero.')
+      setErro(
+        !contaId
+          ? 'Escolha a conta contábil do item — sem ela as compras deste item ficam fora do DRE.'
+          : 'Preencha nome, unidades e um fator de conversão maior que zero.'
+      )
       return
     }
     setSalvando(true)
@@ -36,8 +52,9 @@ export default function NovaMateriaPrimaRapidaModal({ onClose, onCreated }: Prop
           unidade_medida: unidadeMedida.trim(),
           unidade_compra: unidadeCompra.trim(),
           fator_conversao: Number(fatorConversao),
+          conta_id: contaId,
         })
-        .select('*')
+        .select('*, conta:financeiro_contas(codigo, nome)')
         .single()
       if (error) throw error
       onCreated(data)
@@ -109,7 +126,23 @@ export default function NovaMateriaPrimaRapidaModal({ onClose, onCreated }: Prop
               Quantas unidades de "{unidadeMedida || 'medida'}" tem em 1 "{unidadeCompra || 'compra'}". Ex: 1 kg = 1000 g → 1000.
             </p>
           </div>
-          <p className="text-xs text-gray-400">Conta contábil e descrição ficam disponíveis depois, no cadastro completo.</p>
+          <div>
+            <label htmlFor="conta-mp-rapida" className="block text-sm font-medium text-gray-700 mb-1.5">Conta contábil do item (obrigatória)</label>
+            <select
+              id="conta-mp-rapida"
+              value={contaId}
+              onChange={(e) => setContaId(e.target.value)}
+              aria-required="true"
+              className={`w-full border rounded-lg px-3 py-2.5 text-sm bg-white ${contaId ? 'border-gray-300' : 'border-amber-400'}`}
+            >
+              <option value="">Selecione a conta…</option>
+              {contas.map((c) => (
+                <option key={c.id} value={c.id}>{c.codigo} — {c.nome}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">Ex: farinha → 1001 Matéria-Prima; caixa de bolo → 1002 Embalagem.</p>
+          </div>
+          <p className="text-xs text-gray-400">A descrição fica disponível depois, no cadastro completo.</p>
           <button
             onClick={salvar}
             disabled={salvando || !podeSalvar}
