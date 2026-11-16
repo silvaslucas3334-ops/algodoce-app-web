@@ -1,12 +1,16 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import DreDetalheModal from '@/components/DreDetalheModal'
 import PageHeader from '@/components/PageHeader'
 import { buscarDre, buscarDreComparativo, DreResultado, VisaoDre, DreSecao, DreContaValor } from '@/lib/financeiro-dre'
+import { buscarQualidadeDre, QualidadeDre } from '@/lib/financeiro-dre-qualidade'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
-import { ChevronLeft, ChevronRight, Loader, Info, X, TrendingUp, TrendingDown } from 'lucide-react'
+import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Loader, Info, X, TrendingUp, TrendingDown } from 'lucide-react'
 import { CategoriaReceita } from '@/lib/types'
 
 const MESES = [
@@ -75,12 +79,13 @@ function montarAvisos(dados: DreResultado, unidade: VisaoDre): Aviso[] {
 }
 
 function AvisosModal({ avisos, onClose }: { avisos: Aviso[]; onClose: () => void }) {
+  useEscapeKey(onClose)
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label="Avisos sobre este DRE">
       <div className="bg-white rounded-2xl shadow-lg max-w-md w-full p-6 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-gray-800">Avisos sobre este DRE</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={onClose} aria-label="Fechar" className="text-gray-400 hover:text-gray-600">
             <X size={24} />
           </button>
         </div>
@@ -110,10 +115,14 @@ function SecaoCascata({
   titulo,
   secao,
   onAbrirConta,
+  base = 'liquida',
 }: {
   titulo: string
   secao: DreSecao
   onAbrirConta: (c: DreContaValor) => void
+  // Todas as seções mostram % da RECEITA LÍQUIDA (um só denominador); só as deduções, que ainda não têm
+  // receita líquida para dividir, usam a receita bruta — e o rótulo diz qual é a base.
+  base?: 'liquida' | 'bruta'
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3">
@@ -122,7 +131,9 @@ function SecaoCascata({
           {titulo} — {formatBRL(secao.total)}
         </p>
         {secao.percentual != null && (
-          <span className="text-xs text-gray-400 whitespace-nowrap">{secao.percentual.toFixed(1)}%</span>
+          <span className="text-xs text-gray-400 whitespace-nowrap">
+            {secao.percentual.toFixed(1)}% da receita {base === 'bruta' ? 'bruta' : 'líquida'}
+          </span>
         )}
       </div>
       {secao.contas.length === 0 ? (
@@ -175,12 +186,15 @@ interface LinhaComparativa {
   subtotal?: boolean
 }
 
-function TabelaComparativa({ dados }: { dados: DreResultado[] }) {
+function TabelaComparativa({ dados: dadosCronologicos }: { dados: DreResultado[] }) {
+  // Mês mais recente PRIMEIRO: no celular a primeira coluna visível é a que importa (antes era a mais antiga,
+  // geralmente vazia).
+  const dados = [...dadosCronologicos].reverse()
   const linhas: LinhaComparativa[] = [
     { label: 'Receita Bruta de Vendas', valores: dados.map((d) => d.totalReceitaBruta) },
     { label: '(−) Deduções de Vendas', valores: dados.map((d) => d.secaoDeducaoVendas.total) },
     { label: '= Receita Líquida de Vendas', valores: dados.map((d) => d.totalReceitaLiquida), subtotal: true },
-    { label: '(−) CMV', valores: dados.map((d) => d.secaoCmv.total) },
+    { label: '(−) CMV (compras de insumos)', valores: dados.map((d) => d.secaoCmv.total) },
     { label: '(−) Mão de Obra e Encargos', valores: dados.map((d) => d.secaoMaoObra.total) },
     { label: '= Lucro Bruto', valores: dados.map((d) => d.totalLucroBruto), subtotal: true },
     { label: '(−) Despesas Operacionais', valores: dados.map((d) => d.secaoDespesasOperacionais.total) },
@@ -221,10 +235,17 @@ function TabelaComparativa({ dados }: { dados: DreResultado[] }) {
                   <td
                     key={i}
                     className={`px-4 py-2.5 text-right whitespace-nowrap ${
-                      l.subtotal ? 'font-bold text-pink-900' : v < 0 ? 'text-red-600' : 'text-gray-800'
+                      !dados[i].temDados
+                        ? 'text-gray-300'
+                        : l.subtotal
+                          ? 'font-bold text-pink-900'
+                          : v < 0
+                            ? 'text-red-600'
+                            : 'text-gray-800'
                     }`}
+                    title={!dados[i].temDados ? 'Mês sem receita nem lançamentos' : undefined}
                   >
-                    {formatBRL(v)}
+                    {dados[i].temDados ? formatBRL(v) : '—'}
                   </td>
                 ))}
               </tr>
@@ -236,47 +257,132 @@ function TabelaComparativa({ dados }: { dados: DreResultado[] }) {
   )
 }
 
-export default function DrePage() {
-  const hoje = new Date()
+// "DRE completo?": o que falta (ou está duvidoso) para o número do mês merecer confiança. Aparece logo abaixo
+// do mês, antes do resultado — o dono não deve ler o resultado sem ver estes sinais.
+function FaixaQualidade({ qualidade }: { qualidade: QualidadeDre }) {
+  const alertas = qualidade.itens.filter((i) => i.nivel === 'alerta').length
+  if (qualidade.itens.length === 0) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 mb-4 text-sm text-green-800">
+        <CheckCircle size={16} className="flex-shrink-0" />
+        DRE completo — nenhuma pendência conhecida nos dados deste mês.
+      </div>
+    )
+  }
+  return (
+    <div className={`rounded-xl border mb-4 overflow-hidden ${alertas > 0 ? 'border-red-200 bg-red-50/60' : 'border-amber-200 bg-amber-50/60'}`}>
+      <p className={`px-4 py-2.5 text-sm font-semibold flex items-center gap-2 ${alertas > 0 ? 'text-red-800' : 'text-amber-800'}`}>
+        <AlertTriangle size={16} className="flex-shrink-0" />
+        DRE completo? {alertas > 0 ? `Não — ${alertas} alerta(s)` : 'Quase — pontos de atenção'}
+        {qualidade.itens.length > alertas && alertas > 0 && (
+          <span className="font-normal text-xs">· {qualidade.itens.length - alertas} ponto(s) de atenção</span>
+        )}
+      </p>
+      <ul className="divide-y divide-white/70 bg-white/70">
+        {qualidade.itens.map((i) => (
+          <li key={i.id} className="px-4 py-3 text-sm">
+            <p className="font-semibold text-gray-800 flex items-start gap-2">
+              <span
+                className={`mt-1.5 inline-block w-2 h-2 rounded-full flex-shrink-0 ${i.nivel === 'alerta' ? 'bg-red-500' : 'bg-amber-500'}`}
+                aria-label={i.nivel === 'alerta' ? 'Alerta' : 'Atenção'}
+              />
+              {i.titulo}
+            </p>
+            <p className="text-xs text-gray-600 mt-1 ml-4">{i.detalhe}</p>
+            {i.href && (
+              <Link href={i.href} className="inline-block ml-4 mt-1.5 text-xs font-semibold text-pink-700 hover:underline">
+                {i.hrefRotulo || 'Abrir'} →
+              </Link>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
 
-  const [unidade, setUnidade] = useState<VisaoDre>('loja1')
-  const [ano, setAno] = useState(hoje.getFullYear())
-  const [mes, setMes] = useState(hoje.getMonth() + 1)
-  const [modo, setModo] = useState<Modo>('unico')
+// Visão, mês e modo vivem na URL (?v=&ano=&mes=&m=): recarregar a página, voltar e compartilhar o link mantêm
+// exatamente o que se estava vendo. Sem parâmetros, abre no ÚLTIMO MÊS COMPLETO (o mês corrente é parcial e
+// parecia final) e no Consolidado.
+function DreConteudo() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const hoje = new Date()
+  const ultimoMesCompleto = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
+  const visaoParam = searchParams.get('v')
+  const unidade: VisaoDre = visaoParam === 'loja1' || visaoParam === 'loja2' || visaoParam === 'consolidado' ? visaoParam : 'consolidado'
+  const mesParam = Number(searchParams.get('mes'))
+  const ano = Number(searchParams.get('ano')) || ultimoMesCompleto.getFullYear()
+  const mes = mesParam >= 1 && mesParam <= 12 ? mesParam : ultimoMesCompleto.getMonth() + 1
+  const modo: Modo = searchParams.get('m') === 'comp' ? 'comparativo' : 'unico'
+
+  const atualizar = useCallback(
+    (parcial: Record<string, string | null>) => {
+      const p = new URLSearchParams(searchParams.toString())
+      // grava sempre ano e mes juntos: o link fica explícito mesmo quando é o mês padrão
+      if (!p.get('ano')) p.set('ano', String(ano))
+      if (!p.get('mes')) p.set('mes', String(mes))
+      Object.entries(parcial).forEach(([k, v]) => {
+        if (v === null || v === '') p.delete(k)
+        else p.set(k, v)
+      })
+      router.replace(`${pathname}?${p.toString()}`, { scroll: false })
+    },
+    [searchParams, pathname, router, ano, mes]
+  )
 
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [dados, setDados] = useState<DreResultado | null>(null)
   const [dadosComparativo, setDadosComparativo] = useState<DreResultado[] | null>(null)
+  const [qualidade, setQualidade] = useState<QualidadeDre | null>(null)
   const [modalDetalhe, setModalDetalhe] = useState<ModalDetalhe | null>(null)
   const [mostrarAvisos, setMostrarAvisos] = useState(false)
+  const requisicao = useRef(0)
 
   useEffect(() => {
     carregar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unidade, ano, mes, modo])
 
   async function carregar() {
+    const id = ++requisicao.current
     setLoading(true)
     setErro('')
+    setQualidade(null)
     try {
       if (modo === 'unico') {
-        setDados(await buscarDre(unidade, ano, mes))
+        const dre = await buscarDre(unidade, ano, mes)
+        if (id !== requisicao.current) return
+        setDados(dre)
+        setLoading(false)
+        // o DRE aparece primeiro; os sinais de qualidade chegam logo depois, sem segurar a tela
+        buscarQualidadeDre(unidade, ano, mes, dre)
+          .then((q) => id === requisicao.current && setQualidade(q))
+          .catch((e) => console.error('Erro ao calcular a qualidade do DRE:', e))
       } else {
-        setDadosComparativo(await buscarDreComparativo(unidade, ano, mes, 6))
+        const comparativo = await buscarDreComparativo(unidade, ano, mes, 6)
+        if (id !== requisicao.current) return
+        setDadosComparativo(comparativo)
       }
     } catch (err: any) {
+      if (id !== requisicao.current) return
       console.error('Erro ao carregar DRE:', err)
       setErro('Erro ao carregar: ' + (err?.message || 'desconhecido'))
     } finally {
-      setLoading(false)
+      if (id === requisicao.current) setLoading(false)
     }
   }
 
   function mesAnterior() {
-    if (mes === 1) { setMes(12); setAno(ano - 1) } else { setMes(mes - 1) }
+    if (mes === 1) atualizar({ mes: '12', ano: String(ano - 1) })
+    else atualizar({ mes: String(mes - 1), ano: String(ano) })
   }
   function proximoMes() {
-    if (mes === 12) { setMes(1); setAno(ano + 1) } else { setMes(mes + 1) }
+    if (mes === 12) atualizar({ mes: '1', ano: String(ano + 1) })
+    else atualizar({ mes: String(mes + 1), ano: String(ano) })
   }
 
   function abrirConta(secao: DreSecao, c: DreContaValor) {
@@ -312,7 +418,8 @@ export default function DrePage() {
             {(['loja1', 'loja2', 'consolidado'] as const).map((u) => (
               <button
                 key={u}
-                onClick={() => setUnidade(u)}
+                onClick={() => atualizar({ v: u })}
+                aria-pressed={unidade === u}
                 className={`px-4 py-2 rounded-lg text-sm font-semibold border-2 ${
                   unidade === u ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'
                 }`}
@@ -326,7 +433,8 @@ export default function DrePage() {
             {(['unico', 'comparativo'] as const).map((m) => (
               <button
                 key={m}
-                onClick={() => setModo(m)}
+                onClick={() => atualizar({ m: m === 'comparativo' ? 'comp' : null })}
+                aria-pressed={modo === m}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
                   modo === m ? 'bg-gray-800 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-500'
                 }`}
@@ -336,16 +444,46 @@ export default function DrePage() {
             ))}
           </div>
 
-          <div className="flex items-center justify-center gap-4 mb-6">
-            <button onClick={mesAnterior} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+          <div className="flex items-center justify-center gap-4 mb-2">
+            <button onClick={mesAnterior} aria-label="Mês anterior" className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
               <ChevronLeft size={20} className="text-gray-600" />
             </button>
             <p className="text-lg font-semibold text-gray-800 min-w-[180px] text-center">
               {modo === 'unico' ? `${MESES[mes - 1]} de ${ano}` : `Até ${MESES[mes - 1]} de ${ano}`}
             </p>
-            <button onClick={proximoMes} className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
+            <button onClick={proximoMes} aria-label="Próximo mês" className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
               <ChevronRight size={20} className="text-gray-600" />
             </button>
+          </div>
+
+          {/* selos do mês: parcial / dados incompletos / completo */}
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-5 min-h-[24px]" aria-live="polite">
+            {(() => {
+              const emAndamento = modo === 'unico' ? qualidade?.mesEmAndamento : null
+              const ehMesCorrente = ano === hoje.getFullYear() && mes === hoje.getMonth() + 1
+              const andamento =
+                emAndamento ??
+                (ehMesCorrente ? { dia: hoje.getDate(), total: new Date(ano, mes, 0).getDate(), futuro: false } : null)
+              return (
+                <>
+                  {andamento && (
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                      {andamento.futuro ? 'Mês futuro' : `Mês em andamento · dia ${andamento.dia} de ${andamento.total}`}
+                    </span>
+                  )}
+                  {modo === 'unico' && qualidade && !qualidade.completo && (
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200">
+                      Dados incompletos · {qualidade.itens.filter((i) => i.nivel === 'alerta').length} alerta(s)
+                    </span>
+                  )}
+                  {modo === 'unico' && qualidade && qualidade.completo && !andamento && (
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200">
+                      Sem alertas de dados
+                    </span>
+                  )}
+                </>
+              )
+            })()}
           </div>
 
           {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">{erro}</div>}
@@ -358,6 +496,8 @@ export default function DrePage() {
             dadosComparativo && <TabelaComparativa dados={dadosComparativo} />
           ) : dados ? (
             <>
+              {qualidade && <FaixaQualidade qualidade={qualidade} />}
+
               <div className={`rounded-2xl p-6 mb-4 border ${dados.resultado >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -365,9 +505,9 @@ export default function DrePage() {
                     <p className={`text-3xl font-bold mt-1 ${dados.resultado >= 0 ? 'text-green-700' : 'text-red-700'}`}>
                       {formatBRL(dados.resultado)}
                     </p>
-                    {dados.totalReceitaBruta > 0 && (
+                    {dados.totalReceitaLiquida > 0 && (
                       <p className={`text-xs font-medium mt-1 ${dados.resultado >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {((dados.resultado / dados.totalReceitaBruta) * 100).toFixed(1)}% da Receita Bruta
+                        {((dados.resultado / dados.totalReceitaLiquida) * 100).toFixed(1)}% da Receita Líquida
                       </p>
                     )}
                   </div>
@@ -382,8 +522,9 @@ export default function DrePage() {
                   Receita Bruta de Vendas — {formatBRL(dados.totalReceitaBruta)}
                 </p>
                 <p className="text-xs text-gray-400 px-4 pb-3">
-                  Faturamento fiscal (Import do PDV + faturamento do dia informado manualmente), não mais o que caiu no
-                  banco — veja "Entradas de Caixa" mais abaixo pra essa outra visão.
+                  Faturamento informado (lançamento diário e, nos dias sem lançamento, o PDV importado) — não é o que caiu
+                  no banco: veja "Entradas de Caixa" mais abaixo pra essa outra visão. Só o total do mês é confiável; a
+                  divisão por forma de pagamento do lançamento diário não.
                 </p>
               </div>
 
@@ -416,10 +557,10 @@ export default function DrePage() {
                 </div>
               )}
 
-              <SecaoCascata titulo="(−) Deduções de Vendas" secao={dados.secaoDeducaoVendas} onAbrirConta={(c) => abrirConta(dados.secaoDeducaoVendas, c)} />
+              <SecaoCascata titulo="(−) Deduções de Vendas" secao={dados.secaoDeducaoVendas} base="bruta" onAbrirConta={(c) => abrirConta(dados.secaoDeducaoVendas, c)} />
               <SubtotalCascata label="= Receita Líquida de Vendas" valor={dados.totalReceitaLiquida} />
 
-              <SecaoCascata titulo="(−) CMV" secao={dados.secaoCmv} onAbrirConta={(c) => abrirConta(dados.secaoCmv, c)} />
+              <SecaoCascata titulo="(−) CMV (compras de insumos)" secao={dados.secaoCmv} onAbrirConta={(c) => abrirConta(dados.secaoCmv, c)} />
               <SecaoCascata titulo="(−) Mão de Obra e Encargos" secao={dados.secaoMaoObra} onAbrirConta={(c) => abrirConta(dados.secaoMaoObra, c)} />
               <SubtotalCascata label="= Lucro Bruto" valor={dados.totalLucroBruto} />
 
@@ -487,5 +628,14 @@ export default function DrePage() {
         )}
       </div>
     </ProtectedRoute>
+  )
+}
+
+// useSearchParams exige <Suspense> no App Router.
+export default function DrePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">Carregando...</div>}>
+      <DreConteudo />
+    </Suspense>
   )
 }

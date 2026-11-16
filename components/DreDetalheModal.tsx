@@ -2,6 +2,7 @@
 import { DreLinhaDetalhe, DreReceitaDetalhe } from '@/lib/financeiro-dre'
 import { formatBRL } from '@/lib/ofx'
 import { X } from 'lucide-react'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 
 interface Props {
   tipo: 'despesa' | 'insumo' | 'receita'
@@ -16,6 +17,7 @@ interface Props {
 // schema (só categoria), então vira uma lista das entradas individuais,
 // já mostrando bruto x líquido quando a taxa foi informada.
 export default function DreDetalheModal({ tipo, titulo, linhas, receitas, onClose }: Props) {
+  useEscapeKey(onClose)
   const porParte =
     tipo !== 'receita'
       ? Array.from(
@@ -34,11 +36,11 @@ export default function DreDetalheModal({ tipo, titulo, linhas, receitas, onClos
   const receitasOrdenadas = tipo === 'receita' ? (receitas || []).slice().sort((a, b) => b.data.localeCompare(a.data)) : []
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label={titulo}>
       <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-gray-800">{titulo}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+          <button onClick={onClose} aria-label="Fechar" className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
         </div>
 
         {tipo !== 'receita' ? (

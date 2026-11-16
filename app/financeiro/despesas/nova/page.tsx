@@ -33,6 +33,12 @@ function NovaDespesaForm() {
   // voltaria pro estado default (mês atual, aba mensal) em vez de onde o
   // usuário estava — voltarPara carrega o destino exato.
   const voltarPara = caminhoInternoSeguro(params.get('voltarPara'))
+  // Atalho do aviso do DRE (taxas de cartão/aplicativo e DAS do mês): conta pelo código, data e descrição
+  // já preenchidas. Tudo continua editável; valor e beneficiário o usuário informa.
+  const contaCodigoParam = params.get('conta')
+  const dataParam = params.get('dataLancamento')
+  const dataParamValida = dataParam && /^\d{4}-\d{2}-\d{2}$/.test(dataParam) ? dataParam : null
+  const descricaoParam = (params.get('descricao') || '').slice(0, 120)
 
   // Só o valor inicial do seletor — cozinha não é uma entidade própria
   // (custos entram como rateio/0001) e loja tende a lançar pra própria
@@ -42,9 +48,9 @@ function NovaDespesaForm() {
     usuario?.role === 'cozinha' ? 'rateio' : usuario?.role === 'loja' && usuario?.loja_id ? (usuario.loja_id as UnidadeFinanceiro) : 'loja1'
 
   const [parteId, setParteId] = useState('')
-  const [descricao, setDescricao] = useState('')
+  const [descricao, setDescricao] = useState(descricaoParam)
   const [valor, setValor] = useState(extratoValor || '')
-  const [dataLancamento, setDataLancamento] = useState(extratoData || hojeISO())
+  const [dataLancamento, setDataLancamento] = useState(extratoData || dataParamValida || hojeISO())
   const [unidade, setUnidade] = useState<UnidadeFinanceiro>(extratoUnidade || unidadeInicial)
   const [contaId, setContaId] = useState('')
   const [numeroDocumento, setNumeroDocumento] = useState('')
@@ -88,7 +94,11 @@ function NovaDespesaForm() {
       .in('aplicavel_a', ['despesas_gerais', 'ambos'])
       .eq('ativo', true)
       .order('codigo')
-      .then(({ data }) => setContas(data || []))
+      .then(({ data }) => {
+        setContas(data || [])
+        const daUrl = contaCodigoParam ? (data || []).find((c) => c.codigo === contaCodigoParam) : null
+        if (daUrl) setContaId(daUrl.id)
+      })
   }, [])
 
   // Pré-seleciona o beneficiário se o CNPJ/CPF do extrato bater com algum

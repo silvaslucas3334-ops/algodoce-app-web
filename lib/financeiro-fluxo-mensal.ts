@@ -334,7 +334,10 @@ async function buscarFaturamentoLoja(
   ano: number,
   mes: number,
   dias: string[],
-  hoje: string
+  hoje: string,
+  // O DRE só usa os dias já realizados (descarta a previsão), então não precisa baixar os 90 dias de PDV
+  // do histórico — que só servem para calcular a média do forecast.
+  semPrevisao = false
 ): Promise<{ porDia: (number | null)[]; ehForecastPorDia: boolean[] }> {
   const { inicio, fim } = primeiroEUltimoDia(ano, mes)
   const inicioHistorico = inicioJanelaHistorico(hoje)
@@ -342,9 +345,9 @@ async function buscarFaturamentoLoja(
 
   const [pedidosMes, pedidosHistorico, manualMes, manualHistorico] = await Promise.all([
     inicio <= hoje ? buscarPedidosDoPeriodo(loja, inicio, fimReal) : Promise.resolve([]),
-    buscarPedidosDoPeriodo(loja, inicioHistorico, hoje),
+    semPrevisao ? Promise.resolve([]) : buscarPedidosDoPeriodo(loja, inicioHistorico, hoje),
     inicio <= hoje ? buscarFaturamentoDiarioPeriodo(loja, inicio, fimReal) : Promise.resolve([]),
-    buscarFaturamentoDiarioPeriodo(loja, inicioHistorico, hoje),
+    semPrevisao ? Promise.resolve([]) : buscarFaturamentoDiarioPeriodo(loja, inicioHistorico, hoje),
   ])
 
   function agruparPorDia(pedidos: typeof pedidosMes): Map<string, number> {
@@ -410,11 +413,17 @@ export interface FaturamentoPorLoja {
  * sob demanda — reaproveita a mesma lógica de merge manual×PDV e
  * forecast, sem duplicar.
  */
-export async function buscarFaturamentoPorLojaDoMes(ano: number, mes: number): Promise<FaturamentoPorLoja[]> {
+export async function buscarFaturamentoPorLojaDoMes(
+  ano: number,
+  mes: number,
+  opcoes?: { semPrevisao?: boolean }
+): Promise<FaturamentoPorLoja[]> {
   const dias = diasDoMes(ano, mes)
   const hoje = hojeISO()
   const lojas: ('loja1' | 'loja2')[] = ['loja1', 'loja2']
-  const resultados = await Promise.all(lojas.map((loja) => buscarFaturamentoLoja(loja, ano, mes, dias, hoje)))
+  const resultados = await Promise.all(
+    lojas.map((loja) => buscarFaturamentoLoja(loja, ano, mes, dias, hoje, opcoes?.semPrevisao === true))
+  )
   return lojas.map((loja, i) => ({ loja, porDia: resultados[i].porDia, ehForecastPorDia: resultados[i].ehForecastPorDia }))
 }
 

@@ -90,6 +90,14 @@ export interface DreResultado {
   receitasDetalhadas: DreReceitaDetalhe[]
   linhasDetalhadas: DreLinhaDetalhe[] // despesas + itens de compra, por conta — alimenta o drilldown por conta
   aportesReservaDetalhados: DreLinhaDetalhe[]
+  // false = o mês não tem receita nem lançamento nenhum (ex.: antes do sistema): o comparativo mostra "—" em
+  // vez de R$ 0,00, que pareceria um mês real com resultado zero.
+  temDados: boolean
+  // Sinais de qualidade calculados junto com o DRE (sem consulta extra).
+  diagnostico: {
+    // notas de insumos cujo total (sem juros/multa) ≠ soma dos itens: a diferença não entra no DRE
+    notasComDiferenca: { n: number; valor: number }
+  }
 }
 
 /**
@@ -134,7 +142,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
       .lte('data_competencia', dataFim),
     supabase
       .from('financeiro_lancamentos')
-      .select('id, unidade, parte_id, parte:financeiro_partes!parte_id(nome)')
+      .select('id, unidade, parte_id, valor_total, valor_juros_multa, grupo_parcelamento, parte:financeiro_partes!parte_id(nome)')
       .eq('tipo', 'compra_insumos')
       .neq('status', 'cancelado')
       .gte('data_competencia', dataInicio)
@@ -149,7 +157,8 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
       .gt('valor_juros_multa', 0)
       .gte('data_pagamento', dataInicio)
       .lte('data_pagamento', dataFim),
-    buscarFaturamentoPorLojaDoMes(ano, mes),
+    // semPrevisao: o DRE só usa dias já realizados — não baixa os 90 dias de PDV do histórico do forecast
+    buscarFaturamentoPorLojaDoMes(ano, mes, { semPrevisao: true }),
   ])
   if (erroContas) throw new Error(erroContas.message)
   if (erroReceitas) throw new Error(erroReceitas.message)
@@ -324,18 +333,13 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
   const totalLucroBruto = totalReceitaLiquida - secaoCmv.total - secaoMaoObra.total
 
   const secaoDespesasOperacionais = montarSecao('despesas_operacionais', contasDaLinha('despesas_operacionais'), totalReceitaLiquida)
-  const totalResultadoOperacional = totalLucroBruto - secaoDespesasOperacionais.total
-
-  const secaoResultadoFinanceiro = montarSecao('resultado_financeiro', contasDaLinha('resultado_financeiro'), totalReceitaLiquida)
-  const totalLucroLiquidoAntesDistribuicao = totalResultadoOperacional - secaoResultadoFinanceiro.total
-
-  const secaoDistribuicaoLucros = montarSecao('distribuicao_lucros', contasDaLinha('distribuicao_lucros'), totalReceitaLiquida)
 
   // Rede de segurança: lançamento sem conta_id, ou com conta_id apontando
   // pra uma conta sem linha_dre (não deveria existir com o plano seedado —
   // só cobre um cadastro novo/legado sem classificação). Entra no
-  // resultado pra nunca sumir dinheiro silenciosamente, mas fica isolada
-  // da cascata "oficial".
+  // resultado pra nunca sumir dinheiro silenciosamente. Agora ENTRA no subtotal
+  // Resultado Operacional (antes só era subtraído no final, o que fazia os
+  // subtotais não fecharem com o resultado quando havia valor aqui).
   const valorSemConta = valorPorConta.get('sem-conta') || 0
   const contasNaoClassificadas: DreContaValor[] = [
     ...(valorSemConta !== 0 ? [{ contaId: 'sem-conta', codigo: '—', nome: 'Sem conta contábil' }] : []),
@@ -343,8 +347,39 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
   ].map((c: any) => ({ contaId: c.contaId ?? c.id, codigo: c.codigo, nome: c.nome, valor: valorPorConta.get(c.contaId ?? c.id) || 0 }))
   const secaoNaoClassificada = montarSecaoNaoClassificada(contasNaoClassificadas, totalReceitaLiquida)
 
-  const resultado =
-    totalLucroLiquidoAntesDistribuicao - secaoDistribuicaoLucros.total - secaoNaoClassificada.total
+  const totalResultadoOperacional = totalLucroBruto - secaoDespesasOperacionais.total - secaoNaoClassificada.total
+
+  const secaoResultadoFinanceiro = montarSecao('resultado_financeiro', contasDaLinha('resultado_financeiro'), totalReceitaLiquida)
+  const totalLucroLiquidoAntesDistribuicao = totalResultadoOperacional - secaoResultadoFinanceiro.total
+
+  const secaoDistribuicaoLucros = montarSecao('distribuicao_lucros', contasDaLinha('distribuicao_lucros'), totalReceitaLiquida)
+
+  const resultado = totalLucroLiquidoAntesDistribuicao - secaoDistribuicaoLucros.total
+
+  // Notas de insumos cujo total (sem o juros/multa) difere da soma dos itens: o DRE conta só pelos itens,
+  // então a diferença fica de fora do custo. Agrupa parcelas da mesma nota (itens ficam na parcela 1).
+  const gruposNota = new Map<string, { cabecalho: number; itens: number }>()
+  ;(comprasLancamentos || []).forEach((c: any) => {
+    const k = c.grupo_parcelamento || c.id
+    const g = gruposNota.get(k) || { cabecalho: 0, itens: 0 }
+    g.cabecalho += Number(c.valor_total || 0) - Number(c.valor_juros_multa || 0)
+    gruposNota.set(k, g)
+  })
+  const grupoPorLancamento = new Map((comprasLancamentos || []).map((c: any) => [c.id, c.grupo_parcelamento || c.id]))
+  ;(itens || []).forEach((i: any) => {
+    const k = grupoPorLancamento.get(i.lancamento_id)
+    if (k && gruposNota.has(k)) gruposNota.get(k)!.itens += Number(i.valor_total || 0)
+  })
+  let notasDifN = 0
+  let notasDifValor = 0
+  gruposNota.forEach((g) => {
+    const dif = g.cabecalho - g.itens
+    if (Math.abs(dif) > 0.05) {
+      notasDifN++
+      notasDifValor += dif
+    }
+  })
+  const temDados = totalReceitaBruta !== 0 || linhasDetalhadas.length > 0 || aportesReservaDetalhados.length > 0
 
   const receitasDetalhadas: DreReceitaDetalhe[] = receitasFiltradas.map((r: any) => ({
     categoria: r.categoria,
@@ -379,6 +414,8 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     receitasDetalhadas,
     linhasDetalhadas,
     aportesReservaDetalhados,
+    temDados,
+    diagnostico: { notasComDiferenca: { n: notasDifN, valor: Math.round(notasDifValor * 100) / 100 } },
   }
 }
 
