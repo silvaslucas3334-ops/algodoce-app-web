@@ -1,16 +1,20 @@
 'use client'
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import Link from 'next/link'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import DreDetalheModal from '@/components/DreDetalheModal'
+import DreKpis from '@/components/dre/DreKpis'
+import DreCascataTabela from '@/components/dre/DreCascataTabela'
+import DreGraficoCascata from '@/components/dre/DreGraficoCascata'
+import DrePendencias from '@/components/dre/DrePendencias'
 import PageHeader from '@/components/PageHeader'
-import { buscarDre, buscarDreComparativo, DreResultado, VisaoDre, DreSecao, DreContaValor } from '@/lib/financeiro-dre'
+import { buscarDre, buscarDreComparativo, DreResultado, VisaoDre, DreSecao } from '@/lib/financeiro-dre'
 import { buscarQualidadeDre, QualidadeDre } from '@/lib/financeiro-dre-qualidade'
+import { ContaCascata, LinhaCascata, montarCascata, passosDoGrafico } from '@/lib/financeiro-dre-apresentacao'
 import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
-import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Loader, Info, X, TrendingUp, TrendingDown } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader, Info, X } from 'lucide-react'
 import { CategoriaReceita } from '@/lib/types'
 
 const MESES = [
@@ -106,78 +110,9 @@ function AvisosModal({ avisos, onClose }: { avisos: Aviso[]; onClose: () => void
 
 // CMV é a única seção cujas contas vêm de itens de compra (fornecedor);
 // todo o resto vem de lançamentos de despesa (beneficiário) — decide qual
-// rótulo o modal de detalhe usa, sem precisar guardar isso por conta.
+// rótulo o painel de detalhe usa, sem precisar guardar isso por conta.
 function tipoOrigem(linha: DreSecao['linha']): 'insumo' | 'despesa' {
   return linha === 'cmv' ? 'insumo' : 'despesa'
-}
-
-function SecaoCascata({
-  titulo,
-  secao,
-  onAbrirConta,
-  base = 'liquida',
-}: {
-  titulo: string
-  secao: DreSecao
-  onAbrirConta: (c: DreContaValor) => void
-  // Todas as seções mostram % da RECEITA LÍQUIDA (um só denominador); só as deduções, que ainda não têm
-  // receita líquida para dividir, usam a receita bruta — e o rótulo diz qual é a base.
-  base?: 'liquida' | 'bruta'
-}) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3">
-      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-gray-700">
-          {titulo} — {formatBRL(secao.total)}
-        </p>
-        {secao.percentual != null && (
-          <span className="text-xs text-gray-400 whitespace-nowrap">
-            {secao.percentual.toFixed(1)}% da receita {base === 'bruta' ? 'bruta' : 'líquida'}
-          </span>
-        )}
-      </div>
-      {secao.contas.length === 0 ? (
-        <p className="text-sm text-gray-400 px-4 py-4">Nenhuma conta classificada nesta linha.</p>
-      ) : (
-        <div className="divide-y divide-gray-100">
-          {secao.contas.map((c) => {
-            const clicavel = c.valor !== 0
-            const conteudo = (
-              <>
-                <span className="text-gray-600">
-                  {c.codigo !== '—' ? `${c.codigo} — ${c.nome}` : c.nome}
-                  {c.notaZerado && <span className="block text-xs text-amber-600 mt-0.5">{c.notaZerado}</span>}
-                </span>
-                <span className={c.valor > 0 ? 'font-semibold text-gray-800' : 'text-gray-400'}>{formatBRL(c.valor)}</span>
-              </>
-            )
-            return clicavel ? (
-              <button
-                key={c.contaId}
-                onClick={() => onAbrirConta(c)}
-                className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
-              >
-                {conteudo}
-              </button>
-            ) : (
-              <div key={c.contaId} className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-left">
-                {conteudo}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SubtotalCascata({ label, valor }: { label: string; valor: number }) {
-  return (
-    <div className="bg-pink-50 border border-pink-200 rounded-lg px-4 py-2.5 flex items-center justify-between mb-3">
-      <p className="text-sm font-bold text-pink-900">{label}</p>
-      <p className="text-sm font-bold text-pink-900">{formatBRL(valor)}</p>
-    </div>
-  )
 }
 
 interface LinhaComparativa {
@@ -187,7 +122,7 @@ interface LinhaComparativa {
 }
 
 function TabelaComparativa({ dados: dadosCronologicos }: { dados: DreResultado[] }) {
-  // Mês mais recente PRIMEIRO: no celular a primeira coluna visível é a que importa (antes era a mais antiga,
+  // Mês mais recente PRIMEIRO: a primeira coluna visível é a que importa (antes era a mais antiga,
   // geralmente vazia).
   const dados = [...dadosCronologicos].reverse()
   const linhas: LinhaComparativa[] = [
@@ -234,7 +169,7 @@ function TabelaComparativa({ dados: dadosCronologicos }: { dados: DreResultado[]
                 {l.valores.map((v, i) => (
                   <td
                     key={i}
-                    className={`px-4 py-2.5 text-right whitespace-nowrap ${
+                    className={`px-4 py-2.5 text-right whitespace-nowrap tabular-nums ${
                       !dados[i].temDados
                         ? 'text-gray-300'
                         : l.subtotal
@@ -257,46 +192,44 @@ function TabelaComparativa({ dados: dadosCronologicos }: { dados: DreResultado[]
   )
 }
 
-// "DRE completo?": o que falta (ou está duvidoso) para o número do mês merecer confiança. Aparece logo abaixo
-// do mês, antes do resultado — o dono não deve ler o resultado sem ver estes sinais.
-function FaixaQualidade({ qualidade }: { qualidade: QualidadeDre }) {
-  const alertas = qualidade.itens.filter((i) => i.nivel === 'alerta').length
-  if (qualidade.itens.length === 0) {
-    return (
-      <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 mb-4 text-sm text-green-800">
-        <CheckCircle size={16} className="flex-shrink-0" />
-        DRE completo — nenhuma pendência conhecida nos dados deste mês.
-      </div>
-    )
-  }
+// Selos do mês (na barra de contexto): parcial / dados incompletos / sem alertas.
+function SelosDoMes({
+  modo,
+  qualidade,
+  ehMesCorrente,
+  hoje,
+  ano,
+  mes,
+}: {
+  modo: Modo
+  qualidade: QualidadeDre | null
+  ehMesCorrente: boolean
+  hoje: Date
+  ano: number
+  mes: number
+}) {
+  const emAndamento = modo === 'unico' ? qualidade?.mesEmAndamento : null
+  const andamento = emAndamento ?? (ehMesCorrente ? { dia: hoje.getDate(), total: new Date(ano, mes, 0).getDate(), futuro: false } : null)
+  const alertas = qualidade ? qualidade.itens.filter((i) => i.nivel === 'alerta').length : 0
   return (
-    <div className={`rounded-xl border mb-4 overflow-hidden ${alertas > 0 ? 'border-red-200 bg-red-50/60' : 'border-amber-200 bg-amber-50/60'}`}>
-      <p className={`px-4 py-2.5 text-sm font-semibold flex items-center gap-2 ${alertas > 0 ? 'text-red-800' : 'text-amber-800'}`}>
-        <AlertTriangle size={16} className="flex-shrink-0" />
-        DRE completo? {alertas > 0 ? `Não — ${alertas} alerta(s)` : 'Quase — pontos de atenção'}
-        {qualidade.itens.length > alertas && alertas > 0 && (
-          <span className="font-normal text-xs">· {qualidade.itens.length - alertas} ponto(s) de atenção</span>
-        )}
-      </p>
-      <ul className="divide-y divide-white/70 bg-white/70">
-        {qualidade.itens.map((i) => (
-          <li key={i.id} className="px-4 py-3 text-sm">
-            <p className="font-semibold text-gray-800 flex items-start gap-2">
-              <span
-                className={`mt-1.5 inline-block w-2 h-2 rounded-full flex-shrink-0 ${i.nivel === 'alerta' ? 'bg-red-500' : 'bg-amber-500'}`}
-                aria-label={i.nivel === 'alerta' ? 'Alerta' : 'Atenção'}
-              />
-              {i.titulo}
-            </p>
-            <p className="text-xs text-gray-600 mt-1 ml-4">{i.detalhe}</p>
-            {i.href && (
-              <Link href={i.href} className="inline-block ml-4 mt-1.5 text-xs font-semibold text-pink-700 hover:underline">
-                {i.hrefRotulo || 'Abrir'} →
-              </Link>
-            )}
-          </li>
-        ))}
-      </ul>
+    <div className="flex flex-wrap items-center gap-2 min-h-[28px]" aria-live="polite">
+      {andamento && (
+        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+          {andamento.futuro ? 'Mês futuro' : `Mês em andamento · dia ${andamento.dia} de ${andamento.total}`}
+        </span>
+      )}
+      {modo === 'unico' && qualidade && !qualidade.completo && (
+        <button
+          onClick={() => document.getElementById('dre-pendencias')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          className="px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200 hover:bg-red-200"
+          title="Ver as pendências deste mês"
+        >
+          Dados incompletos · {alertas} alerta(s)
+        </button>
+      )}
+      {modo === 'unico' && qualidade && qualidade.completo && !andamento && (
+        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200">Sem alertas de dados</span>
+      )}
     </div>
   )
 }
@@ -336,11 +269,17 @@ function DreConteudo() {
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [dados, setDados] = useState<DreResultado | null>(null)
+  // undefined = carregando o mês anterior; null = não deu para carregar
+  const [dadosAnterior, setDadosAnterior] = useState<DreResultado | null | undefined>(undefined)
   const [dadosComparativo, setDadosComparativo] = useState<DreResultado[] | null>(null)
   const [qualidade, setQualidade] = useState<QualidadeDre | null>(null)
   const [modalDetalhe, setModalDetalhe] = useState<ModalDetalhe | null>(null)
   const [mostrarAvisos, setMostrarAvisos] = useState(false)
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
   const requisicao = useRef(0)
+
+  const anoAnterior = mes === 1 ? ano - 1 : ano
+  const mesAnteriorNum = mes === 1 ? 12 : mes - 1
 
   useEffect(() => {
     carregar()
@@ -352,16 +291,23 @@ function DreConteudo() {
     setLoading(true)
     setErro('')
     setQualidade(null)
+    setDadosAnterior(undefined)
     try {
       if (modo === 'unico') {
         const dre = await buscarDre(unidade, ano, mes)
         if (id !== requisicao.current) return
         setDados(dre)
         setLoading(false)
-        // o DRE aparece primeiro; os sinais de qualidade chegam logo depois, sem segurar a tela
+        // o DRE aparece primeiro; os sinais de qualidade e o mês anterior chegam logo depois, sem segurar a tela
         buscarQualidadeDre(unidade, ano, mes, dre)
           .then((q) => id === requisicao.current && setQualidade(q))
           .catch((e) => console.error('Erro ao calcular a qualidade do DRE:', e))
+        buscarDre(unidade, anoAnterior, mesAnteriorNum)
+          .then((a) => id === requisicao.current && setDadosAnterior(a))
+          .catch((e) => {
+            console.error('Erro ao carregar o mês anterior do DRE:', e)
+            if (id === requisicao.current) setDadosAnterior(null)
+          })
       } else {
         const comparativo = await buscarDreComparativo(unidade, ano, mes, 6)
         if (id !== requisicao.current) return
@@ -385,12 +331,52 @@ function DreConteudo() {
     else atualizar({ mes: String(mes + 1), ano: String(ano) })
   }
 
-  function abrirConta(secao: DreSecao, c: DreContaValor) {
-    setModalDetalhe({ tipo: tipoOrigem(secao.linha), titulo: c.codigo !== '—' ? `${c.codigo} — ${c.nome}` : c.nome, contaId: c.contaId })
+  // ← e → trocam de mês (a menos que a pessoa esteja digitando ou com um painel aberto)
+  useEffect(() => {
+    function aoTeclar(e: KeyboardEvent) {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      const alvo = e.target as HTMLElement | null
+      if (alvo && (['INPUT', 'TEXTAREA', 'SELECT'].includes(alvo.tagName) || alvo.isContentEditable)) return
+      if (modalDetalhe || mostrarAvisos) return
+      if (e.key === 'ArrowLeft') mesAnterior()
+      else proximoMes()
+    }
+    window.addEventListener('keydown', aoTeclar)
+    return () => window.removeEventListener('keydown', aoTeclar)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [atualizar, mes, ano, modalDetalhe, mostrarAvisos])
+
+  function abrirConta(linha: LinhaCascata, c: ContaCascata) {
+    if (!linha.secao) return
+    setModalDetalhe({
+      tipo: tipoOrigem(linha.secao.linha),
+      titulo: c.codigo !== '—' ? `${c.codigo} — ${c.nome}` : c.nome,
+      contaId: c.contaId,
+    })
+  }
+
+  const linhasCascata = useMemo(() => (dados ? montarCascata(dados, dadosAnterior ?? null) : []), [dados, dadosAnterior])
+  const passosGrafico = useMemo(() => (dados ? passosDoGrafico(dados) : []), [dados])
+  const idsComContas = useMemo(() => linhasCascata.filter((l) => l.tipo === 'grupo' && l.contas.length > 0).map((l) => l.id), [linhasCascata])
+  const todosAbertos = idsComContas.length > 0 && idsComContas.every((id) => expandidos.has(id))
+
+  function alternar(id: string) {
+    setExpandidos((atual) => {
+      const novo = new Set(atual)
+      if (novo.has(id)) novo.delete(id)
+      else novo.add(id)
+      return novo
+    })
+  }
+  function alternarTodos() {
+    setExpandidos(todosAbertos ? new Set() : new Set(idsComContas))
   }
 
   const avisos = dados ? montarAvisos(dados, unidade) : []
   const temAvisoUrgente = !!dados && dados.secaoNaoClassificada.total !== 0
+  const ehMesCorrente = ano === hoje.getFullYear() && mes === hoje.getMonth() + 1
+  const parcial = modo === 'unico' && (!!qualidade?.mesEmAndamento || ehMesCorrente)
 
   return (
     <ProtectedRoute allowedRoles={['admin']}>
@@ -398,13 +384,14 @@ function DreConteudo() {
         <PageHeader
           title="DRE"
           backHref="/financeiro"
-          maxWidth="max-w-3xl"
+          maxWidth="max-w-[1600px]"
           actions={
             modo === 'unico' && dados ? (
               <button
                 onClick={() => setMostrarAvisos(true)}
                 className="relative p-2 hover:bg-gray-100 rounded-lg text-gray-500"
                 title="Avisos sobre este DRE"
+                aria-label="Avisos sobre este DRE"
               >
                 <Info size={20} />
                 {temAvisoUrgente && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />}
@@ -413,192 +400,148 @@ function DreConteudo() {
           }
         />
 
-        <div className="max-w-3xl mx-auto px-4 py-6">
-          <div className="flex gap-2 mb-3">
-            {(['loja1', 'loja2', 'consolidado'] as const).map((u) => (
-              <button
-                key={u}
-                onClick={() => atualizar({ v: u })}
-                aria-pressed={unidade === u}
-                className={`px-4 py-2 rounded-lg text-sm font-semibold border-2 ${
-                  unidade === u ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-200 bg-white text-gray-700'
-                }`}
-              >
-                {VISAO_LABEL[u]}
+        {/* barra de contexto: fica fixa no topo ao rolar */}
+        <div className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-gray-200">
+          <div className="max-w-[1600px] mx-auto px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden" role="group" aria-label="Visão">
+              {(['loja1', 'loja2', 'consolidado'] as const).map((u) => (
+                <button
+                  key={u}
+                  onClick={() => atualizar({ v: u })}
+                  aria-pressed={unidade === u}
+                  className={`px-3.5 py-1.5 text-sm font-semibold ${
+                    unidade === u ? 'bg-pink-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {VISAO_LABEL[u]}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button onClick={mesAnterior} aria-label="Mês anterior" title="Mês anterior (←)" className="p-1.5 hover:bg-gray-100 rounded-lg">
+                <ChevronLeft size={18} className="text-gray-600" />
               </button>
-            ))}
-          </div>
-
-          <div className="flex gap-2 mb-4">
-            {(['unico', 'comparativo'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => atualizar({ m: m === 'comparativo' ? 'comp' : null })}
-                aria-pressed={modo === m}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
-                  modo === m ? 'bg-gray-800 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-500'
-                }`}
-              >
-                {m === 'unico' ? 'Mês único' : 'Comparativo (6 meses)'}
+              <p className="text-base font-semibold text-gray-800 min-w-[170px] text-center">
+                {modo === 'unico' ? `${MESES[mes - 1]} de ${ano}` : `Até ${MESES[mes - 1]} de ${ano}`}
+              </p>
+              <button onClick={proximoMes} aria-label="Próximo mês" title="Próximo mês (→)" className="p-1.5 hover:bg-gray-100 rounded-lg">
+                <ChevronRight size={18} className="text-gray-600" />
               </button>
-            ))}
-          </div>
+            </div>
 
-          <div className="flex items-center justify-center gap-4 mb-2">
-            <button onClick={mesAnterior} aria-label="Mês anterior" className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
-              <ChevronLeft size={20} className="text-gray-600" />
-            </button>
-            <p className="text-lg font-semibold text-gray-800 min-w-[180px] text-center">
-              {modo === 'unico' ? `${MESES[mes - 1]} de ${ano}` : `Até ${MESES[mes - 1]} de ${ano}`}
-            </p>
-            <button onClick={proximoMes} aria-label="Próximo mês" className="p-2 hover:bg-gray-200 rounded-lg transition-colors">
-              <ChevronRight size={20} className="text-gray-600" />
-            </button>
-          </div>
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden" role="group" aria-label="Modo">
+              {(['unico', 'comparativo'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => atualizar({ m: m === 'comparativo' ? 'comp' : null })}
+                  aria-pressed={modo === m}
+                  className={`px-3 py-1.5 text-sm font-medium ${modo === m ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >
+                  {m === 'unico' ? 'Mês único' : 'Comparativo (6 meses)'}
+                </button>
+              ))}
+            </div>
 
-          {/* selos do mês: parcial / dados incompletos / completo */}
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-5 min-h-[24px]" aria-live="polite">
-            {(() => {
-              const emAndamento = modo === 'unico' ? qualidade?.mesEmAndamento : null
-              const ehMesCorrente = ano === hoje.getFullYear() && mes === hoje.getMonth() + 1
-              const andamento =
-                emAndamento ??
-                (ehMesCorrente ? { dia: hoje.getDate(), total: new Date(ano, mes, 0).getDate(), futuro: false } : null)
-              return (
-                <>
-                  {andamento && (
-                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-                      {andamento.futuro ? 'Mês futuro' : `Mês em andamento · dia ${andamento.dia} de ${andamento.total}`}
-                    </span>
-                  )}
-                  {modo === 'unico' && qualidade && !qualidade.completo && (
-                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200">
-                      Dados incompletos · {qualidade.itens.filter((i) => i.nivel === 'alerta').length} alerta(s)
-                    </span>
-                  )}
-                  {modo === 'unico' && qualidade && qualidade.completo && !andamento && (
-                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200">
-                      Sem alertas de dados
-                    </span>
-                  )}
-                </>
-              )
-            })()}
+            <SelosDoMes modo={modo} qualidade={qualidade} ehMesCorrente={ehMesCorrente} hoje={hoje} ano={ano} mes={mes} />
           </div>
+        </div>
 
-          {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">{erro}</div>}
+        <div className="max-w-[1600px] mx-auto px-4 py-5 space-y-4">
+          {erro && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{erro}</div>}
 
           {loading ? (
-            <div className="flex items-center justify-center py-12 gap-2 text-gray-400">
+            <div className="flex items-center justify-center py-16 gap-2 text-gray-400">
               <Loader size={20} className="animate-spin" /> Carregando...
             </div>
           ) : modo === 'comparativo' ? (
             dadosComparativo && <TabelaComparativa dados={dadosComparativo} />
           ) : dados ? (
             <>
-              {qualidade && <FaixaQualidade qualidade={qualidade} />}
+              <DreKpis dados={dados} anterior={dadosAnterior} parcial={parcial} mesAnterior={mesAnteriorNum} />
 
-              <div className={`rounded-2xl p-6 mb-4 border ${dados.resultado >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                <div className="flex items-center justify-between gap-4">
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)] gap-4 items-start">
+                <DreCascataTabela
+                  linhas={linhasCascata}
+                  receitaLiquida={dados.totalReceitaLiquida}
+                  receitaBruta={dados.totalReceitaBruta}
+                  rotuloAnterior={MESES_ABREV[mesAnteriorNum - 1].toLowerCase()}
+                  carregandoAnterior={dadosAnterior === undefined}
+                  parcial={parcial}
+                  expandidos={expandidos}
+                  onAlternar={alternar}
+                  onAlternarTodos={alternarTodos}
+                  todosAbertos={todosAbertos}
+                  onAbrirConta={abrirConta}
+                />
+
+                <div className="space-y-4">
+                  <div className="bg-white rounded-xl border border-gray-100 p-4">
+                    <p className="text-sm font-semibold text-gray-700 mb-2">Da receita bruta ao resultado</p>
+                    <DreGraficoCascata passos={passosGrafico} />
+                  </div>
+                  <DrePendencias qualidade={qualidade} />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <p className="text-sm font-semibold text-gray-700">Caixa × competência</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    O resultado acima é por competência. Aqui fica o que efetivamente caiu no banco e o que foi e voltou da reserva — informativo, não entra no resultado.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 lg:divide-x divide-gray-100">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Resultado Líquido do Período</p>
-                    <p className={`text-3xl font-bold mt-1 ${dados.resultado >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                      {formatBRL(dados.resultado)}
+                    <p className="text-xs font-semibold text-gray-500 px-4 pt-3">
+                      Entradas de caixa — <span className="tabular-nums">{formatBRL(dados.totalEntradasCaixa)}</span>
                     </p>
-                    {dados.totalReceitaLiquida > 0 && (
-                      <p className={`text-xs font-medium mt-1 ${dados.resultado >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {((dados.resultado / dados.totalReceitaLiquida) * 100).toFixed(1)}% da Receita Líquida
-                      </p>
+                    <div className="divide-y divide-gray-100">
+                      {dados.entradasCaixaPorCategoria.map((c) => (
+                        <button
+                          key={c.categoria}
+                          onClick={() => setModalDetalhe({ tipo: 'receita', titulo: c.label, categoria: c.categoria })}
+                          className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+                        >
+                          <span className="text-gray-600">{c.label}</span>
+                          <span className={`tabular-nums ${c.valor > 0 ? 'font-semibold text-gray-800' : 'text-gray-400'}`}>{formatBRL(c.valor)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 px-4 pt-3">Reserva (13º, férias, ativo fixo…)</p>
+                    {dados.totalAportesReserva > 0 || dados.totalResgatesAplicacao > 0 ? (
+                      <div className="divide-y divide-gray-100">
+                        {dados.totalAportesReserva > 0 && (
+                          <button
+                            onClick={() => setModalDetalhe({ tipo: 'aporte', titulo: 'Aportes em Reserva' })}
+                            className="w-full flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+                          >
+                            <span className="text-gray-600">
+                              Aportes em reserva
+                              <span className="block text-xs text-gray-400">Caixa saindo para a reserva — não é despesa.</span>
+                            </span>
+                            <span className="font-semibold text-gray-800 tabular-nums">{formatBRL(dados.totalAportesReserva)}</span>
+                          </button>
+                        )}
+                        {dados.totalResgatesAplicacao > 0 && (
+                          <button
+                            onClick={() => setModalDetalhe({ tipo: 'receita', titulo: 'Resgate de Aplicação', categoria: 'resgate_aplicacao' })}
+                            className="w-full flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
+                          >
+                            <span className="text-gray-600">
+                              Resgates de aplicação
+                              <span className="block text-xs text-gray-400">Volta da reserva para o caixa — não é venda.</span>
+                            </span>
+                            <span className="font-semibold text-gray-800 tabular-nums">{formatBRL(dados.totalResgatesAplicacao)}</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 px-4 py-4">Sem aportes nem resgates neste mês.</p>
                     )}
                   </div>
-                  <div className={`rounded-full p-3 flex-shrink-0 ${dados.resultado >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {dados.resultado >= 0 ? <TrendingUp size={28} /> : <TrendingDown size={28} />}
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3">
-                <p className="text-sm font-semibold text-gray-700 px-4 py-3">
-                  Receita Bruta de Vendas — {formatBRL(dados.totalReceitaBruta)}
-                </p>
-                <p className="text-xs text-gray-400 px-4 pb-3">
-                  Faturamento informado (lançamento diário e, nos dias sem lançamento, o PDV importado) — não é o que caiu
-                  no banco: veja "Entradas de Caixa" mais abaixo pra essa outra visão. Só o total do mês é confiável; a
-                  divisão por forma de pagamento do lançamento diário não.
-                </p>
-              </div>
-
-              {(dados.totalResgatesAplicacao > 0 || dados.totalAportesReserva > 0) && (
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mb-3 divide-y divide-gray-100">
-                  {dados.totalAportesReserva > 0 && (
-                    <button
-                      onClick={() => setModalDetalhe({ tipo: 'aporte', titulo: 'Aportes em Reserva' })}
-                      className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50"
-                    >
-                      <div>
-                        <p className="text-sm font-semibold text-gray-700">Aportes em Reserva</p>
-                        <p className="text-xs text-gray-400 mt-0.5">Caixa saindo pra reserva (13º, férias, ativo fixo...) — não é despesa, não entra no resultado.</p>
-                      </div>
-                      <span className="font-semibold text-gray-800 flex-shrink-0 ml-3">{formatBRL(dados.totalAportesReserva)}</span>
-                    </button>
-                  )}
-                  {dados.totalResgatesAplicacao > 0 && (
-                    <button
-                      onClick={() => setModalDetalhe({ tipo: 'receita', titulo: 'Resgate de Aplicação', categoria: 'resgate_aplicacao' })}
-                      className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50"
-                    >
-                      <div>
-                        <p className="text-sm font-semibold text-gray-700">Resgates de Aplicação</p>
-                        <p className="text-xs text-gray-400 mt-0.5">Volta da reserva pro caixa — não é venda, não entra no resultado do mês.</p>
-                      </div>
-                      <span className="font-semibold text-gray-800 flex-shrink-0 ml-3">{formatBRL(dados.totalResgatesAplicacao)}</span>
-                    </button>
-                  )}
-                </div>
-              )}
-
-              <SecaoCascata titulo="(−) Deduções de Vendas" secao={dados.secaoDeducaoVendas} base="bruta" onAbrirConta={(c) => abrirConta(dados.secaoDeducaoVendas, c)} />
-              <SubtotalCascata label="= Receita Líquida de Vendas" valor={dados.totalReceitaLiquida} />
-
-              <SecaoCascata titulo="(−) CMV (compras de insumos)" secao={dados.secaoCmv} onAbrirConta={(c) => abrirConta(dados.secaoCmv, c)} />
-              <SecaoCascata titulo="(−) Mão de Obra e Encargos" secao={dados.secaoMaoObra} onAbrirConta={(c) => abrirConta(dados.secaoMaoObra, c)} />
-              <SubtotalCascata label="= Lucro Bruto" valor={dados.totalLucroBruto} />
-
-              <SecaoCascata titulo="(−) Despesas Operacionais" secao={dados.secaoDespesasOperacionais} onAbrirConta={(c) => abrirConta(dados.secaoDespesasOperacionais, c)} />
-              {dados.secaoNaoClassificada.total !== 0 && (
-                <SecaoCascata
-                  titulo="Não classificado (revisar plano de contas)"
-                  secao={dados.secaoNaoClassificada}
-                  onAbrirConta={(c) => abrirConta(dados.secaoNaoClassificada, c)}
-                />
-              )}
-              <SubtotalCascata label="= Resultado Operacional" valor={dados.totalResultadoOperacional} />
-
-              <SecaoCascata titulo="(−) Resultado Financeiro" secao={dados.secaoResultadoFinanceiro} onAbrirConta={(c) => abrirConta(dados.secaoResultadoFinanceiro, c)} />
-              <SubtotalCascata label="= Lucro Líquido Antes da Distribuição" valor={dados.totalLucroLiquidoAntesDistribuicao} />
-
-              <SecaoCascata titulo="(−) Distribuição de Lucros" secao={dados.secaoDistribuicaoLucros} onAbrirConta={(c) => abrirConta(dados.secaoDistribuicaoLucros, c)} />
-
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden mt-6">
-                <p className="text-sm font-semibold text-gray-700 px-4 py-3 border-b border-gray-100">
-                  Entradas de Caixa (informativo) — {formatBRL(dados.totalEntradasCaixa)}
-                </p>
-                <p className="text-xs text-gray-400 px-4 pt-3">
-                  O que efetivamente caiu no banco no período, por categoria — não entra mais no cálculo do resultado
-                  (a Receita Bruta acima já é fiscal). Fica aqui pra conferir a diferença entre o que foi vendido e o
-                  que já foi recebido.
-                </p>
-                <div className="divide-y divide-gray-100">
-                  {dados.entradasCaixaPorCategoria.map((c) => (
-                    <button
-                      key={c.categoria}
-                      onClick={() => setModalDetalhe({ tipo: 'receita', titulo: c.label, categoria: c.categoria })}
-                      className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 text-left"
-                    >
-                      <span className="text-gray-600">{c.label}</span>
-                      <span className={c.valor > 0 ? 'font-semibold text-gray-800' : 'text-gray-400'}>{formatBRL(c.valor)}</span>
-                    </button>
-                  ))}
                 </div>
               </div>
             </>
