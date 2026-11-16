@@ -62,10 +62,7 @@ function montarAvisos(dados: DreResultado, unidade: VisaoDre): Aviso[] {
     {
       tom: 'ambar',
       texto:
-        'Competência de lançamentos antigos (antes desta funcionalidade) é aproximada pela data de lançamento/pagamento — só despesas recorrentes configuradas depois têm competência deslocada de verdade.' +
-        (unidade !== 'consolidado' && dados.percentualRateio != null
-          ? ` Rateio aplicado: ${(dados.percentualRateio * 100).toFixed(1)}% das despesas e do CMV de rateio/cozinha do mês, proporcional ao faturamento fiscal de cada loja (Import do PDV).`
-          : ''),
+        'Competência de lançamentos antigos (antes desta funcionalidade) é aproximada pela data de lançamento/pagamento — só despesas recorrentes configuradas depois têm competência deslocada de verdade.',
     },
     {
       tom: 'ambar',
@@ -73,6 +70,12 @@ function montarAvisos(dados: DreResultado, unidade: VisaoDre): Aviso[] {
         'Empréstimos/Amortizações (Resultado Financeiro) refletem o valor lançado nessas contas — se incluírem a parcela de principal (não só juros), o resultado fica subestimado; confira como esses lançamentos são registrados.',
     },
   ]
+  if (unidade !== 'consolidado' && dados.percentualRateio != null) {
+    avisos.unshift({
+      tom: 'azul',
+      texto: `Rateio da cozinha: esta loja fica com ${(dados.percentualRateio * 100).toFixed(1).replace('.', ',')}% do faturamento das duas lojas no mês. Esse percentual divide tudo o que foi lançado em "Rateio (Cozinha)" e TODAS as compras de matéria-prima (1001), embalagem (1002) e impostos de compra (1004), mesmo as lançadas direto numa loja. Em Consolidado nada é dividido.`,
+    })
+  }
   if (dados.secaoNaoClassificada.total !== 0) {
     avisos.unshift({
       tom: 'vermelho',
@@ -467,6 +470,7 @@ function DreConteudo() {
                   linhas={linhasCascata}
                   baseValor={valorDaBase(dados, base)}
                   base={base}
+                  percentualRateio={dados.percentualRateio}
                   onMudarBase={(b) => atualizar({ base: b === 'liquida' ? 'liq' : null })}
                   receitaBruta={dados.totalReceitaBruta}
                   rotuloAnterior={MESES_ABREV[mesAnteriorNum - 1].toLowerCase()}

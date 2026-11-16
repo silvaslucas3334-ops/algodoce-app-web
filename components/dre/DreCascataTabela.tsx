@@ -27,6 +27,8 @@ interface Props {
   /** 100% da coluna de percentual: receita bruta ou líquida, conforme a base escolhida */
   baseValor: number
   base: BasePercentual
+  /** só nas visões de uma loja: fatia do rateio da cozinha (0 a 1); null em Consolidado */
+  percentualRateio: number | null
   onMudarBase: (base: BasePercentual) => void
   receitaBruta: number
   /** rótulo curto do mês anterior para o cabeçalho ("set"); null quando ainda não há comparação */
@@ -53,6 +55,7 @@ export default function DreCascataTabela({
   linhas,
   baseValor,
   base,
+  percentualRateio,
   onMudarBase,
   receitaBruta,
   rotuloAnterior,
@@ -198,6 +201,15 @@ export default function DreCascataTabela({
       <p className="text-xs text-gray-400 px-4 py-3 border-t border-gray-100">
         Receita bruta = faturamento informado (lançamento diário e, nos dias sem lançamento, o PDV importado) — não é o que caiu no banco.
         Percentuais sobre a receita {base === 'bruta' ? 'bruta' : 'líquida'} (= 100%). CMV = compras de insumos do mês, não o consumo real. Clique numa conta para ver os lançamentos.
+        {percentualRateio != null && (
+          <>
+            {' '}
+            <span className="text-gray-500 font-medium">
+              Rateio: esta loja fica com {(percentualRateio * 100).toFixed(1).replace('.', ',')}% do faturamento das duas — vale para matéria-prima,
+              embalagem, impostos de compra e tudo lançado em Rateio (Cozinha).
+            </span>
+          </>
+        )}
       </p>
     </div>
   )

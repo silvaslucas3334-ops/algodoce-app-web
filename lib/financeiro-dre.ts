@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import { CategoriaReceita, FinanceiroConta, LinhaDre } from './types'
 import { CATEGORIA_RECEITA_LABEL, LINHA_DRE_LABEL } from './constants'
 import { buscarFaturamentoPorLojaDoMes } from './financeiro-fluxo-mensal'
+import { CODIGOS_CMV_SEMPRE_RATEADOS, parcelaNaVisao } from './financeiro-rateio'
 
 export type VisaoDre = 'loja1' | 'loja2' | 'consolidado'
 
@@ -200,14 +201,20 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
         ? faturamentoFiscalLoja1
         : faturamentoFiscalLoja2
 
+  const faturamentoTotalLojas = faturamentoFiscalLoja1 + faturamentoFiscalLoja2
   const percentualRateio =
     unidade === 'consolidado'
       ? null
       : (() => {
-          const total = faturamentoFiscalLoja1 + faturamentoFiscalLoja2
           const receitaUnidade = unidade === 'loja1' ? faturamentoFiscalLoja1 : faturamentoFiscalLoja2
-          return total > 0 ? receitaUnidade / total : 0
+          return faturamentoTotalLojas > 0 ? receitaUnidade / faturamentoTotalLojas : 0
         })()
+
+  // Matéria-prima (1001) e embalagem (1002) seguem SEMPRE a regra de rateio (proporção do faturamento), em qualquer
+  // unidade em que a nota foi lançada. Sem faturamento no mês não há proporção: aí vale a unidade do lançamento,
+  // para o custo não sumir da visão da loja.
+  const idsCmvSempreRateados = new Set(contas.filter((c) => CODIGOS_CMV_SEMPRE_RATEADOS.includes(c.codigo)).map((c) => c.id))
+  const forcarRateio = (contaId: string | null | undefined) => faturamentoTotalLojas > 0 && !!contaId && idsCmvSempreRateados.has(contaId)
 
   // Entradas de Caixa — o que efetivamente caiu no banco (financeiro_receitas),
   // por categoria. Não alimenta mais o resultado (ver totalReceitaBruta acima,
@@ -263,11 +270,8 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     // juros vai para Despesas Financeiras (3005) mais abaixo, no mês do pagamento.
     const juros = contaJurosId ? Number(d.valor_juros_multa || 0) : 0
     const valorBase = Number(d.valor_total) - juros
-    if (unidade === 'consolidado' || d.unidade === unidade) {
-      acumular(d.conta_id, valorBase, d.parte_id, parteNome)
-    } else if (d.unidade === 'rateio') {
-      acumular(d.conta_id, valorBase * (percentualRateio || 0), d.parte_id, parteNome)
-    }
+    const parcela = parcelaNaVisao(valorBase, d.unidade, unidade, percentualRateio, forcarRateio(d.conta_id))
+    if (parcela !== null) acumular(d.conta_id, parcela, d.parte_id, parteNome)
   })
 
   // Juros/multa/taxa por atraso → Despesas Financeiras (3005). Antes o juros das notas de insumos não entrava
@@ -293,11 +297,9 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     // (unidade='rateio', ex: matéria-prima compartilhada pelas duas lojas)
     // precisa entrar proporcionalmente na visão de cada loja — antes ficava
     // de fora inteiro, e só aparecia certo em Consolidado.
-    if (unidade === 'consolidado' || lancamento.unidade === unidade) {
-      acumular(item.conta_id, item.valor_total, lancamento.parte_id, parteNome)
-    } else if (lancamento.unidade === 'rateio') {
-      acumular(item.conta_id, item.valor_total * (percentualRateio || 0), lancamento.parte_id, parteNome)
-    }
+    // Contas de matéria-prima e embalagem entram sempre pela regra de rateio, mesmo em nota lançada numa loja.
+    const parcela = parcelaNaVisao(Number(item.valor_total), lancamento.unidade, unidade, percentualRateio, forcarRateio(item.conta_id))
+    if (parcela !== null) acumular(item.conta_id, parcela, lancamento.parte_id, parteNome)
   })
 
   const totalAportesReserva = aportesReservaDetalhados.reduce((s, l) => s + l.valor, 0)
