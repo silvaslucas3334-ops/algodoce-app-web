@@ -152,9 +152,16 @@ export function variacaoDaConta(c: ContaCascata): Variacao {
   return calcularVariacao(c.valor, c.anterior, 'percentual', 'custo')
 }
 
-/** Percentual sobre a receita líquida (denominador único da tabela); null quando não há receita líquida. */
-export function percentualDaReceitaLiquida(valor: number, receitaLiquida: number): number | null {
-  return receitaLiquida > 0 ? (valor / receitaLiquida) * 100 : null
+/** Base dos percentuais da tela: a receita bruta (100% = faturamento) ou a líquida (100% = depois das deduções). */
+export type BasePercentual = 'bruta' | 'liquida'
+
+export function valorDaBase(d: Pick<DreResultado, 'totalReceitaBruta' | 'totalReceitaLiquida'>, base: BasePercentual): number {
+  return base === 'bruta' ? d.totalReceitaBruta : d.totalReceitaLiquida
+}
+
+/** Percentual sobre a base escolhida (denominador único da tabela); null quando a base é zero ou negativa. */
+export function percentualSobre(valor: number, base: number): number | null {
+  return base > 0 ? (valor / base) * 100 : null
 }
 
 export interface PassoGrafico {

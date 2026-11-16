@@ -1,6 +1,6 @@
 'use client'
 import type { DreResultado } from '@/lib/financeiro-dre'
-import { calcularVariacao, percentualDaReceitaLiquida, TomVariacao } from '@/lib/financeiro-dre-apresentacao'
+import { BasePercentual, calcularVariacao, percentualSobre, TomVariacao, valorDaBase } from '@/lib/financeiro-dre-apresentacao'
 import { formatBRL } from '@/lib/ofx'
 
 const MESES_ABREV = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
@@ -20,6 +20,7 @@ interface Props {
   /** mês corrente: comparar o parcial com o mês cheio anterior engana, então não mostra variação */
   parcial: boolean
   mesAnterior: number
+  base: BasePercentual
 }
 
 interface Tile {
@@ -31,7 +32,8 @@ interface Tile {
   destaque?: boolean
 }
 
-export default function DreKpis({ dados, anterior, parcial, mesAnterior }: Props) {
+export default function DreKpis({ dados, anterior, parcial, mesAnterior, base }: Props) {
+  const baseValor = valorDaBase(dados, base)
   const ref = anterior && anterior.temDados ? anterior : null
   const tiles: Tile[] = [
     { id: 'rl', rotulo: 'Receita líquida', valor: dados.totalReceitaLiquida, anterior: ref ? ref.totalReceitaLiquida : null, modo: 'percentual' },
@@ -43,7 +45,8 @@ export default function DreKpis({ dados, anterior, parcial, mesAnterior }: Props
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {tiles.map((t) => {
-        const margem = t.id === 'rl' ? null : percentualDaReceitaLiquida(t.valor, dados.totalReceitaLiquida)
+        // a receita líquida só ganha "% da base" quando a base é a bruta (100% dela mesma não informa nada)
+        const margem = t.id === 'rl' && base === 'liquida' ? null : percentualSobre(t.valor, baseValor)
         const v = calcularVariacao(t.valor, t.anterior, t.modo, 'ganho')
         const corValor = t.destaque ? (t.valor >= 0 ? 'text-green-700' : 'text-red-700') : 'text-gray-800'
         return (
@@ -68,7 +71,7 @@ export default function DreKpis({ dados, anterior, parcial, mesAnterior }: Props
                 </span>
               )}
             </p>
-            {margem != null && <p className="text-xs text-gray-400 mt-0.5">{margem.toFixed(1).replace('.', ',')}% da receita líquida</p>}
+            {margem != null && <p className="text-xs text-gray-400 mt-0.5">{margem.toFixed(1).replace('.', ',')}% da receita {base === 'bruta' ? 'bruta' : 'líquida'}</p>}
           </div>
         )
       })}

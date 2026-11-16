@@ -7,7 +7,7 @@ import { compactoBRL, PassoGrafico } from '@/lib/financeiro-dre-apresentacao'
 const LARGURA = 600
 const ALTURA = 230
 const TOPO = 26
-const BASE = 34 // espaço dos rótulos de baixo
+const BASE = 50 // espaço dos rótulos de baixo (inclui o valor de um resultado negativo, que desce abaixo da linha)
 const LATERAL = 10
 
 const COR = { total: '#2563eb', queda: '#fb7185', positivo: '#16a34a', negativo: '#dc2626' }
@@ -23,9 +23,9 @@ export default function DreGraficoCascata({ passos }: { passos: PassoGrafico[] }
   const fatia = (LARGURA - LATERAL * 2) / passos.length
   const larguraBarra = Math.min(54, fatia * 0.62)
 
-  const resumo = passos
-    .map((p) => `${p.rotulo} ${p.tipo === 'queda' ? '−' : ''}${compactoBRL(Math.abs(p.valor))}`)
-    .join(', ')
+  // queda: o valor SAI da receita (−); receita e resultado mostram o próprio sinal (resultado negativo = −)
+  const textoValor = (p: PassoGrafico) => compactoBRL(p.tipo === 'queda' ? -p.valor : p.valor)
+  const resumo = passos.map((p) => `${p.rotulo} ${textoValor(p)}`).join(', ')
 
   return (
     <svg viewBox={`0 0 ${LARGURA} ${ALTURA}`} width="100%" role="img" aria-label={`Da receita bruta ao resultado: ${resumo}`}>
@@ -36,7 +36,7 @@ export default function DreGraficoCascata({ passos }: { passos: PassoGrafico[] }
         const altura = Math.max(Math.abs(y(p.de) - y(p.ate)), 2)
         const cor = p.tipo === 'total' ? COR.total : p.tipo === 'queda' ? COR.queda : p.valor >= 0 ? COR.positivo : COR.negativo
         const proximo = passos[i + 1]
-        const rotulo = `${p.tipo === 'queda' ? '−' : ''}${compactoBRL(Math.abs(p.valor))}`
+        const rotulo = textoValor(p)
         const naParteDeBaixo = p.tipo === 'resultado' && p.valor < 0
         return (
           <g key={p.rotulo}>
@@ -63,7 +63,7 @@ export default function DreGraficoCascata({ passos }: { passos: PassoGrafico[] }
             >
               {rotulo}
             </text>
-            <text x={x + larguraBarra / 2} y={ALTURA - 12} textAnchor="middle" fontSize="11" fill="#6b7280">
+            <text x={x + larguraBarra / 2} y={ALTURA - 6} textAnchor="middle" fontSize="11" fill="#6b7280">
               {p.rotulo}
             </text>
           </g>

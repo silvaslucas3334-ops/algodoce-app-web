@@ -10,7 +10,7 @@ import DrePendencias from '@/components/dre/DrePendencias'
 import PageHeader from '@/components/PageHeader'
 import { buscarDre, buscarDreComparativo, DreResultado, VisaoDre, DreSecao } from '@/lib/financeiro-dre'
 import { buscarQualidadeDre, QualidadeDre } from '@/lib/financeiro-dre-qualidade'
-import { ContaCascata, LinhaCascata, montarCascata, passosDoGrafico } from '@/lib/financeiro-dre-apresentacao'
+import { BasePercentual, ContaCascata, LinhaCascata, montarCascata, passosDoGrafico, valorDaBase } from '@/lib/financeiro-dre-apresentacao'
 import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { formatBRL } from '@/lib/ofx'
 import { UNIDADE_LABEL } from '@/lib/constants'
@@ -250,6 +250,8 @@ function DreConteudo() {
   const ano = Number(searchParams.get('ano')) || ultimoMesCompleto.getFullYear()
   const mes = mesParam >= 1 && mesParam <= 12 ? mesParam : ultimoMesCompleto.getMonth() + 1
   const modo: Modo = searchParams.get('m') === 'comp' ? 'comparativo' : 'unico'
+  // base dos percentuais (?base=liq): por padrão a receita bruta é 100%
+  const base: BasePercentual = searchParams.get('base') === 'liq' ? 'liquida' : 'bruta'
 
   const atualizar = useCallback(
     (parcial: Record<string, string | null>) => {
@@ -458,12 +460,14 @@ function DreConteudo() {
             dadosComparativo && <TabelaComparativa dados={dadosComparativo} />
           ) : dados ? (
             <>
-              <DreKpis dados={dados} anterior={dadosAnterior} parcial={parcial} mesAnterior={mesAnteriorNum} />
+              <DreKpis dados={dados} anterior={dadosAnterior} parcial={parcial} mesAnterior={mesAnteriorNum} base={base} />
 
               <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)] gap-4 items-start">
                 <DreCascataTabela
                   linhas={linhasCascata}
-                  receitaLiquida={dados.totalReceitaLiquida}
+                  baseValor={valorDaBase(dados, base)}
+                  base={base}
+                  onMudarBase={(b) => atualizar({ base: b === 'liquida' ? 'liq' : null })}
                   receitaBruta={dados.totalReceitaBruta}
                   rotuloAnterior={MESES_ABREV[mesAnteriorNum - 1].toLowerCase()}
                   carregandoAnterior={dadosAnterior === undefined}

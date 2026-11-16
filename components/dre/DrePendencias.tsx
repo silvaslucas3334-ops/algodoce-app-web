@@ -32,15 +32,17 @@ export default function DrePendencias({ qualidade }: { qualidade: QualidadeDre |
   return (
     <div id="dre-pendencias" className={`rounded-xl border overflow-hidden ${alertas > 0 ? 'border-red-200' : 'border-amber-200'}`}>
       <div className={`px-4 py-3 flex items-center justify-between gap-3 ${alertas > 0 ? 'bg-red-50' : 'bg-amber-50'}`}>
-        <p className={`text-sm font-semibold flex items-center gap-2 ${alertas > 0 ? 'text-red-800' : 'text-amber-800'}`}>
-          <AlertTriangle size={16} className="flex-shrink-0" />
-          Este mês está completo? {alertas > 0 ? 'Não' : 'Quase'}
-          <span className="font-normal text-xs">
-            · {alertas > 0 ? `${alertas} alerta(s)` : ''}
-            {alertas > 0 && atencao > 0 ? ' e ' : ''}
-            {atencao > 0 ? `${atencao} ponto(s) de atenção` : ''}
-          </span>
-        </p>
+        <div className={`flex items-start gap-2 min-w-0 ${alertas > 0 ? 'text-red-800' : 'text-amber-800'}`}>
+          <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold">Este mês está completo? {alertas > 0 ? 'Não' : 'Quase'}</p>
+            <p className="text-xs font-normal">
+              {alertas > 0 ? `${alertas} alerta(s)` : ''}
+              {alertas > 0 && atencao > 0 ? ' e ' : ''}
+              {atencao > 0 ? `${atencao} ponto(s) de atenção` : ''}
+            </p>
+          </div>
+        </div>
         <button onClick={() => setDetalhes((v) => !v)} aria-pressed={detalhes} className="text-xs font-semibold text-gray-600 hover:underline whitespace-nowrap">
           {detalhes ? 'Ocultar detalhes' : 'Mostrar detalhes'}
         </button>

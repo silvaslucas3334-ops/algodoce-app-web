@@ -2,9 +2,10 @@
 import { Fragment } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import {
+  BasePercentual,
   ContaCascata,
   LinhaCascata,
-  percentualDaReceitaLiquida,
+  percentualSobre,
   TomVariacao,
   variacaoDaConta,
   variacaoDaLinha,
@@ -23,7 +24,10 @@ const CONTAS_ENCARGO_VENDA = new Set(['2003', '2004', '2005'])
 
 interface Props {
   linhas: LinhaCascata[]
-  receitaLiquida: number
+  /** 100% da coluna de percentual: receita bruta ou líquida, conforme a base escolhida */
+  baseValor: number
+  base: BasePercentual
+  onMudarBase: (base: BasePercentual) => void
   receitaBruta: number
   /** rótulo curto do mês anterior para o cabeçalho ("set"); null quando ainda não há comparação */
   rotuloAnterior: string
@@ -47,7 +51,9 @@ function Barra({ valor, base, cor }: { valor: number; base: number; cor: string 
 
 export default function DreCascataTabela({
   linhas,
-  receitaLiquida,
+  baseValor,
+  base,
+  onMudarBase,
   receitaBruta,
   rotuloAnterior,
   carregandoAnterior,
@@ -64,9 +70,26 @@ export default function DreCascataTabela({
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
         <p className="text-sm font-semibold text-gray-700">Cascata do mês</p>
-        <button onClick={onAlternarTodos} className="text-xs font-semibold text-pink-700 hover:underline">
-          {todosAbertos ? 'Recolher contas' : 'Expandir contas'}
-        </button>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <span>% sobre</span>
+            <div className="flex rounded-md border border-gray-200 overflow-hidden" role="group" aria-label="Base dos percentuais">
+              {(['bruta', 'liquida'] as const).map((b) => (
+                <button
+                  key={b}
+                  onClick={() => onMudarBase(b)}
+                  aria-pressed={base === b}
+                  className={`px-2.5 py-1 font-medium ${base === b ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >
+                  {b === 'bruta' ? 'Receita bruta' : 'Receita líquida'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button onClick={onAlternarTodos} className="text-xs font-semibold text-pink-700 hover:underline whitespace-nowrap">
+            {todosAbertos ? 'Recolher contas' : 'Expandir contas'}
+          </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -74,8 +97,12 @@ export default function DreCascataTabela({
             <tr className="text-xs text-gray-400 border-b border-gray-100">
               <th scope="col" className="text-left font-medium px-4 py-2">Linha</th>
               <th scope="col" className="text-right font-medium px-3 py-2">Valor</th>
-              <th scope="col" className="text-right font-medium px-3 py-2 whitespace-nowrap" title="Percentual sobre a receita líquida">
-                % rec. líq.
+              <th
+                scope="col"
+                className="text-right font-medium px-3 py-2 whitespace-nowrap"
+                title={`Percentual sobre a receita ${base === 'bruta' ? 'bruta' : 'líquida'} (= 100%)`}
+              >
+                {base === 'bruta' ? '% rec. bruta' : '% rec. líq.'}
               </th>
               <th scope="col" className="hidden lg:table-cell font-medium px-3 py-2 w-28" title="Proporção sobre a receita bruta">
                 Proporção
@@ -87,7 +114,7 @@ export default function DreCascataTabela({
             {linhas.map((l) => {
               const aberto = expandidos.has(l.id)
               const temContas = l.tipo === 'grupo' && l.contas.length > 0
-              const pct = percentualDaReceitaLiquida(l.valor, receitaLiquida)
+              const pct = percentualSobre(l.valor, baseValor)
               const v = variacaoDaLinha(l)
               const destaque = l.tipo === 'subtotal' || l.tipo === 'resultado'
               const final = l.id === 'resultado'
@@ -131,7 +158,7 @@ export default function DreCascataTabela({
                       const cv = variacaoDaConta(c)
                       const clicavel = c.valor !== 0
                       const naoLancado = c.valor === 0 && CONTAS_ENCARGO_VENDA.has(c.codigo) && receitaBruta > 0
-                      const cpct = percentualDaReceitaLiquida(c.valor, receitaLiquida)
+                      const cpct = percentualSobre(c.valor, baseValor)
                       return (
                         <tr key={c.contaId} className="border-b border-gray-50 bg-gray-50/40 text-gray-600">
                           <td className="pl-10 pr-4 py-2">
@@ -170,7 +197,7 @@ export default function DreCascataTabela({
       </div>
       <p className="text-xs text-gray-400 px-4 py-3 border-t border-gray-100">
         Receita bruta = faturamento informado (lançamento diário e, nos dias sem lançamento, o PDV importado) — não é o que caiu no banco.
-        Percentuais sobre a receita líquida. CMV = compras de insumos do mês, não o consumo real. Clique numa conta para ver os lançamentos.
+        Percentuais sobre a receita {base === 'bruta' ? 'bruta' : 'líquida'} (= 100%). CMV = compras de insumos do mês, não o consumo real. Clique numa conta para ver os lançamentos.
       </p>
     </div>
   )
