@@ -95,6 +95,11 @@ export default function ContasPage() {
                                 Cascata: {c.linha_dre ? LINHA_DRE_LABEL[c.linha_dre] : 'Não classificado'}
                               </span>
                               {!c.afeta_dre && <span className="ml-2 text-amber-600">· Reserva (não afeta DRE)</span>}
+                              {c.rateio_sempre && (
+                                <span className="ml-2 text-blue-700" title="No DRE, o total do mês nesta conta é dividido entre as lojas pela proporção do faturamento, seja qual for a unidade do lançamento">
+                                  · Central — sempre rateada
+                                </span>
+                              )}
                             </p>
                           </div>
                           <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600 whitespace-nowrap flex-shrink-0">

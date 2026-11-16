@@ -26,6 +26,7 @@ export default function NovaContaModal({ centros, onClose, onCreated }: Props) {
   const [aplicavelA, setAplicavelA] = useState<DadosConta['aplicavel_a']>('ambos')
   const [afetaDre, setAfetaDre] = useState(true)
   const [afetaFluxoCaixa, setAfetaFluxoCaixa] = useState(true)
+  const [rateioSempre, setRateioSempre] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
@@ -48,6 +49,8 @@ export default function NovaContaModal({ centros, onClose, onCreated }: Props) {
         aplicavel_a: aplicavelA,
         afeta_dre: afetaDre,
         afeta_fluxo_caixa: afetaFluxoCaixa,
+        // só envia quando marcada: a coluna tem padrão false, e assim criar conta comum não depende da migration
+        ...(rateioSempre ? { rateio_sempre: true } : {}),
       })
       onCreated(conta)
       onClose()
@@ -178,6 +181,17 @@ export default function NovaContaModal({ centros, onClose, onCreated }: Props) {
                 Delivery) — despesas lançadas nesta conta não geram evento de contas a pagar nem entram no calendário
                 de caixa, só no resultado (DRE). Trava esse comportamento pra qualquer despesa lançada nesta conta —
                 não fica mais como escolha do usuário na hora de lançar.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={rateioSempre} onChange={(e) => setRateioSempre(e.target.checked)} className="mt-0.5" />
+            <span className="text-sm text-gray-700">
+              Conta central — sempre rateada
+              <span className="block text-xs text-gray-400 mt-0.5">
+                No DRE, o total do mês nesta conta é dividido entre as lojas pela proporção do faturamento, seja qual for
+                a unidade do lançamento (custos da empresa toda: matéria-prima, pró-labore, contador...).
               </span>
             </span>
           </label>

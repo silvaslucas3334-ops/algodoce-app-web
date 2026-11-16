@@ -26,6 +26,7 @@ export default function EditarContaModal({ conta, centros, onClose, onSaved }: P
   const [aplicavelA, setAplicavelA] = useState(conta.aplicavel_a)
   const [afetaDre, setAfetaDre] = useState(conta.afeta_dre)
   const [afetaFluxoCaixa, setAfetaFluxoCaixa] = useState(conta.afeta_fluxo_caixa)
+  const [rateioSempre, setRateioSempre] = useState(!!conta.rateio_sempre)
   const [ativo, setAtivo] = useState(conta.ativo)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -50,6 +51,9 @@ export default function EditarContaModal({ conta, centros, onClose, onSaved }: P
         afeta_fluxo_caixa: afetaFluxoCaixa,
         ativo,
       }
+      // só envia a marcação se a coluna já existe no banco (conta.rateio_sempre vem preenchido) — evita erro
+      // enquanto a migration financeiro-contas-rateio-sempre não foi rodada
+      if (conta.rateio_sempre !== undefined) dados.rateio_sempre = rateioSempre
       await atualizarConta(conta.id, dados)
       onSaved({ ...conta, ...dados, linha_dre: linhaDre || null })
       onClose()
@@ -168,6 +172,20 @@ export default function EditarContaModal({ conta, centros, onClose, onSaved }: P
               </span>
             </span>
           </label>
+
+          {conta.rateio_sempre !== undefined && (
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={rateioSempre} onChange={(e) => setRateioSempre(e.target.checked)} className="mt-0.5" />
+              <span className="text-sm text-gray-700">
+                Conta central — sempre rateada
+                <span className="block text-xs text-gray-400 mt-0.5">
+                  No DRE, o total do mês nesta conta é dividido entre as lojas pela proporção do faturamento, seja qual
+                  for a unidade do lançamento. Use para custos da empresa toda (matéria-prima, pró-labore, contador...).
+                  Muda o DRE de cada loja nos meses passados; o Consolidado não muda.
+                </span>
+              </span>
+            </label>
+          )}
 
           <label className="flex items-center gap-2.5 cursor-pointer">
             <input type="checkbox" checked={ativo} onChange={(e) => setAtivo(e.target.checked)} />

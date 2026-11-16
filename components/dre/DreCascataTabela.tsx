@@ -205,8 +205,8 @@ export default function DreCascataTabela({
           <>
             {' '}
             <span className="text-gray-500 font-medium">
-              Rateio: esta loja fica com {(percentualRateio * 100).toFixed(1).replace('.', ',')}% do faturamento das duas — vale para matéria-prima,
-              embalagem, impostos de compra e tudo lançado em Rateio (Cozinha).
+              Rateio: esta loja fica com {(percentualRateio * 100).toFixed(1).replace('.', ',')}% do faturamento das duas — vale para as contas
+              centrais (Plano de Contas) e tudo lançado em Rateio (Cozinha).
             </span>
           </>
         )}

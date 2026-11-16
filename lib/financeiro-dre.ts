@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 import { CategoriaReceita, FinanceiroConta, LinhaDre } from './types'
 import { CATEGORIA_RECEITA_LABEL, LINHA_DRE_LABEL } from './constants'
 import { buscarFaturamentoPorLojaDoMes } from './financeiro-fluxo-mensal'
-import { CODIGOS_CMV_SEMPRE_RATEADOS, parcelaNaVisao } from './financeiro-rateio'
+import { idsContasCentrais, parcelaNaVisao } from './financeiro-rateio'
 
 export type VisaoDre = 'loja1' | 'loja2' | 'consolidado'
 
@@ -82,6 +82,8 @@ export interface DreResultado {
   totalEntradasCaixa: number
 
   percentualRateio: number | null // só preenchido quando unidade é loja1/loja2 — % do faturamento do mês que essa loja representa
+  // Contas centrais (sempre rateadas), marcadas no Plano de Contas — usadas só para explicar o rateio na tela.
+  contasCentrais: { codigo: string; nome: string }[]
   // Resgates de contas de reserva (afeta_dre=false) — informativo, fora do
   // resultado do mês: não é venda, é a própria reserva voltando pro caixa.
   totalResgatesAplicacao: number
@@ -128,7 +130,8 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     { data: jurosPagos, error: erroJuros },
     faturamentoFiscalPorLoja,
   ] = await Promise.all([
-    supabase.from('financeiro_contas').select('id, codigo, nome, linha_dre, afeta_dre'),
+    // select('*'): traz também rateio_sempre quando a coluna existe, sem quebrar se a migration ainda não rodou
+    supabase.from('financeiro_contas').select('*'),
     supabase
       .from('financeiro_receitas')
       .select('unidade, categoria, data, valor, valor_bruto, observacao')
@@ -152,7 +155,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     // em que foram PAGOS (é quando o encargo acontece). Vale para despesas e para notas de insumos.
     supabase
       .from('financeiro_lancamentos')
-      .select('valor_juros_multa, unidade, parte_id, parte:financeiro_partes!parte_id(nome)')
+      .select('tipo, conta_id, valor_juros_multa, unidade, parte_id, parte:financeiro_partes!parte_id(nome)')
       .in('tipo', ['despesa', 'compra_insumos'])
       .neq('status', 'cancelado')
       .gt('valor_juros_multa', 0)
@@ -210,11 +213,15 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
           return faturamentoTotalLojas > 0 ? receitaUnidade / faturamentoTotalLojas : 0
         })()
 
-  // Matéria-prima (1001) e embalagem (1002) seguem SEMPRE a regra de rateio (proporção do faturamento), em qualquer
-  // unidade em que a nota foi lançada. Sem faturamento no mês não há proporção: aí vale a unidade do lançamento,
-  // para o custo não sumir da visão da loja.
-  const idsCmvSempreRateados = new Set(contas.filter((c) => CODIGOS_CMV_SEMPRE_RATEADOS.includes(c.codigo)).map((c) => c.id))
-  const forcarRateio = (contaId: string | null | undefined) => faturamentoTotalLojas > 0 && !!contaId && idsCmvSempreRateados.has(contaId)
+  // Contas CENTRAIS (rateio_sempre, marcadas no Plano de Contas) seguem SEMPRE a regra de rateio (proporção do
+  // faturamento), em qualquer unidade em que o lançamento foi feito. Sem faturamento no mês não há proporção: aí vale
+  // a unidade do lançamento, para o custo não sumir da visão da loja.
+  const idsCentrais = idsContasCentrais(contas)
+  const forcarRateio = (contaId: string | null | undefined) => faturamentoTotalLojas > 0 && !!contaId && idsCentrais.has(contaId)
+  const contasCentrais = contas
+    .filter((c) => idsCentrais.has(c.id))
+    .map((c) => ({ codigo: c.codigo, nome: c.nome }))
+    .sort((a, b) => a.codigo.localeCompare(b.codigo))
 
   // Entradas de Caixa — o que efetivamente caiu no banco (financeiro_receitas),
   // por categoria. Não alimenta mais o resultado (ver totalReceitaBruta acima,
@@ -280,11 +287,11 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     ;(jurosPagos || []).forEach((l: any) => {
       const parteNome = l.parte?.nome || 'Sem beneficiário'
       const juros = Number(l.valor_juros_multa || 0)
-      if (unidade === 'consolidado' || l.unidade === unidade) {
-        acumular(contaJurosId, juros, l.parte_id, parteNome)
-      } else if (l.unidade === 'rateio') {
-        acumular(contaJurosId, juros * (percentualRateio || 0), l.parte_id, parteNome)
-      }
+      // O juros acompanha a ORIGEM: nota de compra de insumos (CMV, sempre rateado) → rateio; despesa → vale a conta
+      // da despesa (central = rateio). Sem isso o juros ficaria 100% numa loja enquanto o valor da nota é rateado.
+      const origemCentral = l.tipo === 'compra_insumos' ? faturamentoTotalLojas > 0 : forcarRateio(l.conta_id)
+      const parcela = parcelaNaVisao(juros, l.unidade, unidade, percentualRateio, origemCentral)
+      if (parcela !== null) acumular(contaJurosId, parcela, l.parte_id, parteNome)
     })
   }
 
@@ -411,6 +418,7 @@ export async function buscarDre(unidade: VisaoDre, ano: number, mes: number): Pr
     entradasCaixaPorCategoria,
     totalEntradasCaixa,
     percentualRateio,
+    contasCentrais,
     totalResgatesAplicacao,
     totalAportesReserva,
     receitasDetalhadas,

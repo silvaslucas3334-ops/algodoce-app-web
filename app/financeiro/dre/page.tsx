@@ -73,7 +73,9 @@ function montarAvisos(dados: DreResultado, unidade: VisaoDre): Aviso[] {
   if (unidade !== 'consolidado' && dados.percentualRateio != null) {
     avisos.unshift({
       tom: 'azul',
-      texto: `Rateio da cozinha: esta loja fica com ${(dados.percentualRateio * 100).toFixed(1).replace('.', ',')}% do faturamento das duas lojas no mês. Esse percentual divide tudo o que foi lançado em "Rateio (Cozinha)" e TODAS as compras de matéria-prima (1001), embalagem (1002) e impostos de compra (1004), mesmo as lançadas direto numa loja. Em Consolidado nada é dividido.`,
+      texto: `Rateio da cozinha: esta loja fica com ${(dados.percentualRateio * 100).toFixed(1).replace('.', ',')}% do faturamento das duas lojas no mês. Esse percentual divide tudo o que foi lançado em "Rateio (Cozinha)" e TODOS os lançamentos das contas centrais, mesmo os lançados direto numa loja${
+        dados.contasCentrais.length > 0 ? ` (${dados.contasCentrais.map((c) => `${c.codigo} ${c.nome}`).join(', ')})` : ''
+      }. As contas centrais são marcadas no Plano de Contas. Em Consolidado nada é dividido.`,
     })
   }
   if (dados.secaoNaoClassificada.total !== 0) {

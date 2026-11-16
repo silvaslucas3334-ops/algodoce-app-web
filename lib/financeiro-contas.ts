@@ -22,6 +22,8 @@ export interface DadosConta {
   aplicavel_a: 'compras_insumos' | 'despesas_gerais' | 'ambos'
   afeta_dre: boolean
   afeta_fluxo_caixa: boolean
+  /** conta central: sempre rateada entre as lojas no DRE (coluna criada pela migration financeiro-contas-rateio-sempre) */
+  rateio_sempre?: boolean
 }
 
 export async function criarConta(dados: DadosConta): Promise<FinanceiroConta> {
