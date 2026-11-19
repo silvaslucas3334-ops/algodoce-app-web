@@ -10,7 +10,7 @@ import { Loader, CheckCircle, XCircle, ShoppingCart, ReceiptText, Pencil, Plus, 
 import { EtiquetaAprovacao, FinanceiroConta, FinanceiroLancamentoItem, FinanceiroParte, FinanceiroMateriaPrima } from '@/lib/types'
 import { UNIDADE_LABEL, FORMA_PAGAMENTO_LABEL, CONDICAO_PAGAMENTO_LABEL, TIPO_LANCAMENTO_LABEL, STATUS_CONCILIACAO_LABEL, STATUS_CONCILIACAO_COLOR } from '@/lib/constants'
 import { formatBRL } from '@/lib/ofx'
-import { formatarDocumento, hojeISO, statusExibicao, somarMeses } from '@/lib/financeiro-utils'
+import { competenciaAposMudarData, formatarDocumento, hojeISO, statusExibicao, somarMeses } from '@/lib/financeiro-utils'
 import { contarTransacoesVinculadas, desfazerConciliacao } from '@/lib/financeiro-reconciliacao'
 import { caminhoInternoSeguro } from '@/lib/navegacao'
 import Link from 'next/link'
@@ -334,6 +334,14 @@ function DetalheDespesaContent() {
   // cancelado — registro cancelado é congelado, edição só mexe no cabeçalho.
   const podeControlarStatusNaEdicao = lancamento?.status !== 'cancelado'
 
+  // Competência (mês que o DRE conta) que o lançamento terá ao salvar a edição: acompanha a data do lançamento,
+  // mantendo a mesma distância em meses de antes. Parcelas de um mesmo grupo ficam de fora (dividem a competência).
+  const competenciaPrevista: string | null =
+    lancamento && formEdicao && lancamento.data_competencia && !lancamento.grupo_parcelamento && formEdicao.data_lancamento && formEdicao.data_lancamento !== lancamento.data_lancamento
+      ? competenciaAposMudarData(lancamento.data_lancamento, lancamento.data_competencia, formEdicao.data_lancamento)
+      : lancamento?.data_competencia || null
+  const mesAnoDe = (iso: string) => `${iso.slice(5, 7)}/${iso.slice(0, 4)}`
+
   async function salvarEdicao() {
     if (!lancamento || !formEdicao) return
     if (!formEdicao.parte_id || !formEdicao.data_lancamento || !formEdicao.data_vencimento) {
@@ -393,6 +401,10 @@ function DetalheDespesaContent() {
         unidade: formEdicao.unidade,
         updated_at: new Date().toISOString(),
       }
+      // A competência (mês que o DRE conta) acompanha a data do lançamento — antes só a data mudava e a despesa
+      // continuava no mês antigo do DRE. Parcelas de um mesmo grupo ficam de fora: dividem a mesma competência.
+      const novaCompetencia = competenciaPrevista
+      if (novaCompetencia && novaCompetencia !== lancamento.data_competencia) payload.data_competencia = novaCompetencia
       if (corrigindoParaValorConciliado) {
         payload.status = 'pago'
         payload.data_pagamento = lancamento.data_pagamento || hojeISO()
@@ -668,6 +680,12 @@ function DetalheDespesaContent() {
                 )}
                 <div className="flex justify-between"><span className="text-gray-500">Valor</span><span className="font-semibold text-gray-800">{formatBRL(lancamento.valor_total)}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Data do lançamento</span><span className="text-gray-800">{new Date(lancamento.data_lancamento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
+                {lancamento.data_competencia && (
+                  <div className="flex justify-between" title="Mês em que o DRE conta esta despesa">
+                    <span className="text-gray-500">Competência (DRE)</span>
+                    <span className="text-gray-800">{mesAnoDe(lancamento.data_competencia)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between"><span className="text-gray-500">Vencimento</span><span className="text-gray-800">{new Date(lancamento.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}</span></div>
                 {lancamento.status === 'aberto' && (ehAdmin || lancamento.data_prevista_pagamento) && (
                   <div>
@@ -837,6 +855,17 @@ function DetalheDespesaContent() {
                     />
                   </div>
                 </div>
+                {lancamento.data_competencia && (
+                  <p className="text-[11px] text-gray-500 -mt-1">
+                    Competência no DRE:{' '}
+                    <span className="font-semibold text-gray-700">{mesAnoDe(competenciaPrevista || lancamento.data_competencia)}</span>
+                    {competenciaPrevista && competenciaPrevista !== lancamento.data_competencia
+                      ? ` (era ${mesAnoDe(lancamento.data_competencia)} — acompanha a data do lançamento)`
+                      : lancamento.grupo_parcelamento
+                        ? ' — as parcelas dividem a mesma competência'
+                        : ''}
+                  </p>
+                )}
                 {podeControlarStatusNaEdicao && (
                   <div>
                     <div className="flex gap-2 mb-2">

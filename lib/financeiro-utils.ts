@@ -79,6 +79,21 @@ export function diferencaEmMeses(dataA: string, dataB: string): number {
 }
 
 /**
+ * Competência de um lançamento depois de mudar a "Data do lançamento": acompanha a nova data MANTENDO A MESMA
+ * DISTÂNCIA EM MESES que já existia entre as duas — 0 na maioria dos lançamentos (competência = data do lançamento) e
+ * 1 ou mais em recorrências e em despesas lançadas de propósito com a competência de outro mês (ex.: a conta de
+ * energia de agosto lançada em outubro). O DRE conta pela competência, então ela não pode ficar para trás quando a data
+ * muda (ex.: INSS criado em 17/11 e corrigido para 31/10 continuava contando em novembro).
+ */
+export function competenciaAposMudarData(
+  dataLancamentoAntiga: string,
+  competenciaAntiga: string,
+  novaDataLancamento: string
+): string {
+  return somarMeses(novaDataLancamento, diferencaEmMeses(dataLancamentoAntiga, competenciaAntiga))
+}
+
+/**
  * Vencimento a partir da condição de pagamento do cadastro:
  * à vista = a própria data da compra; a prazo = data + prazo em dias (7/15/30).
  */
